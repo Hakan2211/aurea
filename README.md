@@ -8,21 +8,25 @@ the best local + API models (images, voices, music, video) on your own GPU.
 
 ## Status
 
-Frontend skeleton (design tokens, app shell, Director chat with stubbed data).
-Runs as a Vite SPA for now; the Electron wrapper and `studiod` core land in P0.
+Electron desktop app: all 9 v1 screens (stubbed data) inside a frameless shell
+(hidden title bar + native overlay controls, sandboxed preload bridge on
+`window.aurea`). Next up: `studiod` tRPC core.
 
 ## Structure
 
 ```
-apps/desktop    React 19 + Tailwind v4 renderer (future Electron renderer)
-packages/       (reserved: core = studiod, shared = zod schemas, remotion-kit)
+apps/desktop            React 19 + Tailwind v4 renderer + Electron shell
+apps/desktop/electron   main.ts (window/lifecycle) + preload.ts (context bridge)
+packages/               (reserved: core = studiod, shared = zod schemas, remotion-kit)
 ```
 
 ## Run
 
 ```
 npm install
-npm run dev     # http://localhost:5173
+npm run dev                          # Vite + Electron window, HMR
+npm run build                        # typecheck + renderer/main/preload bundles
+npm run package -w @aurea/desktop    # NSIS installer → apps/desktop/release/
 ```
 
 ## Design tokens (from the design-system sheet)

@@ -71,4 +71,14 @@
   .hairline {
     border-color: color-mix(in srgb, var(--color-cream) 7%, transparent);
   }
+
+  /* Frameless-window drag regions (Electron) */
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  .drag-region a,
+  .drag-region button,
+  .drag-region input {
+    -webkit-app-region: no-drag;
+  }
 }

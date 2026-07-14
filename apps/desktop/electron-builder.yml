@@ -1,0 +1,17 @@
+appId: app.aurea.desktop
+productName: Aurea
+directories:
+  output: release
+files:
+  - dist/**
+  - dist-electron/**
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+# No code signing yet — dev builds only
+forceCodeSigning: false
+npmRebuild: false

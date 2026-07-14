@@ -25,7 +25,18 @@ const nav = [
 
 export function AppShell() {
   return (
-    <div className="grain flex h-full">
+    <div className="flex h-full flex-col">
+      {/* Frameless-window title bar — only inside the Electron shell; native
+          window controls overlay the right edge (titleBarOverlay, 36px) */}
+      {window.aurea?.isElectron && (
+        <header className="drag-region flex h-9 shrink-0 items-center border-b hairline bg-[#0c0c0d] px-4">
+          <span className="font-serif text-[12px] font-medium tracking-[0.3em] text-fog select-none">
+            AUREA
+          </span>
+        </header>
+      )}
+
+      <div className="grain flex min-h-0 flex-1">
       <aside className="flex w-[64px] shrink-0 flex-col items-center border-r hairline bg-[#0c0c0d] py-4">
         {/* Wordmark */}
         <div className="mb-6 flex h-9 w-9 items-center justify-center rounded-xl border border-gold/30">
@@ -78,9 +89,10 @@ export function AppShell() {
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-hidden">
-        <Outlet />
-      </main>
+        <main className="min-w-0 flex-1 overflow-hidden">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
