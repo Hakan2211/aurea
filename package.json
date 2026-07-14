@@ -1,0 +1,14 @@
+{
+  "name": "aurea",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Aurea — the local-first AI creation platform (Cursor for video)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @aurea/desktop",
+    "build": "npm run build -w @aurea/desktop"
+  }
+}

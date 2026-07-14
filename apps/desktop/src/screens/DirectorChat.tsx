@@ -1,0 +1,357 @@
+import {
+  Check,
+  ChevronDown,
+  FileAudio,
+  FileImage,
+  FileMusic,
+  FileVideo,
+  Paperclip,
+  Pause,
+  Play,
+  RefreshCw,
+  Search,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { useAssets, useChat, useJobs, useProjects } from "@/hooks";
+import type { Asset, ChatMessage, Job } from "@/data/sample";
+import { composer } from "@/data/sample";
+import { Chip, GhostButton, GoldButton, Progress, Waveform, cx } from "@/components/ui";
+
+const kindIcon = {
+  image: FileImage,
+  video: FileVideo,
+  audio: FileAudio,
+  music: FileMusic,
+} as const;
+
+/* ---------- left rail: project + assets ---------- */
+
+function AssetRail() {
+  const { projects } = useProjects();
+  const { assets } = useAssets();
+  const active = projects[0];
+
+  return (
+    <aside className="flex w-[264px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
+      <button className="m-3 flex items-center justify-between rounded-xl bg-surface p-3 text-left transition hover:bg-raised">
+        <div>
+          <div className="font-serif text-[15px] text-cream">{active.name}</div>
+          <div className="mt-0.5 text-[11px] text-fog">{active.meta}</div>
+        </div>
+        <ChevronDown size={14} className="text-fog" />
+      </button>
+
+      <div className="flex items-center justify-between px-4 pb-2 pt-1">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fog">
+          Assets
+        </span>
+        <Search size={13} className="text-fog" />
+      </div>
+
+      <div className="grid flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto px-3 pb-3">
+        {assets.map((a) => (
+          <AssetThumb key={a.id} asset={a} />
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function AssetThumb({ asset }: { asset: Asset }) {
+  const Icon = kindIcon[asset.kind];
+  return (
+    <button
+      title={asset.name}
+      className="group relative aspect-square overflow-hidden rounded-lg border border-cream/5 transition hover:border-gold/40"
+    >
+      <div className={cx("absolute inset-0", asset.swatch)} />
+      {(asset.kind === "audio" || asset.kind === "music") && (
+        <Waveform seed={asset.id.length * 5} bars={14} played={0} className="absolute inset-x-2 top-1/2 h-5 -translate-y-1/2" />
+      )}
+      <Icon size={13} className="absolute left-1.5 top-1.5 text-cream/70" />
+      {asset.duration && (
+        <span className="absolute bottom-1 right-1 rounded bg-ink/70 px-1 text-[10px] text-cream/80">
+          {asset.duration}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* ---------- center: chat thread ---------- */
+
+function Thread() {
+  const { messages } = useChat();
+  return (
+    <section className="flex min-w-0 flex-1 flex-col">
+      <header className="flex items-center gap-2.5 border-b hairline px-6 py-3.5">
+        <Sparkles size={16} className="text-gold" />
+        <div>
+          <h1 className="font-serif text-[17px] leading-tight text-cream">AI Director</h1>
+          <p className="text-[11px] text-fog">Your creative partner in previsualization and production</p>
+        </div>
+      </header>
+
+      <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        {messages.map((m) => (
+          <Message key={m.id} message={m} />
+        ))}
+      </div>
+
+      <Composer />
+    </section>
+  );
+}
+
+function Message({ message }: { message: ChatMessage }) {
+  const isUser = message.role === "user";
+  return (
+    <div className={cx("flex max-w-[720px] flex-col gap-2", isUser && "ml-auto items-end")}>
+      <div className="flex items-baseline gap-2 text-[11px] text-fog">
+        <span className={cx("font-semibold uppercase tracking-wide", !isUser && "text-gold/80")}>
+          {isUser ? "You" : "Director"}
+        </span>
+        <span>{message.time}</span>
+      </div>
+      {message.text && (
+        <p
+          className={cx(
+            "rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
+            isUser ? "rounded-tr-sm bg-gold/12 text-cream" : "rounded-tl-sm bg-surface text-cream/90",
+          )}
+        >
+          {message.text}
+        </p>
+      )}
+      {message.card?.type === "images" && <ImageResultCard items={message.card.items} />}
+      {message.card?.type === "video" && (
+        <VideoJobCard job={message.card.job} swatch={message.card.thumbSwatch} />
+      )}
+      {message.card?.type === "audio" && <AudioTakeCard card={message.card} />}
+    </div>
+  );
+}
+
+function ImageResultCard({ items }: { items: Asset[] }) {
+  return (
+    <div className="w-full rounded-2xl rounded-tl-sm border hairline bg-surface p-3">
+      <div className="grid grid-cols-2 gap-2">
+        {items.map((it, i) => (
+          <div
+            key={it.id}
+            className={cx(
+              "group relative aspect-video overflow-hidden rounded-lg border",
+              i === 1 ? "border-gold/60" : "border-cream/5",
+            )}
+          >
+            <div className={cx("absolute inset-0", it.swatch)} />
+            <span className="absolute bottom-1.5 left-2 text-[10px] text-cream/70">{it.name}</span>
+            {i === 1 && (
+              <span className="absolute right-1.5 top-1.5 rounded-full bg-gold px-1.5 py-0.5 text-[10px] font-semibold text-ink">
+                picked
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-2.5 flex gap-2">
+        <GhostButton>
+          <RefreshCw size={12} /> Regenerate
+        </GhostButton>
+        <GoldButton>
+          <Check size={12} /> Approve & save
+        </GoldButton>
+      </div>
+    </div>
+  );
+}
+
+function VideoJobCard({ job, swatch }: { job: Job; swatch: string }) {
+  return (
+    <div className="w-full rounded-2xl rounded-tl-sm border hairline bg-surface p-3">
+      <div className="relative aspect-video overflow-hidden rounded-lg">
+        <div className={cx("absolute inset-0", swatch)} />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-ink/60 backdrop-blur">
+            <Play size={16} className="ml-0.5 text-cream" />
+          </div>
+        </div>
+        <span className="absolute left-2 top-2 rounded bg-ink/70 px-1.5 py-0.5 text-[10px] text-cream/85">
+          {job.engine}
+        </span>
+      </div>
+      <div className="mt-2.5">
+        <div className="flex items-center justify-between text-[12px]">
+          <span className="text-cream/90">{job.title}</span>
+          <span className="text-gold">{job.progress}%</span>
+        </div>
+        <Progress value={job.progress} className="mt-1.5" />
+        <div className="mt-1.5 flex items-center justify-between text-[11px] text-fog">
+          <span>
+            {job.stage} · ETA {job.eta}
+          </span>
+          <button className="flex items-center gap-1 text-fog transition hover:text-ember">
+            <X size={11} /> Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AudioTakeCard({
+  card,
+}: {
+  card: { title: string; voice: string; duration: string; seed: number };
+}) {
+  return (
+    <div className="flex w-full items-center gap-3 rounded-2xl rounded-tl-sm border hairline bg-surface p-3">
+      <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold text-ink transition hover:brightness-110">
+        <Play size={15} className="ml-0.5" />
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[12px] italic text-cream/85">{card.title}</p>
+        <Waveform seed={card.seed} bars={56} played={0.35} className="mt-1.5" />
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <Chip tone="gold">{card.voice}</Chip>
+        <span className="text-[11px] text-fog">{card.duration}</span>
+      </div>
+    </div>
+  );
+}
+
+function Composer() {
+  return (
+    <footer className="border-t hairline px-6 py-4">
+      <div className="rounded-2xl border border-cream/10 bg-surface px-4 py-3 transition focus-within:border-gold/40">
+        <textarea
+          rows={1}
+          placeholder="Message the Director…"
+          className="w-full resize-none bg-transparent text-[13px] text-cream placeholder:text-fog focus:outline-none"
+        />
+        <div className="mt-2.5 flex items-center gap-2">
+          <button className="flex items-center gap-1.5 rounded-full border border-cream/10 px-2.5 py-1 text-[11px] text-cream/80 transition hover:border-gold/40">
+            {composer.model} <ChevronDown size={11} />
+          </button>
+          <Chip tone="muted">{composer.estimate}</Chip>
+          <div className="ml-auto flex items-center gap-1.5">
+            <button className="flex h-8 w-8 items-center justify-center rounded-lg text-fog transition hover:bg-cream/5 hover:text-cream">
+              <Paperclip size={15} />
+            </button>
+            <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110">
+              <Send size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+      <p className="mt-2 text-center text-[10px] text-fog/60">
+        AI outputs can make mistakes. Review before use.
+      </p>
+    </footer>
+  );
+}
+
+/* ---------- right rail: job center ---------- */
+
+const statusChip: Record<Job["status"], { tone: "gold" | "muted" | "sage" | "ember"; label: string }> = {
+  running: { tone: "gold", label: "Running" },
+  queued: { tone: "muted", label: "Queued" },
+  completed: { tone: "sage", label: "Done" },
+  failed: { tone: "ember", label: "Failed" },
+};
+
+function JobRail() {
+  const { jobs, vram } = useJobs();
+  const usedPct = (vram.used / vram.total) * 100;
+  const allocPct = ((vram.allocated - vram.used) / vram.total) * 100;
+
+  return (
+    <aside className="flex w-[300px] shrink-0 flex-col border-l hairline bg-[#0e0e10]">
+      <header className="flex items-center justify-between px-4 py-3.5">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fog">
+          Job center
+        </span>
+        <button
+          title="Pause queue"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-fog transition hover:bg-cream/5 hover:text-cream"
+        >
+          <Pause size={13} />
+        </button>
+      </header>
+
+      <div className="mx-3 rounded-xl bg-surface p-3">
+        <div className="flex items-baseline justify-between">
+          <span className="text-[11px] text-fog">VRAM</span>
+          <span className="text-[13px] text-cream">
+            <span className="font-semibold text-gold">{vram.used}</span>
+            <span className="text-fog"> / {vram.total} GB</span>
+          </span>
+        </div>
+        <div className="mt-2 flex h-1.5 gap-px overflow-hidden rounded-full bg-cream/8">
+          <div className="bg-gold" style={{ width: `${usedPct}%` }} />
+          <div className="bg-gold/35" style={{ width: `${allocPct}%` }} />
+        </div>
+        <div className="mt-1.5 flex gap-3 text-[10px] text-fog">
+          <span className="flex items-center gap-1">
+            <i className="h-1.5 w-1.5 rounded-full bg-gold" /> used
+          </span>
+          <span className="flex items-center gap-1">
+            <i className="h-1.5 w-1.5 rounded-full bg-gold/35" /> allocated
+          </span>
+          <span className="flex items-center gap-1">
+            <i className="h-1.5 w-1.5 rounded-full bg-cream/15" /> free
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-3 flex-1 space-y-2 overflow-y-auto px-3 pb-3">
+        {jobs.map((j) => (
+          <JobRow key={j.id} job={j} />
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function JobRow({ job }: { job: Job }) {
+  const chip = statusChip[job.status];
+  const Icon = kindIcon[job.kind === "tts" ? "audio" : job.kind === "music" ? "music" : job.kind];
+  return (
+    <div className="rounded-xl bg-surface p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon size={14} className="shrink-0 text-gold/70" />
+          <span className="truncate text-[12px] text-cream/90">{job.title}</span>
+        </div>
+        <Chip tone={chip.tone}>{chip.label}</Chip>
+      </div>
+      <div className="mt-1.5 text-[11px] text-fog">
+        {job.engine} · {job.priority}
+      </div>
+      {job.status === "running" && (
+        <>
+          <Progress value={job.progress} className="mt-2" />
+          <div className="mt-1 flex justify-between text-[10px] text-fog">
+            <span>{job.stage}</span>
+            <span>{job.eta}</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------- screen ---------- */
+
+export function DirectorChat() {
+  return (
+    <div className="flex h-full">
+      <AssetRail />
+      <Thread />
+      <JobRail />
+    </div>
+  );
+}

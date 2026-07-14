@@ -1,0 +1,74 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/fraunces";
+@import "tailwindcss";
+
+/*
+ * Aurea design tokens — source of truth: UI-Design/design-system-sheet.jpg
+ * + PLATFORM-PRD.md Part 3c. Dark luxury: near-black, warm gold, editorial serif.
+ */
+@theme {
+  --color-ink: #0a0a0b;
+  --color-surface: #141416;
+  --color-raised: #1c1c1f;
+  --color-gold: #c9a96e;
+  --color-gold-deep: #a8874c;
+  --color-ember: #b33a2b;
+  --color-cream: #edeae4;
+  --color-fog: #8e8a82;
+  --color-sage: #6fa07c;
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Fraunces Variable", Georgia, serif;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink font-sans text-cream antialiased;
+    font-size: 14px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-gold) 30%, transparent);
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-cream) 12%, transparent);
+    border-radius: 4px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  /* Subtle film grain — the brand texture, kept below 5% opacity */
+  .grain::after {
+    content: "";
+    pointer-events: none;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .glass {
+    background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid color-mix(in srgb, var(--color-cream) 7%, transparent);
+  }
+
+  .hairline {
+    border-color: color-mix(in srgb, var(--color-cream) 7%, transparent);
+  }
+}
