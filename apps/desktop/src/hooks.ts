@@ -1,4 +1,18 @@
-import { assets, chat, imageLab, jobs, preflight, projects, system, vram } from "@/data/sample";
+import {
+  assetLibrary,
+  assets,
+  chat,
+  imageLab,
+  jobs,
+  musicLab,
+  preflight,
+  projects,
+  settings,
+  system,
+  videoLab,
+  voiceLab,
+  vram,
+} from "@/data/sample";
 import { FORMATS, STYLE_PACKS } from "@/data/formats";
 
 /* Stub hooks — the seam where the typed tRPC client plugs in (PRD Part 2:
@@ -30,4 +44,24 @@ export function useFormats() {
 
 export function useImageLab() {
   return imageLab;
+}
+
+export function useVoiceLab() {
+  return voiceLab;
+}
+
+export function useMusicLab() {
+  return musicLab;
+}
+
+export function useAssetLibrary() {
+  return assetLibrary;
+}
+
+export function useVideoLab() {
+  return videoLab;
+}
+
+export function useSettings() {
+  return settings;
 }
