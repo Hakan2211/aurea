@@ -67,10 +67,11 @@ function SectionHeader({ title, sub }: { title: string; sub: string }) {
 
 function ToggleList({
   items,
+  onToggle,
 }: {
   items: { id: string; label: string; desc: string; on: boolean }[];
+  onToggle: (id: string, on: boolean) => void;
 }) {
-  const [state, setState] = useState(Object.fromEntries(items.map((t) => [t.id, t.on])));
   return (
     <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
       {items.map((t) => (
@@ -79,12 +80,33 @@ function ToggleList({
             <div className="text-[13px] font-medium text-cream">{t.label}</div>
             <div className="mt-0.5 text-[11px] text-fog">{t.desc}</div>
           </div>
-          <Toggle
-            on={state[t.id]}
-            onChange={() => setState((s) => ({ ...s, [t.id]: !s[t.id] }))}
-          />
+          <Toggle on={t.on} onChange={() => onToggle(t.id, !t.on)} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Path field that commits on Enter/blur — the value is owned by studiod. */
+function PathInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && draft !== value) onCommit(draft);
+    setDraft(null);
+  };
+  return (
+    <div className="flex min-w-0 flex-1 items-center rounded-lg border border-cream/10 bg-surface focus-within:border-gold/35">
+      <input
+        value={draft ?? value}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+        spellCheck={false}
+        className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:outline-none"
+      />
+      <span className="px-2.5 text-fog">
+        <Folder size={13} />
+      </span>
     </div>
   );
 }
@@ -169,8 +191,10 @@ function ProviderAuth({ provider }: { provider: Provider }) {
 }
 
 function ProvidersSection() {
-  const { providers, defaultProvider } = useSettings();
-  const [active, setActive] = useState(defaultProvider);
+  const { providers, defaultProvider, setDefaultProvider } = useSettings();
+  const active = defaultProvider;
+  const setActive = (id: string) =>
+    setDefaultProvider(id as Parameters<typeof setDefaultProvider>[0]);
 
   return (
     <div className="space-y-5">
@@ -224,7 +248,7 @@ function ProvidersSection() {
 /* ---------- storage ---------- */
 
 function StorageSection() {
-  const { storage } = useSettings();
+  const { storage, setDataRoot, setVideofastDir } = useSettings();
   return (
     <div className="space-y-5">
       <SectionHeader
@@ -234,20 +258,22 @@ function StorageSection() {
       <div className="grid grid-cols-[1fr_auto] gap-2.5">
         <div className="rounded-2xl border hairline bg-surface/50 p-4">
           <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
-            Models root path
+            Data root path
           </div>
           <div className="mt-2.5 flex items-center gap-2">
-            <div className="flex min-w-0 flex-1 items-center rounded-lg border border-cream/10 bg-surface">
-              <input
-                readOnly
-                value={storage.root}
-                className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:outline-none"
-              />
-              <button className="px-2.5 text-fog transition hover:text-gold">
-                <Folder size={13} />
-              </button>
-            </div>
+            <PathInput value={storage.root} onCommit={setDataRoot} />
           </div>
+          <div className="mt-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+            Videofast pipeline root
+          </div>
+          <div className="mt-2.5 flex items-center gap-2">
+            <PathInput value={storage.videofastDir ?? ""} onCommit={setVideofastDir} />
+          </div>
+          {!storage.videofastDir && (
+            <div className="mt-1.5 text-[10px] text-fog/70">
+              Not detected — point this at your videofast checkout to enable format renders.
+            </div>
+          )}
           <div className="mt-4 flex items-baseline justify-between text-[11px]">
             <span className="text-fog">Usage</span>
             <span className="tabular-nums text-cream/90">
@@ -322,11 +348,11 @@ function EnginesSection() {
 /* ---------- general / shortcuts / advanced ---------- */
 
 function GeneralSection() {
-  const { general } = useSettings();
+  const { general, toggleGeneral } = useSettings();
   return (
     <div className="space-y-5">
       <SectionHeader title="General" sub="Application behavior and appearance." />
-      <ToggleList items={general.toggles} />
+      <ToggleList items={general.toggles} onToggle={toggleGeneral} />
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
         {(
           [
@@ -372,11 +398,11 @@ function ShortcutsSection() {
 }
 
 function AdvancedSection() {
-  const { advanced } = useSettings();
+  const { advanced, toggleAdvanced } = useSettings();
   return (
     <div className="space-y-5">
       <SectionHeader title="Advanced" sub="Power-user options. Defaults are safe — these may not be." />
-      <ToggleList items={advanced.toggles} />
+      <ToggleList items={advanced.toggles} onToggle={toggleAdvanced} />
       <button className="flex w-full flex-col items-center gap-1 rounded-2xl border border-dashed border-cream/15 px-4 py-6 transition hover:border-gold/40">
         <SquareTerminal size={20} strokeWidth={1.5} className="text-fog" />
         <span className="mt-1 text-[13px] font-medium text-cream/90">Open ComfyUI (advanced)</span>

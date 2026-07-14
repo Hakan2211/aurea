@@ -1,14 +1,15 @@
 /* JobEngine — the single GPU owner (PRD Part 2). Holds the queue, enforces
  * one exclusive job at a time, and streams snapshots to subscribers.
  *
- * P0 skeleton: execution is a SIMULATED worker that ticks progress so the
- * scheduler/subscription plumbing is real end-to-end. Engine adapters
- * (ComfyUI sidecar, TTS venvs, Remotion workers) replace `advance()` later
- * in P0 — the queue semantics and the tRPC surface stay. */
+ * Execution: jobs with a payload run on a matching engine adapter (videofast
+ * batch pipeline today; ComfyUI sidecar, TTS venvs next). Jobs without one —
+ * seed fixtures, UI demo enqueues — fall back to the simulated worker so the
+ * queue plumbing stays demonstrable without a GPU pipeline installed. */
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { EnqueueJob, Job, JobPriority } from "@aurea/shared";
+import type { AdapterRun, EngineAdapter } from "./adapters/types.js";
 
 const PRIORITY_RANK: Record<JobPriority, number> = { interactive: 0, preview: 1, batch: 2 };
 
@@ -43,8 +44,10 @@ export class JobEngine extends EventEmitter {
   private jobs = new Map<string, TrackedJob>();
   private seq = 0;
   private timer: NodeJS.Timeout;
+  /** live adapter execution per running job id */
+  private execs = new Map<string, AdapterRun>();
 
-  constructor(seed: Job[] = []) {
+  constructor(seed: Job[] = [], private adapters: EngineAdapter[] = []) {
     super();
     for (const job of seed) {
       const tracked: TrackedJob = { ...job, seq: this.seq++ };
@@ -89,6 +92,7 @@ export class JobEngine extends EventEmitter {
   cancel(id: string): Job | undefined {
     const job = this.jobs.get(id);
     if (!job || (job.status !== "queued" && job.status !== "running")) return this.find(id);
+    this.execs.get(id)?.cancel();
     job.status = "failed";
     job.error = "Canceled by user";
     job.stage = undefined;
@@ -104,6 +108,7 @@ export class JobEngine extends EventEmitter {
     job.progress = 0;
     job.error = undefined;
     job.elapsed = undefined;
+    job.output = undefined;
     job.seq = this.seq++;
     this.publish();
     return this.find(id);
@@ -111,6 +116,8 @@ export class JobEngine extends EventEmitter {
 
   close() {
     clearInterval(this.timer);
+    for (const exec of this.execs.values()) exec.cancel();
+    this.execs.clear();
     this.removeAllListeners();
   }
 
@@ -122,12 +129,15 @@ export class JobEngine extends EventEmitter {
     this.emit("snapshot", this.snapshot());
   }
 
-  /* ---------- simulated worker (P0 placeholder for engine adapters) ---------- */
-
   private tick() {
     const running = [...this.jobs.values()].find((j) => j.status === "running");
     if (running) {
-      this.advance(running);
+      if (this.execs.has(running.id)) {
+        // adapter pushes progress; the tick only keeps the wall clock moving
+        if (running.startedAt) running.elapsed = fmtDuration(Date.now() - running.startedAt);
+      } else {
+        this.advance(running);
+      }
       this.publish();
       return;
     }
@@ -138,9 +148,46 @@ export class JobEngine extends EventEmitter {
       next.status = "running";
       next.startedAt = Date.now();
       next.progress = 0;
+      const adapter = this.adapters.find((a) => a.canRun(next));
+      if (adapter) this.startAdapter(next, adapter);
       this.publish();
     }
   }
+
+  /* ---------- adapter execution ---------- */
+
+  private startAdapter(job: TrackedJob, adapter: EngineAdapter) {
+    const run = adapter.start(job, (p) => {
+      if (job.status !== "running") return;
+      if (p.progress !== undefined) job.progress = Math.min(100, Math.max(0, Math.round(p.progress)));
+      if (p.stage !== undefined) job.stage = p.stage;
+      if (p.detail !== undefined) job.detail = p.detail;
+      this.publish();
+    });
+    this.execs.set(job.id, run);
+    run.done
+      .then(({ output }) => {
+        if (job.status !== "running") return; // canceled while finishing
+        job.status = "completed";
+        job.progress = 100;
+        job.stage = undefined;
+        job.eta = undefined;
+        job.output = output;
+      })
+      .catch((err: unknown) => {
+        if (job.status !== "running") return; // cancel() already recorded the reason
+        job.status = "failed";
+        job.error = err instanceof Error ? err.message : String(err);
+        job.stage = undefined;
+        job.eta = undefined;
+      })
+      .finally(() => {
+        this.execs.delete(job.id);
+        this.publish();
+      });
+  }
+
+  /* ---------- simulated worker (fallback for jobs without a payload) ---------- */
 
   private advance(job: TrackedJob) {
     const rate = TICK_RATE[job.kind];

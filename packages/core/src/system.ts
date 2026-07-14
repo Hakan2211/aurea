@@ -7,8 +7,11 @@ import { execFile } from "node:child_process";
 import os from "node:os";
 import type { Preflight, SystemInfo, Vram } from "@aurea/shared";
 import { seedVram, systemFallback } from "./seed.js";
+import type { SettingsStore } from "./settings.js";
 
 const POLL_MS = 2000;
+/** disk figures drift slowly — refresh every Nth GPU poll */
+const DISK_EVERY = 15;
 
 /* memory.reserved needs a recent driver; drop it from the query if it 400s
  * rather than losing telemetry entirely */
@@ -34,6 +37,7 @@ export class SystemMonitor extends EventEmitter {
   private timer: NodeJS.Timeout;
   private live = false;
   private fieldSet = 0;
+  private polls = 0;
 
   vram: Vram = { ...seedVram };
   info: SystemInfo = {
@@ -42,11 +46,24 @@ export class SystemMonitor extends EventEmitter {
     queuePaused: false,
   };
 
-  constructor() {
+  constructor(private settings?: SettingsStore) {
     super();
     void this.poll();
-    this.timer = setInterval(() => void this.poll(), POLL_MS);
+    void this.pollDisk();
+    this.timer = setInterval(() => {
+      void this.poll();
+      if (++this.polls % DISK_EVERY === 0) void this.pollDisk();
+    }, POLL_MS);
     this.timer.unref();
+  }
+
+  private async pollDisk() {
+    if (!this.settings) return;
+    const stats = await this.settings.storageStats();
+    if (stats.freeGb !== null) {
+      const free = stats.freeGb >= 1000 ? `${(stats.freeGb / 1000).toFixed(1)} TB` : `${Math.round(stats.freeGb)} GB`;
+      this.info = { ...this.info, storage: `${free} free` };
+    }
   }
 
   /** VRAM headroom message for the job center's preflight strip */

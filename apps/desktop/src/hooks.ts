@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import type { Settings } from "@aurea/shared";
 import {
   assetLibrary,
   assets,
@@ -78,6 +80,78 @@ export function useVideoLab() {
   return videoLab;
 }
 
+/* sample toggle ids ↔ persisted settings fields */
+const GENERAL_KEY = {
+  login: "launchAtLogin",
+  hw: "hardwareAcceleration",
+  tray: "keepInTray",
+  telemetry: "telemetry",
+} as const;
+const ADVANCED_KEY = {
+  prerelease: "prereleaseEngines",
+  verbose: "verboseJobLogs",
+  keepvram: "keepModelsWarm",
+} as const;
+
+const fmtGb = (gb: number) => (gb >= 1000 ? `${(gb / 1000).toFixed(2)} TB` : `${Math.round(gb)} GB`);
+
+/** LIVE — persisted settings + real disk figures from studiod; sample data
+ * fills anything the store doesn't own yet (providers list, engines, shortcuts). */
 export function useSettings() {
-  return settings;
+  const live = trpc.settings.get.useQuery().data;
+  const disk = trpc.settings.storage.useQuery(undefined, { refetchInterval: 30_000 }).data;
+  const utils = trpc.useUtils();
+  const { mutate: update } = trpc.settings.update.useMutation({
+    onSuccess: (next) => utils.settings.get.setData(undefined, next),
+  });
+
+  return useMemo(() => {
+    const merged = {
+      ...settings,
+      defaultProvider: live?.providers.default ?? settings.defaultProvider,
+      storage: {
+        ...settings.storage,
+        root: live?.storage.dataRoot ?? settings.storage.root,
+        videofastDir: live?.paths.videofastDir ?? null,
+        used:
+          disk?.freeGb != null && disk?.totalGb != null
+            ? fmtGb(disk.totalGb - disk.freeGb)
+            : settings.storage.used,
+        total: disk?.totalGb != null ? fmtGb(disk.totalGb) : settings.storage.total,
+      },
+      general: {
+        ...settings.general,
+        toggles: settings.general.toggles.map((t) => ({
+          ...t,
+          on: live ? live.general[GENERAL_KEY[t.id as keyof typeof GENERAL_KEY]] : t.on,
+        })),
+      },
+      advanced: {
+        toggles: settings.advanced.toggles.map((t) => ({
+          ...t,
+          on: live ? live.advanced[ADVANCED_KEY[t.id as keyof typeof ADVANCED_KEY]] : t.on,
+        })),
+      },
+    };
+    return {
+      ...merged,
+      toggleGeneral(id: string, on: boolean) {
+        const key = GENERAL_KEY[id as keyof typeof GENERAL_KEY];
+        if (key) update({ general: { [key]: on } });
+      },
+      toggleAdvanced(id: string, on: boolean) {
+        const key = ADVANCED_KEY[id as keyof typeof ADVANCED_KEY];
+        if (key) update({ advanced: { [key]: on } });
+      },
+      setDataRoot(dataRoot: string) {
+        if (dataRoot.trim()) update({ storage: { dataRoot: dataRoot.trim() } });
+      },
+      setVideofastDir(dir: string) {
+        update({ paths: { videofastDir: dir.trim() || null } });
+      },
+      setDefaultProvider(id: Settings["providers"]["default"]) {
+        update({ providers: { default: id } });
+      },
+    };
+  }, [live, disk, update]);
 }

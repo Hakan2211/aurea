@@ -3,7 +3,7 @@
 
 import { on } from "node:events";
 import { z } from "zod";
-import { enqueueJobSchema, type Job, type Vram } from "@aurea/shared";
+import { enqueueJobSchema, settingsUpdateSchema, type Job, type Vram } from "@aurea/shared";
 import { procedure, router } from "./trpc.js";
 
 const jobId = z.object({ id: z.string() });
@@ -48,6 +48,17 @@ export const appRouter = router({
 
   projects: router({
     list: procedure.query(({ ctx }) => ctx.projects),
+  }),
+
+  settings: router({
+    get: procedure.query(({ ctx }) => ctx.settings.get()),
+
+    update: procedure
+      .input(settingsUpdateSchema)
+      .mutation(({ ctx, input }) => ctx.settings.update(input)),
+
+    /** live disk figures for the volume holding storage.dataRoot */
+    storage: procedure.query(({ ctx }) => ctx.settings.storageStats()),
   }),
 });
 

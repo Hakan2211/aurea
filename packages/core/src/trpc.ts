@@ -2,12 +2,14 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import type { Project } from "@aurea/shared";
 import type { JobEngine } from "./jobs.js";
 import type { SystemMonitor } from "./system.js";
+import type { SettingsStore } from "./settings.js";
 
 export interface Context {
   /** did the request present the boot token (HTTP bearer / WS connectionParams)? */
   authed: boolean;
   engine: JobEngine;
   monitor: SystemMonitor;
+  settings: SettingsStore;
   projects: Project[];
 }
 

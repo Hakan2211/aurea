@@ -11,6 +11,8 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
 import { JobEngine } from "./jobs.js";
 import { SystemMonitor } from "./system.js";
+import { SettingsStore } from "./settings.js";
+import { VideofastAdapter } from "./adapters/videofast.js";
 import { appRouter } from "./router.js";
 import type { Context } from "./trpc.js";
 import { seedJobs, seedProjects } from "./seed.js";
@@ -37,9 +39,10 @@ const bearer = (header: string | undefined) =>
 export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHandle> {
   const token = opts.token ?? randomBytes(24).toString("base64url");
 
-  const engine = new JobEngine(seedJobs);
-  const monitor = new SystemMonitor();
-  const base: Omit<Context, "authed"> = { engine, monitor, projects: seedProjects };
+  const settings = new SettingsStore();
+  const engine = new JobEngine(seedJobs, [new VideofastAdapter(settings)]);
+  const monitor = new SystemMonitor(settings);
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects: seedProjects };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,

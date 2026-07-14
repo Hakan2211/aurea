@@ -73,8 +73,9 @@ export const seedJobs: Job[] = [
   },
 ];
 
-/* Static fallbacks for fields SystemMonitor can't measure yet (cuda core count
- * isn't queryable via nvidia-smi; storage needs the settings store's data root). */
+/* Static fallbacks for fields SystemMonitor can't measure (cuda core count
+ * isn't queryable via nvidia-smi). storage is overwritten by live statfs of
+ * the settings store's data root once the first disk poll lands. */
 export const systemFallback = {
   gpu: "NVIDIA GeForce RTX 3090 Ti",
   driver: "566.36",
