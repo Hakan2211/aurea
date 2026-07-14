@@ -1,0 +1,107 @@
+/* studiod boot: one Node process owning the GPU queue, serving tRPC over
+ * localhost HTTP (queries/mutations) + WS (subscriptions). Auth is a per-boot
+ * bearer token — localhost ports are reachable by any local process, so the
+ * token is the boundary. Clients get it from the Electron bridge or the
+ * port file (~/.aurea/studiod.json). */
+
+import http from "node:http";
+import { randomBytes } from "node:crypto";
+import { createHTTPHandler } from "@trpc/server/adapters/standalone";
+import { applyWSSHandler } from "@trpc/server/adapters/ws";
+import { WebSocketServer } from "ws";
+import { JobEngine } from "./jobs.js";
+import { SystemMonitor } from "./system.js";
+import { appRouter } from "./router.js";
+import type { Context } from "./trpc.js";
+import { seedJobs, seedProjects } from "./seed.js";
+import { clearPortFile, writePortFile } from "./portfile.js";
+
+export interface StudiodOptions {
+  /** 0 (default) lets the OS assign a free port */
+  port?: number;
+  /** per-boot random token unless pinned (headless dev) */
+  token?: string;
+  /** record port+token+pid in ~/.aurea/studiod.json for discovery */
+  writePortFile?: boolean;
+}
+
+export interface StudiodHandle {
+  port: number;
+  token: string;
+  close: () => Promise<void>;
+}
+
+const bearer = (header: string | undefined) =>
+  header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+
+export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHandle> {
+  const token = opts.token ?? randomBytes(24).toString("base64url");
+
+  const engine = new JobEngine(seedJobs);
+  const monitor = new SystemMonitor();
+  const base: Omit<Context, "authed"> = { engine, monitor, projects: seedProjects };
+
+  const trpcHandler = createHTTPHandler({
+    router: appRouter,
+    createContext: ({ req }): Context => ({
+      ...base,
+      authed: bearer(req.headers.authorization) === token,
+    }),
+  });
+
+  const server = http.createServer((req, res) => {
+    // the renderer calls from an http://localhost:5173 or file:// origin
+    res.setHeader("access-control-allow-origin", "*");
+    res.setHeader("access-control-allow-headers", "authorization, content-type, trpc-accept, x-trpc-source");
+    res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    // unauthenticated liveness probe for port-file reuse detection
+    if (req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, service: "studiod", pid: process.pid }));
+      return;
+    }
+    trpcHandler(req, res);
+  });
+
+  const wss = new WebSocketServer({ server });
+  const wsHandler = applyWSSHandler({
+    wss,
+    router: appRouter,
+    // browsers can't set WS headers; the token rides in connectionParams
+    createContext: ({ info }): Context => ({
+      ...base,
+      authed: info.connectionParams?.token === token,
+    }),
+  });
+
+  const port = await new Promise<number>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(opts.port ?? 0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (addr && typeof addr === "object") resolve(addr.port);
+      else reject(new Error("studiod: could not determine bound port"));
+    });
+  });
+
+  if (opts.writePortFile) {
+    await writePortFile({ port, token, pid: process.pid });
+  }
+
+  return {
+    port,
+    token,
+    close: async () => {
+      wsHandler.broadcastReconnectNotification();
+      engine.close();
+      monitor.close();
+      wss.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (opts.writePortFile) await clearPortFile(process.pid);
+    },
+  };
+}

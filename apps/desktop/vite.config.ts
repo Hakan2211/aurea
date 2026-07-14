@@ -11,6 +11,23 @@ export default defineConfig({
     tailwindcss(),
     electron([
       {
+        // studiod bundle for utilityProcess.fork — built first so main.ts can
+        // fork it; no onstart (the main entry below owns the electron launch,
+        // so core changes need a dev-server restart to re-fork)
+        onstart: () => {},
+        entry: "electron/studiod.ts",
+        vite: {
+          build: {
+            // runs inside Electron's utilityProcess (Node 22), not a page
+            target: "node22",
+            rollupOptions: {
+              // optional native accelerators probed by ws — not installed
+              external: ["bufferutil", "utf-8-validate"],
+            },
+          },
+        },
+      },
+      {
         // Main process — plugin defaults to ESM output (package is "type": "module")
         entry: "electron/main.ts",
       },

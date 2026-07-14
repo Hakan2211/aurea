@@ -8,5 +8,7 @@ interface Window {
       readonly chrome: string | undefined;
       readonly node: string | undefined;
     };
+    /** {port, token} of the running studiod, or null if it failed to boot */
+    readonly studiod: () => Promise<{ port: number; token: string } | null>;
   };
 }

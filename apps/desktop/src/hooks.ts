@@ -14,12 +14,20 @@ import {
   vram,
 } from "@/data/sample";
 import { FORMATS, STYLE_PACKS } from "@/data/formats";
+import { trpc } from "@/trpc";
 
-/* Stub hooks — the seam where the typed tRPC client plugs in (PRD Part 2:
- * studiod over localhost HTTP+WS). Screens only ever import from here. */
+/* The studiod seam. Screens only ever import from here.
+ *
+ * useProjects/useJobs/useSystem are LIVE — tRPC queries against studiod, kept
+ * streaming by the LiveSync subscriber in StudiodProvider. Sample data remains
+ * as placeholderData so a plain browser tab (or a dead core) still renders.
+ * The lab hooks below are still stubs; they convert the same way as their
+ * routers land in packages/core. */
 
 export function useProjects() {
-  return { projects, activeId: projects[0].id };
+  const query = trpc.projects.list.useQuery(undefined, { placeholderData: projects });
+  const list = query.data ?? projects;
+  return { projects: list, activeId: list[0]?.id ?? "" };
 }
 
 export function useAssets() {
@@ -27,11 +35,19 @@ export function useAssets() {
 }
 
 export function useJobs() {
-  return { jobs, vram };
+  const jobsQuery = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs });
+  const vramQuery = trpc.system.vram.useQuery(undefined, { placeholderData: vram });
+  return { jobs: jobsQuery.data ?? jobs, vram: vramQuery.data ?? vram };
 }
 
 export function useSystem() {
-  return { system, preflight };
+  const query = trpc.system.overview.useQuery(undefined, {
+    placeholderData: { system, preflight },
+    // temp + preflight strip drift slowly; no subscription for these yet
+    refetchInterval: 5_000,
+    staleTime: 4_000,
+  });
+  return query.data ?? { system, preflight };
 }
 
 export function useChat() {

@@ -1,6 +1,7 @@
-import { app, BrowserWindow, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, shell, utilityProcess } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { probeStudiod, readPortFile } from "@aurea/core/portfile";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,6 +13,46 @@ const INK = "#0a0a0b";
 const CREAM = "#edeae4";
 
 let win: BrowserWindow | null = null;
+
+/* ---------- studiod (tier 3: core service over localhost tRPC) ---------- */
+
+interface StudiodInfo {
+  port: number;
+  token: string;
+}
+
+let studiod: StudiodInfo | null = null;
+let studiodChild: Electron.UtilityProcess | null = null;
+
+/** Reuse a live studiod (headless CLI may own the GPU already); fork otherwise. */
+async function ensureStudiod(): Promise<void> {
+  const existing = await readPortFile();
+  if (existing && (await probeStudiod(existing))) {
+    studiod = { port: existing.port, token: existing.token };
+    return;
+  }
+
+  const child = utilityProcess.fork(path.join(__dirname, "studiod.js"), [], {
+    serviceName: "aurea-studiod",
+  });
+  studiodChild = child;
+
+  studiod = await new Promise<StudiodInfo | null>((resolve) => {
+    const timeout = setTimeout(() => resolve(null), 15_000);
+    child.once("message", (msg: StudiodInfo) => {
+      clearTimeout(timeout);
+      resolve(msg);
+    });
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve(null);
+    });
+  });
+
+  if (!studiod) console.error("studiod failed to start — renderer will run on fallback data");
+}
+
+ipcMain.handle("aurea:studiod", () => studiod);
 
 function createWindow() {
   win = new BrowserWindow({
@@ -62,7 +103,9 @@ function createWindow() {
 
 nativeTheme.themeSource = "dark";
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // core first: the renderer asks for {port, token} as soon as it boots
+  await ensureStudiod();
   createWindow();
 
   app.on("activate", () => {
@@ -72,4 +115,8 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("quit", () => {
+  studiodChild?.kill();
 });

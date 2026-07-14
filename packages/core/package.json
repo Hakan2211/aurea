@@ -1,0 +1,21 @@
+{
+  "name": "@aurea/core",
+  "private": true,
+  "version": "0.0.1",
+  "description": "studiod — Aurea's core service: job engine, GPU scheduler, engine registry, tRPC surface",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./portfile": "./src/portfile.ts"
+  },
+  "dependencies": {
+    "@aurea/shared": "*",
+    "@trpc/server": "^11.4.0",
+    "ws": "^8.18.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.18.0"
+  }
+}

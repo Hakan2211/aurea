@@ -10,6 +10,12 @@
   "scripts": {
     "dev": "npm run dev -w @aurea/desktop",
     "build": "npm run build -w @aurea/desktop",
-    "package": "npm run package -w @aurea/desktop"
+    "package": "npm run package -w @aurea/desktop",
+    "studiod": "tsx packages/core/src/bin.ts",
+    "typecheck:core": "tsc --noEmit -p packages/core"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
   }
 }

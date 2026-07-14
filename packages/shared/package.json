@@ -1,0 +1,13 @@
+{
+  "name": "@aurea/shared",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Aurea shared zod schemas — the contract between studiod and every client",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  }
+}
