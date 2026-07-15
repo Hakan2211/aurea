@@ -12,6 +12,7 @@
     "build": "npm run build -w @aurea/desktop",
     "package": "npm run package -w @aurea/desktop",
     "studiod": "tsx packages/core/src/bin.ts",
+    "mcp": "tsx packages/core/src/mcp.ts",
     "typecheck:core": "tsc --noEmit -p packages/core"
   },
   "devDependencies": {

@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@aurea/shared": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@trpc/client": "^11.18.0",
     "@trpc/server": "^11.4.0",
     "ws": "^8.18.0",
     "zod": "^3.25.0"

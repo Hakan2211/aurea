@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aurea": {
+      "command": "node",
+      "args": ["--import", "tsx", "packages/core/src/mcp.ts"]
+    }
+  }
+}

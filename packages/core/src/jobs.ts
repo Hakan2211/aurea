@@ -18,6 +18,7 @@ import path from "node:path";
 import { z } from "zod";
 import { jobSchema, type EnqueueJobResolved, type Job, type JobPriority } from "@aurea/shared";
 import type { AdapterRun, EngineAdapter } from "./adapters/types.js";
+import type { GpuLock } from "./gpulock.js";
 
 const PRIORITY_RANK: Record<JobPriority, number> = { interactive: 0, preview: 1, batch: 2 };
 
@@ -58,6 +59,8 @@ export interface JobEngineOptions {
   storeFile?: () => string;
   /** move a finished adapter job's artifact into its project; returns the new path */
   importOutput?: (job: Job) => string | undefined;
+  /** shared .gpu.lock interop with the legacy videofast CLI (see gpulock.ts) */
+  gpuLock?: GpuLock;
 }
 
 export class JobEngine extends EventEmitter {
@@ -140,6 +143,7 @@ export class JobEngine extends EventEmitter {
     clearInterval(this.timer);
     for (const exec of this.execs.values()) exec.cancel();
     this.execs.clear();
+    this.opts.gpuLock?.release();
     clearTimeout(this.saveTimer);
     this.save();
     this.removeAllListeners();
@@ -205,11 +209,28 @@ export class JobEngine extends EventEmitter {
       .filter((j) => j.status === "queued")
       .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.seq - b.seq)[0];
     if (next) {
+      const adapter = this.adapters.find((a) => a.canRun(next));
+      if (adapter && this.opts.gpuLock) {
+        const held = this.opts.gpuLock.heldByOther();
+        if (held) {
+          // an external videofast batch owns the GPU — hold the queue, don't fail
+          const stage = `Waiting for GPU — external batch ${held.batchId} (pid ${held.pid})`;
+          if (next.stage !== stage) {
+            next.stage = stage;
+            this.publish();
+          }
+          return;
+        }
+      }
       next.status = "running";
       next.startedAt = Date.now();
       next.progress = 0;
-      const adapter = this.adapters.find((a) => a.canRun(next));
-      if (adapter) this.startAdapter(next, adapter);
+      next.stage = undefined;
+      if (adapter) {
+        // videofast jobs skip this: the spawned run-batch.ts takes the lock itself
+        if (next.payload?.type !== "videofast") this.opts.gpuLock?.acquire(`aurea:${next.id}`);
+        this.startAdapter(next, adapter);
+      }
       this.publish();
     }
   }
@@ -251,6 +272,7 @@ export class JobEngine extends EventEmitter {
       })
       .finally(() => {
         this.execs.delete(job.id);
+        this.opts.gpuLock?.release(); // no-op unless this process holds it
         this.publish();
       });
   }
