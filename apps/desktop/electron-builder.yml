@@ -6,6 +6,8 @@ files:
   - dist/**
   - dist-electron/**
 win:
+  # electron-builder derives the multi-size .ico from this 512px png
+  icon: build/icon.png
   target:
     - nsis
 nsis:
@@ -15,3 +17,6 @@ nsis:
 # No code signing yet — dev builds only
 forceCodeSigning: false
 npmRebuild: false
+# Use the locally installed electron (same pinned 43.1.1) instead of
+# download+extract — the extract's dir-rename trips over Defender on this box
+electronDist: ../../node_modules/electron/dist

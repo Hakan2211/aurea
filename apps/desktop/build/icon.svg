@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Aurea mark — geometric gold "A" on ink, drawn as paths (no font deps).
+       Palette = design tokens: ink #0a0a0b, gold #c9a96e, gold-deep #a8874c. -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="32%" r="85%">
+      <stop offset="0%" stop-color="#1c1c1f"/>
+      <stop offset="55%" stop-color="#121214"/>
+      <stop offset="100%" stop-color="#0a0a0b"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dcc08a"/>
+      <stop offset="55%" stop-color="#c9a96e"/>
+      <stop offset="100%" stop-color="#a8874c"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="url(#bg)"/>
+  <!-- hairline ring -->
+  <rect x="22" y="22" width="468" height="468" rx="100" fill="none"
+        stroke="#c9a96e" stroke-opacity="0.28" stroke-width="3"/>
+
+  <!-- the A: two legs + floating crossbar -->
+  <g stroke="url(#gold)" stroke-width="38" stroke-linecap="round" fill="none">
+    <path d="M 256 122 L 152 390"/>
+    <path d="M 256 122 L 360 390"/>
+  </g>
+  <!-- detached editorial crossbar, slightly low -->
+  <rect x="186" y="299" width="140" height="26" rx="13" fill="url(#gold)"/>
+  <!-- apex highlight dot -->
+  <circle cx="256" cy="122" r="26" fill="#dcc08a"/>
+</svg>

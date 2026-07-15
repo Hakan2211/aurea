@@ -57,6 +57,8 @@ ipcMain.handle("aurea:studiod", () => studiod);
 function createWindow() {
   win = new BrowserWindow({
     title: "Aurea",
+    // packaged builds get the exe's embedded ico; this covers dev + unpacked
+    icon: path.join(__dirname, "../build/icon.png"),
     width: 1520,
     height: 940,
     minWidth: 1100,
