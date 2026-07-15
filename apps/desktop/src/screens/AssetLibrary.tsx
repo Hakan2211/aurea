@@ -168,6 +168,12 @@ function AssetCard({
       )}
     >
       <div className={cx("relative aspect-[4/3]", asset.swatch)}>
+        {asset.url && asset.kind === "image" && (
+          <img src={asset.url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        )}
+        {asset.url && asset.kind === "video" && (
+          <video src={asset.url} preload="metadata" muted className="absolute inset-0 h-full w-full object-cover" />
+        )}
         <span className="absolute left-2 top-2 flex h-6 w-6 items-center justify-center rounded-md bg-ink/55 text-cream/85 backdrop-blur-sm">
           <Icon size={12} />
         </span>
@@ -313,7 +319,9 @@ function GridPanel({
         </div>
         {shown.length === 0 && (
           <p className="py-16 text-center text-[12px] text-fog">
-            Nothing matches “{query}” — try a different search or filter.
+            {lib.assets.length === 0
+              ? "The library is empty — everything you generate lands here automatically."
+              : `Nothing matches “${query}” — try a different search or filter.`}
           </p>
         )}
       </div>
@@ -358,7 +366,16 @@ function Inspector({ asset }: { asset: LibraryAsset }) {
       {/* preview */}
       <div className="p-4 pb-3">
         <div className={cx("relative aspect-video overflow-hidden rounded-xl", asset.swatch)}>
-          {audio && asset.waveSeed !== undefined ? (
+          {asset.url && asset.kind === "image" && (
+            <img src={asset.url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          )}
+          {asset.url && asset.kind === "video" && (
+            <video src={asset.url} controls preload="metadata" className="absolute inset-0 h-full w-full object-cover" />
+          )}
+          {asset.url && audio && (
+            <audio src={asset.url} controls className="absolute inset-x-2 bottom-2 h-8 w-[calc(100%-16px)]" />
+          )}
+          {audio && !asset.url && asset.waveSeed !== undefined ? (
             <div className="absolute inset-0 flex items-center px-4">
               <Waveform seed={asset.waveSeed} bars={64} played={0.2} className="h-10! w-full" />
             </div>
@@ -367,7 +384,7 @@ function Inspector({ asset }: { asset: LibraryAsset }) {
             <Maximize2 size={11} />
           </button>
         </div>
-        {(asset.kind === "video" || audio) && (
+        {(asset.kind === "video" || audio) && !asset.url && (
           <div className="mt-2.5 flex items-center gap-2.5">
             <button className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110">
               <Play size={11} className="ml-0.5" />
@@ -464,14 +481,19 @@ function Inspector({ asset }: { asset: LibraryAsset }) {
 export function AssetLibrary() {
   const lib = useAssetLibrary();
   const [filter, setFilter] = useState<Filter>("all");
-  const [assetId, setAssetId] = useState(lib.assets[0].id);
+  const [assetId, setAssetId] = useState(lib.assets[0]?.id ?? "");
   const asset = lib.assets.find((a) => a.id === assetId) ?? lib.assets[0];
 
   return (
     <div className="flex h-full">
       <CollectionsPanel filter={filter} onFilter={setFilter} />
-      <GridPanel filter={filter} onFilter={setFilter} assetId={asset.id} onSelect={setAssetId} />
-      <Inspector asset={asset} />
+      <GridPanel
+        filter={filter}
+        onFilter={setFilter}
+        assetId={asset?.id ?? ""}
+        onSelect={setAssetId}
+      />
+      {asset && <Inspector asset={asset} />}
     </div>
   );
 }

@@ -3,7 +3,15 @@
 
 import { on } from "node:events";
 import { z } from "zod";
-import { enqueueJobSchema, settingsUpdateSchema, type Job, type Vram } from "@aurea/shared";
+import {
+  enqueueJobSchema,
+  projectCreateSchema,
+  projectRenameSchema,
+  settingsUpdateSchema,
+  type Job,
+  type Vram,
+} from "@aurea/shared";
+import { scanLibrary } from "./library.js";
 import { procedure, router } from "./trpc.js";
 
 const jobId = z.object({ id: z.string() });
@@ -47,7 +55,22 @@ export const appRouter = router({
   }),
 
   projects: router({
-    list: procedure.query(({ ctx }) => ctx.projects),
+    list: procedure.query(({ ctx }) => ctx.projects.list()),
+
+    create: procedure
+      .input(projectCreateSchema)
+      .mutation(({ ctx, input }) => ctx.projects.create(input.name)),
+
+    rename: procedure
+      .input(projectRenameSchema)
+      .mutation(({ ctx, input }) => ctx.projects.rename(input.id, input.name)),
+  }),
+
+  library: router({
+    /** every real file in every project's assets tree, newest first */
+    list: procedure.query(({ ctx }) => ({
+      assets: scanLibrary(ctx.settings.get().storage.dataRoot, ctx.projects),
+    })),
   }),
 
   settings: router({

@@ -152,9 +152,41 @@ export type StorageStats = z.infer<typeof storageStatsSchema>;
 export const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
+  /** subtitle in the switcher — computed by the store ("3 assets · Jul 14") */
   meta: z.string(),
+  createdAt: z.string(),
 });
 export type Project = z.infer<typeof projectSchema>;
+
+export const projectCreateSchema = z.object({ name: z.string().trim().min(1) });
+export const projectRenameSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1),
+});
+
+/* ---------- asset library ---------- */
+
+export const libraryKindSchema = z.enum(["image", "video", "audio", "music", "model3d"]);
+export type LibraryKind = z.infer<typeof libraryKindSchema>;
+
+/** One real file inside a project's assets/ tree, as scanned by studiod. */
+export const libraryAssetSchema = z.object({
+  /** stable identity — the dataRoot-relative path */
+  id: z.string(),
+  kind: libraryKindSchema,
+  name: z.string(),
+  project: z.string(),
+  projectName: z.string(),
+  /** posix-style path relative to storage.dataRoot */
+  relPath: z.string(),
+  /** studiod media route ("/media/<escaped relPath>") — client adds host + token */
+  url: z.string(),
+  sizeBytes: z.number(),
+  createdAt: z.string(),
+  /** lowercase extension without the dot */
+  ext: z.string(),
+});
+export type LibraryAsset = z.infer<typeof libraryAssetSchema>;
 
 /* ---------- studiod discovery ---------- */
 

@@ -50,8 +50,8 @@ export interface ChatMessage {
 const s = (from: string, to: string) => `bg-gradient-to-br ${from} ${to}`;
 
 export const projects = [
-  { id: "animal-sitcom", name: "Animal Sitcom", meta: "S01E03 · 12 shots" },
-  { id: "noir-ascend", name: "Noir Ascend", meta: "Motivation channel · 5 queued" },
+  { id: "animal-sitcom", name: "Animal Sitcom", meta: "S01E03 · 12 shots", createdAt: "2026-07-01T12:00:00.000Z" },
+  { id: "noir-ascend", name: "Noir Ascend", meta: "Motivation channel · 5 queued", createdAt: "2026-07-08T12:00:00.000Z" },
 ];
 
 export const assets: Asset[] = [
@@ -382,6 +382,8 @@ export interface LibraryAsset {
   meta: string;
   duration?: string;
   swatch: string;
+  /** absolute studiod /media URL — real thumbnail/preview when present */
+  url?: string;
   waveSeed?: number;
   favorite?: boolean;
   /** part of the current multi-selection */

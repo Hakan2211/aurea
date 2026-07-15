@@ -3,12 +3,20 @@
  *
  * Execution: jobs with a payload run on a matching engine adapter (videofast
  * batch pipeline today; ComfyUI sidecar, TTS venvs next). Jobs without one —
- * seed fixtures, UI demo enqueues — fall back to the simulated worker so the
- * queue plumbing stays demonstrable without a GPU pipeline installed. */
+ * UI demo enqueues — fall back to the simulated worker so the queue plumbing
+ * stays demonstrable without a GPU pipeline installed.
+ *
+ * The queue is persisted to <dataRoot>/jobs.json: history survives restarts,
+ * and jobs that were queued or mid-run when studiod died come back queued —
+ * a restart resumes the queue rather than losing it (cancel is how you stop
+ * a job on purpose). */
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import type { EnqueueJob, Job, JobPriority } from "@aurea/shared";
+import fs from "node:fs";
+import path from "node:path";
+import { z } from "zod";
+import { jobSchema, type EnqueueJob, type Job, type JobPriority } from "@aurea/shared";
 import type { AdapterRun, EngineAdapter } from "./adapters/types.js";
 
 const PRIORITY_RANK: Record<JobPriority, number> = { interactive: 0, preview: 1, batch: 2 };
@@ -40,23 +48,37 @@ interface TrackedJob extends Job {
   seq: number;
 }
 
+/** how many finished jobs the persisted history keeps */
+const HISTORY_CAP = 100;
+const SAVE_DEBOUNCE_MS = 300;
+
+export interface JobEngineOptions {
+  adapters?: EngineAdapter[];
+  /** persistence file, resolved per save so a dataRoot change carries the history along */
+  storeFile?: () => string;
+  /** move a finished adapter job's artifact into its project; returns the new path */
+  importOutput?: (job: Job) => string | undefined;
+}
+
 export class JobEngine extends EventEmitter {
   private jobs = new Map<string, TrackedJob>();
   private seq = 0;
   private timer: NodeJS.Timeout;
   /** live adapter execution per running job id */
   private execs = new Map<string, AdapterRun>();
+  private adapters: EngineAdapter[];
+  private saveTimer: NodeJS.Timeout | undefined;
 
-  constructor(seed: Job[] = [], private adapters: EngineAdapter[] = []) {
+  constructor(private opts: JobEngineOptions = {}) {
     super();
-    for (const job of seed) {
-      const tracked: TrackedJob = { ...job, seq: this.seq++ };
-      if (tracked.status === "running" && tracked.elapsed) {
-        // continue the seeded running job's clock instead of resetting it
-        const [h, m, s] = tracked.elapsed.split(":").map(Number);
-        tracked.startedAt = Date.now() - ((h * 3600 + m * 60 + s) * 1000);
-      }
-      this.jobs.set(tracked.id, tracked);
+    this.adapters = opts.adapters ?? [];
+    for (const job of this.load()) {
+      // whatever was in flight when the last studiod died goes back in line
+      const revived: TrackedJob =
+        job.status === "running" || job.status === "queued"
+          ? { ...job, status: "queued", progress: 0, stage: undefined, eta: undefined, elapsed: undefined, seq: this.seq++ }
+          : { ...job, seq: this.seq++ };
+      this.jobs.set(revived.id, revived);
     }
     this.timer = setInterval(() => this.tick(), TICK_MS);
     this.timer.unref();
@@ -118,6 +140,8 @@ export class JobEngine extends EventEmitter {
     clearInterval(this.timer);
     for (const exec of this.execs.values()) exec.cancel();
     this.execs.clear();
+    clearTimeout(this.saveTimer);
+    this.save();
     this.removeAllListeners();
   }
 
@@ -127,6 +151,42 @@ export class JobEngine extends EventEmitter {
 
   private publish() {
     this.emit("snapshot", this.snapshot());
+    if (!this.opts.storeFile) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.save(), SAVE_DEBOUNCE_MS);
+    this.saveTimer.unref();
+  }
+
+  /* ---------- persistence ---------- */
+
+  private load(): Job[] {
+    if (!this.opts.storeFile) return [];
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.opts.storeFile(), "utf8"));
+      return z.array(jobSchema).parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  private save(): void {
+    if (!this.opts.storeFile) return;
+    const finished = this.snapshot().filter(
+      (j) => j.status === "completed" || j.status === "failed",
+    );
+    const keep = new Set(finished.slice(0, HISTORY_CAP).map((j) => j.id));
+    const jobs = this.snapshot().filter(
+      (j) => j.status === "running" || j.status === "queued" || keep.has(j.id),
+    );
+    try {
+      const file = this.opts.storeFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(jobs, null, 2));
+      fs.renameSync(tmp, file);
+    } catch {
+      // history is best-effort; the live queue keeps working without it
+    }
   }
 
   private tick() {
@@ -173,6 +233,14 @@ export class JobEngine extends EventEmitter {
         job.stage = undefined;
         job.eta = undefined;
         job.output = output;
+        if (output && this.opts.importOutput) {
+          try {
+            // pull the artifact into the project's assets tree (library picks it up)
+            job.output = this.opts.importOutput({ ...job }) ?? output;
+          } catch {
+            // delivery stays valid at the adapter's original path
+          }
+        }
       })
       .catch((err: unknown) => {
         if (job.status !== "running") return; // cancel() already recorded the reason

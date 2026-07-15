@@ -1,0 +1,176 @@
+/* ProjectStore — real persisted projects (P0). Each project is a plain folder
+ * under <dataRoot>/projects/<id>/ holding project.json plus an assets/ tree
+ * with one subfolder per kind. The folder layout IS the database: the library
+ * scanner and the media route read straight from disk, so anything the user
+ * drops into a project folder by hand shows up in the app too.
+ *
+ * dataRoot comes from the settings store on every call — repointing storage
+ * in Settings repoints the whole store, no restart needed. */
+
+import fs from "node:fs";
+import path from "node:path";
+import { z } from "zod";
+import type { Job, LibraryKind, Project } from "@aurea/shared";
+import type { SettingsStore } from "./settings.js";
+
+export const ASSET_KINDS = ["image", "video", "audio", "music", "model3d"] as const;
+
+/** extension → library kind, shared by the scanner and the importer */
+export const EXT_KIND: Record<string, LibraryKind> = {
+  png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image",
+  mp4: "video", webm: "video", mov: "video", mkv: "video",
+  wav: "audio", mp3: "audio", flac: "audio", ogg: "audio", m4a: "audio",
+  glb: "model3d", gltf: "model3d", obj: "model3d", fbx: "model3d",
+};
+
+/** what actually lives in project.json (meta is computed, never stored) */
+const projectFileSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  createdAt: z.string(),
+});
+type ProjectFile = z.infer<typeof projectFileSchema>;
+
+const JOB_KIND_DIR: Record<Job["kind"], LibraryKind> = {
+  video: "video",
+  image: "image",
+  tts: "audio",
+  music: "music",
+};
+
+const slugify = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "project";
+
+const fmtDay = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+/** files under dir, recursive, ignoring dotfiles; depth-capped for safety */
+function countFiles(dir: string, depth = 5): number {
+  if (depth < 0 || !fs.existsSync(dir)) return 0;
+  let n = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
+    if (entry.isDirectory()) n += countFiles(path.join(dir, entry.name), depth - 1);
+    else if (entry.isFile()) n += 1;
+  }
+  return n;
+}
+
+export class ProjectStore {
+  constructor(private settings: SettingsStore) {}
+
+  root(): string {
+    return path.join(this.settings.get().storage.dataRoot, "projects");
+  }
+
+  dir(id: string): string {
+    return path.join(this.root(), id);
+  }
+
+  list(): Project[] {
+    const root = this.root();
+    if (!fs.existsSync(root)) return [];
+    const projects: Project[] = [];
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const file = this.read(entry.name);
+      if (!file) continue;
+      const assets = countFiles(path.join(this.dir(file.id), "assets"));
+      projects.push({
+        ...file,
+        meta:
+          assets > 0
+            ? `${assets} asset${assets === 1 ? "" : "s"} · ${fmtDay(file.createdAt)}`
+            : `Empty · created ${fmtDay(file.createdAt)}`,
+      });
+    }
+    return projects.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  create(name: string): Project {
+    const base = slugify(name);
+    let id = base;
+    for (let n = 2; fs.existsSync(this.dir(id)); n++) id = `${base}-${n}`;
+    for (const kind of ASSET_KINDS) {
+      fs.mkdirSync(path.join(this.dir(id), "assets", kind), { recursive: true });
+    }
+    this.write({ id, name: name.trim(), createdAt: new Date().toISOString() });
+    return this.list().find((p) => p.id === id)!;
+  }
+
+  rename(id: string, name: string): Project {
+    const file = this.read(id);
+    if (!file) throw new Error(`unknown project "${id}"`);
+    this.write({ ...file, name: name.trim() });
+    return this.list().find((p) => p.id === id)!;
+  }
+
+  /** first boot (or wiped dataRoot): make sure the switcher has something real */
+  ensureDefault(): void {
+    if (this.list().length === 0) this.create("Playground");
+  }
+
+  /** Copy a finished job's artifact into its project's assets tree. Adapters
+   * may deliver a single file or a folder (videofast ships final.mp4 + cover
+   * art + metadata); for a folder every top-level media file comes along and
+   * the file matching the job's own kind is the primary output. Returns the
+   * imported primary path, or undefined when the job isn't tied to a real
+   * project (demo jobs carry display-only project strings). */
+  importJobOutput(job: Job): string | undefined {
+    if (!job.project || !job.output) return undefined;
+    const id = job.project.replace(/^\//, "").split("/")[0];
+    if (!this.read(id) || !fs.existsSync(job.output)) return undefined;
+
+    const base = slugify(job.title || path.basename(job.output, path.extname(job.output)));
+    if (fs.statSync(job.output).isFile()) {
+      const kind = EXT_KIND[path.extname(job.output).slice(1).toLowerCase()];
+      return this.importFile(id, kind ?? JOB_KIND_DIR[job.kind], job.output, base);
+    }
+
+    let primary: string | undefined;
+    for (const entry of fs.readdirSync(job.output, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const ext = path.extname(entry.name).slice(1).toLowerCase();
+      const kind = EXT_KIND[ext];
+      if (!kind) continue;
+      // "final.mp4" takes the job's name outright; side artifacts keep theirs as a suffix
+      const name = entry.name.startsWith("final.")
+        ? base
+        : `${base}-${slugify(path.basename(entry.name, path.extname(entry.name)))}`;
+      const dest = this.importFile(id, kind, path.join(job.output, entry.name), name);
+      if (kind === JOB_KIND_DIR[job.kind] && !primary) primary = dest;
+    }
+    return primary;
+  }
+
+  private importFile(projectId: string, kind: LibraryKind, source: string, base: string): string {
+    const destDir = path.join(this.dir(projectId), "assets", kind);
+    fs.mkdirSync(destDir, { recursive: true });
+    const ext = path.extname(source);
+    let dest = path.join(destDir, `${base}${ext}`);
+    for (let n = 2; fs.existsSync(dest); n++) dest = path.join(destDir, `${base}-${n}${ext}`);
+    fs.copyFileSync(source, dest);
+    return dest;
+  }
+
+  private read(id: string): ProjectFile | null {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(this.dir(id), "project.json"), "utf8"));
+      return projectFileSchema.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  private write(file: ProjectFile): void {
+    const target = path.join(this.dir(file.id), "project.json");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const tmp = `${target}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(file, null, 2));
+    fs.renameSync(tmp, target);
+  }
+}

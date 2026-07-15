@@ -6,16 +6,18 @@
 
 import http from "node:http";
 import { randomBytes } from "node:crypto";
+import path from "node:path";
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
 import { JobEngine } from "./jobs.js";
 import { SystemMonitor } from "./system.js";
 import { SettingsStore } from "./settings.js";
+import { ProjectStore } from "./projects.js";
 import { VideofastAdapter } from "./adapters/videofast.js";
+import { serveMedia } from "./media.js";
 import { appRouter } from "./router.js";
 import type { Context } from "./trpc.js";
-import { seedJobs, seedProjects } from "./seed.js";
 import { clearPortFile, writePortFile } from "./portfile.js";
 
 export interface StudiodOptions {
@@ -40,9 +42,15 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
   const token = opts.token ?? randomBytes(24).toString("base64url");
 
   const settings = new SettingsStore();
-  const engine = new JobEngine(seedJobs, [new VideofastAdapter(settings)]);
+  const projects = new ProjectStore(settings);
+  projects.ensureDefault();
+  const engine = new JobEngine({
+    adapters: [new VideofastAdapter(settings)],
+    storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),
+    importOutput: (job) => projects.importJobOutput(job),
+  });
   const monitor = new SystemMonitor(settings);
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects: seedProjects };
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,
@@ -66,6 +74,11 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, service: "studiod", pid: process.pid }));
+      return;
+    }
+    // library file streaming for <img>/<video> (token in query string)
+    if (req.url?.startsWith("/media/")) {
+      serveMedia(req, res, settings.get().storage.dataRoot, token);
       return;
     }
     trpcHandler(req, res);
