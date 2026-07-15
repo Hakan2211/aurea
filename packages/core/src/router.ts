@@ -10,9 +10,11 @@ import {
   musicGenerateSchema,
   projectCreateSchema,
   projectRenameSchema,
+  directorSendSchema,
   settingsUpdateSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
+  type DirectorState,
   type Job,
   type JobPayload,
   type Vram,
@@ -117,6 +119,33 @@ export const appRouter = router({
         return generate(ctx, { type: "video", ...payload }, project);
       }),
     }),
+  }),
+
+  director: router({
+    get: procedure
+      .input(z.object({ project: z.string().min(1) }))
+      .query(({ ctx, input }) => ctx.director.get(input.project)),
+
+    send: procedure.input(directorSendSchema).mutation(({ ctx, input }) => {
+      if (!ctx.projects.list().some((p) => p.id === input.project)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `unknown project "${input.project}"` });
+      }
+      try {
+        return ctx.director.send(input.project, input.text);
+      } catch (err) {
+        throw new TRPCError({ code: "CONFLICT", message: String((err as Error).message) });
+      }
+    }),
+
+    /** full-thread snapshots per update — chats are short, so no delta protocol */
+    onUpdate: procedure
+      .input(z.object({ project: z.string().min(1) }))
+      .subscription(async function* ({ ctx, input, signal }) {
+        yield ctx.director.get(input.project);
+        for await (const [state] of on(ctx.director, "update", { signal })) {
+          if ((state as DirectorState).project === input.project) yield state as DirectorState;
+        }
+      }),
   }),
 
   settings: router({

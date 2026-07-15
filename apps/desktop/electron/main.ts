@@ -103,6 +103,11 @@ function createWindow() {
 
 nativeTheme.themeSource = "dark";
 
+// dev-only: AUREA_CDP_PORT=9223 opens Chrome DevTools Protocol for automated verification
+if (process.env.AUREA_CDP_PORT) {
+  app.commandLine.appendSwitch("remote-debugging-port", process.env.AUREA_CDP_PORT);
+}
+
 app.whenReady().then(async () => {
   // core first: the renderer asks for {port, token} as soon as it boots
   await ensureStudiod();

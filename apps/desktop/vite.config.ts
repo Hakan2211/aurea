@@ -21,8 +21,11 @@ export default defineConfig({
             // runs inside Electron's utilityProcess (Node 22), not a page
             target: "node22",
             rollupOptions: {
-              // optional native accelerators probed by ws — not installed
-              external: ["bufferutil", "utf-8-validate"],
+              // optional native accelerators probed by ws — not installed.
+              // The agent SDK must stay external: it spawns its bundled
+              // Claude Code cli.js via paths relative to its own package dir,
+              // which inlining would break.
+              external: ["bufferutil", "utf-8-validate", "@anthropic-ai/claude-agent-sdk"],
             },
           },
         },

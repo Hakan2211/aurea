@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type {
+  DirectorToolCall,
   ImageGenerate,
   Job,
   JobPayload,
@@ -10,6 +11,7 @@ import type {
   TtsGenerate,
   VideoGenerate,
 } from "@aurea/shared";
+import type { Asset, AssetKind, ChatMessage } from "@/data/sample";
 import {
   assetLibrary,
   assets,
@@ -58,8 +60,25 @@ export function useProjects() {
   };
 }
 
+/** LIVE — the Director rail shows the real library, newest first. Sample data
+ * stands in for a dead core (plain browser tab). */
 export function useAssets() {
-  return { assets };
+  const media = useMediaBase();
+  const live = trpc.library.list.useQuery().data?.assets;
+  return useMemo(() => {
+    if (!live) return { assets };
+    const mapped: Asset[] = live
+      .filter((a) => a.kind !== "model3d")
+      .slice(0, 24)
+      .map((a) => ({
+        id: a.id,
+        kind: a.kind as AssetKind,
+        name: a.name,
+        swatch: KIND_SWATCH[a.kind],
+        url: media ? media(a.url) : undefined,
+      }));
+    return { assets: mapped };
+  }, [live, media]);
 }
 
 export function useJobs() {
@@ -78,8 +97,69 @@ export function useSystem() {
   return query.data ?? { system, preflight };
 }
 
+/* ---------- director chat (LIVE) ---------- */
+
+export interface UiToolCall extends Omit<DirectorToolCall, "jobId"> {
+  /** the live job behind this tool call, when it enqueued one */
+  job?: Job;
+}
+
+export interface UiChatMessage extends ChatMessage {
+  toolCall?: UiToolCall;
+}
+
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+/** LIVE — the Director thread for the active project. director.onUpdate
+ * streams every turn (text, tool calls, tool results) into the query cache;
+ * tool calls that enqueued jobs get their live Job attached from the jobs
+ * stream. Sample data stands in for a dead core. */
 export function useChat() {
-  return { messages: chat };
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const query = trpc.director.get.useQuery({ project }, { enabled: !!project });
+  trpc.director.onUpdate.useSubscription(
+    { project },
+    {
+      enabled: !!project,
+      onData: (state) => utils.director.get.setData({ project }, state),
+    },
+  );
+  const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
+  const mutation = trpc.director.send.useMutation({
+    onSuccess: (state) => utils.director.get.setData({ project }, state),
+  });
+  const { mutate } = mutation;
+
+  return useMemo(() => {
+    const state = query.data;
+    if (!state) {
+      return { messages: chat as UiChatMessage[], busy: false, live: false, send: (_: string) => {} };
+    }
+    const messages: UiChatMessage[] = state.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      time: fmtTime(m.at),
+      text: m.text,
+      toolCall: m.tool
+        ? {
+            name: m.tool.name,
+            summary: m.tool.summary,
+            status: m.tool.status,
+            job: m.tool.jobId ? jobsData?.find((j) => j.id === m.tool!.jobId) : undefined,
+          }
+        : undefined,
+    }));
+    return {
+      messages,
+      busy: state.status === "thinking" || mutation.isPending,
+      live: true,
+      send: (text: string) => {
+        if (text.trim()) mutate({ project, text });
+      },
+    };
+  }, [query.data, jobsData, project, mutate, mutation.isPending]);
 }
 
 export function useFormats() {

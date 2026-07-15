@@ -1,10 +1,13 @@
+import { useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   FileAudio,
   FileImage,
   FileMusic,
   FileVideo,
+  Loader2,
   Paperclip,
   Pause,
   Play,
@@ -12,10 +15,11 @@ import {
   Search,
   Send,
   Sparkles,
+  Wrench,
   X,
 } from "lucide-react";
-import { useAssets, useChat, useJobs, useProjects } from "@/hooks";
-import type { Asset, ChatMessage, Job } from "@/data/sample";
+import { useAssets, useChat, useJobs, useProjects, type UiChatMessage, type UiToolCall } from "@/hooks";
+import type { Asset, Job } from "@/data/sample";
 import { composer } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Progress, Waveform, cx } from "@/components/ui";
 
@@ -67,6 +71,12 @@ function AssetThumb({ asset }: { asset: Asset }) {
       className="group relative aspect-square overflow-hidden rounded-lg border border-cream/5 transition hover:border-gold/40"
     >
       <div className={cx("absolute inset-0", asset.swatch)} />
+      {asset.url && asset.kind === "image" && (
+        <img src={asset.url} alt={asset.name} className="absolute inset-0 h-full w-full object-cover" />
+      )}
+      {asset.url && asset.kind === "video" && (
+        <video src={asset.url} preload="metadata" muted className="absolute inset-0 h-full w-full object-cover" />
+      )}
       {(asset.kind === "audio" || asset.kind === "music") && (
         <Waveform seed={asset.id.length * 5} bars={14} played={0} className="absolute inset-x-2 top-1/2 h-5 -translate-y-1/2" />
       )}
@@ -83,7 +93,13 @@ function AssetThumb({ asset }: { asset: Asset }) {
 /* ---------- center: chat thread ---------- */
 
 function Thread() {
-  const { messages } = useChat();
+  const { messages, busy, send } = useChat();
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, busy]);
+
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-2.5 border-b hairline px-6 py-3.5">
@@ -95,17 +111,34 @@ function Thread() {
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        {messages.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <Sparkles size={20} className="text-gold/60" />
+            <p className="font-serif text-[15px] text-cream/80">The set is quiet.</p>
+            <p className="max-w-[380px] text-[12px] leading-relaxed text-fog">
+              Ask the Director for keyframes, a voice take, a music cue, or a full videofast episode —
+              every job lands in the rail on the right and finishes in your library.
+            </p>
+          </div>
+        )}
         {messages.map((m) => (
           <Message key={m.id} message={m} />
         ))}
+        {busy && (
+          <div className="flex items-center gap-2 text-[11px] text-fog">
+            <Loader2 size={12} className="animate-spin text-gold/70" />
+            The Director is thinking…
+          </div>
+        )}
+        <div ref={endRef} />
       </div>
 
-      <Composer />
+      <Composer busy={busy} onSend={send} />
     </section>
   );
 }
 
-function Message({ message }: { message: ChatMessage }) {
+function Message({ message }: { message: UiChatMessage }) {
   const isUser = message.role === "user";
   return (
     <div className={cx("flex max-w-[720px] flex-col gap-2", isUser && "ml-auto items-end")}>
@@ -118,18 +151,55 @@ function Message({ message }: { message: ChatMessage }) {
       {message.text && (
         <p
           className={cx(
-            "rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
+            "whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
             isUser ? "rounded-tr-sm bg-gold/12 text-cream" : "rounded-tl-sm bg-surface text-cream/90",
           )}
         >
           {message.text}
         </p>
       )}
+      {message.toolCall && <ToolCallCard tool={message.toolCall} />}
       {message.card?.type === "images" && <ImageResultCard items={message.card.items} />}
       {message.card?.type === "video" && (
         <VideoJobCard job={message.card.job} swatch={message.card.thumbSwatch} />
       )}
       {message.card?.type === "audio" && <AudioTakeCard card={message.card} />}
+    </div>
+  );
+}
+
+/** one Director tool call — spinner while running, live job progress when it enqueued one */
+function ToolCallCard({ tool }: { tool: UiToolCall }) {
+  const running = tool.status === "running" || tool.job?.status === "running" || tool.job?.status === "queued";
+  const failed = tool.status === "error" || tool.job?.status === "failed";
+  return (
+    <div className="w-full max-w-[520px] rounded-2xl rounded-tl-sm border hairline bg-surface px-3.5 py-2.5">
+      <div className="flex items-center gap-2">
+        <Wrench size={12} className="shrink-0 text-gold/60" />
+        <span className="truncate font-mono text-[11px] text-cream/85">{tool.name}</span>
+        <span className="ml-auto shrink-0">
+          {failed ? (
+            <AlertTriangle size={13} className="text-ember" />
+          ) : running ? (
+            <Loader2 size={13} className="animate-spin text-gold" />
+          ) : (
+            <Check size={13} className="text-sage" />
+          )}
+        </span>
+      </div>
+      {tool.summary && <p className="mt-1 truncate text-[11px] text-fog">{tool.summary}</p>}
+      {tool.job && (tool.job.status === "running" || tool.job.status === "queued") && (
+        <>
+          <Progress value={tool.job.progress} className="mt-2" />
+          <div className="mt-1 flex justify-between text-[10px] text-fog">
+            <span>{tool.job.stage ?? tool.job.status}</span>
+            <span>{tool.job.eta}</span>
+          </div>
+        </>
+      )}
+      {tool.job?.status === "failed" && (
+        <p className="mt-1 text-[11px] text-ember">{tool.job.error ?? "job failed"}</p>
+      )}
     </div>
   );
 }
@@ -223,25 +293,45 @@ function AudioTakeCard({
   );
 }
 
-function Composer() {
+function Composer({ busy, onSend }: { busy: boolean; onSend: (text: string) => void }) {
+  const [text, setText] = useState("");
+
+  const submit = () => {
+    if (busy || !text.trim()) return;
+    onSend(text);
+    setText("");
+  };
+
   return (
     <footer className="border-t hairline px-6 py-4">
       <div className="rounded-2xl border border-cream/10 bg-surface px-4 py-3 transition focus-within:border-gold/40">
         <textarea
           rows={1}
-          placeholder="Message the Director…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={busy ? "The Director is working…" : "Message the Director…"}
           className="w-full resize-none bg-transparent text-[13px] text-cream placeholder:text-fog focus:outline-none"
         />
         <div className="mt-2.5 flex items-center gap-2">
           <button className="flex items-center gap-1.5 rounded-full border border-cream/10 px-2.5 py-1 text-[11px] text-cream/80 transition hover:border-gold/40">
             {composer.model} <ChevronDown size={11} />
           </button>
-          <Chip tone="muted">{composer.estimate}</Chip>
+          <Chip tone="muted">{busy ? "thinking…" : composer.estimate}</Chip>
           <div className="ml-auto flex items-center gap-1.5">
             <button className="flex h-8 w-8 items-center justify-center rounded-lg text-fog transition hover:bg-cream/5 hover:text-cream">
               <Paperclip size={15} />
             </button>
-            <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110">
+            <button
+              onClick={submit}
+              disabled={busy || !text.trim()}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110 disabled:opacity-40"
+            >
               <Send size={14} />
             </button>
           </div>

@@ -16,6 +16,7 @@ import { SystemMonitor } from "./system.js";
 import { SettingsStore } from "./settings.js";
 import { ProjectStore } from "./projects.js";
 import { Labs } from "./labs.js";
+import { DirectorService } from "./director.js";
 import { VideofastAdapter } from "./adapters/videofast.js";
 import { ImageAdapter } from "./adapters/image.js";
 import { TtsAdapter } from "./adapters/tts.js";
@@ -67,7 +68,13 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
   });
   const monitor = new SystemMonitor(settings);
   const labs = new Labs(settings);
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs };
+  // the Director's tools call back into this very server; coords resolve after listen
+  let selfCoords: { port: number; token: string } | null = null;
+  const director = new DirectorService(settings, () => {
+    if (!selfCoords) throw new Error("studiod is not listening yet");
+    return selfCoords;
+  });
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,
@@ -120,6 +127,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       else reject(new Error("studiod: could not determine bound port"));
     });
   });
+
+  selfCoords = { port, token };
 
   if (opts.writePortFile) {
     await writePortFile({ port, token, pid: process.pid });

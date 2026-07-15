@@ -283,6 +283,52 @@ export const libraryAssetSchema = z.object({
 });
 export type LibraryAsset = z.infer<typeof libraryAssetSchema>;
 
+/* ---------- director chat ---------- */
+
+/** One tool call the Director made mid-conversation, rendered as a card. */
+export const directorToolCallSchema = z.object({
+  /** tool name without the mcp__aurea__ prefix (e.g. "generate_image") */
+  name: z.string(),
+  /** compact one-line rendering of the tool input */
+  summary: z.string(),
+  status: z.enum(["running", "done", "error"]),
+  /** set when the tool enqueued a job — the UI attaches live progress from the jobs stream */
+  jobId: z.string().optional(),
+});
+export type DirectorToolCall = z.infer<typeof directorToolCallSchema>;
+
+export const directorMessageSchema = z.object({
+  id: z.string(),
+  role: z.enum(["user", "director"]),
+  /** ISO timestamp */
+  at: z.string(),
+  text: z.string().optional(),
+  tool: directorToolCallSchema.optional(),
+});
+export type DirectorMessage = z.infer<typeof directorMessageSchema>;
+
+/** The whole chat thread for one project, as streamed to the renderer. */
+export const directorStateSchema = z.object({
+  project: z.string(),
+  /** thinking = a Claude run is in flight; the composer disables itself */
+  status: z.enum(["idle", "thinking"]),
+  messages: z.array(directorMessageSchema),
+});
+export type DirectorState = z.infer<typeof directorStateSchema>;
+
+export const directorSendSchema = z.object({
+  project: z.string().min(1),
+  text: z.string().trim().min(1),
+});
+
+/** On-disk shape — <dataRoot>/projects/<id>/director.json */
+export const directorChatFileSchema = z.object({
+  /** Claude Code session id for resume-based conversation continuity */
+  sessionId: z.string().nullable().default(null),
+  messages: z.array(directorMessageSchema).default([]),
+});
+export type DirectorChatFile = z.infer<typeof directorChatFileSchema>;
+
 /* ---------- studiod discovery ---------- */
 
 /** Contents of ~/.aurea/studiod.json — how shells and CLIs find a running core. */

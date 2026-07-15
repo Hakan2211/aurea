@@ -11,6 +11,8 @@ export interface Asset {
   duration?: string;
   /** tailwind gradient classes standing in for real thumbnails */
   swatch: string;
+  /** studiod /media preview URL once the library is live */
+  url?: string;
 }
 
 export type JobStatus = "running" | "queued" | "completed" | "failed";
