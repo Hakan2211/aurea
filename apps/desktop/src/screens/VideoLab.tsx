@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -92,6 +92,9 @@ function Select({
 
 function ParamsPanel() {
   const lab = useVideoLab();
+  // the dead-core fallback shape predates the live fields — narrow before use
+  const canGenerate = "canGenerate" in lab ? lab.canGenerate : false;
+  const startFrameUrl = "url" in lab.startFrame ? lab.startFrame.url : undefined;
   const [prompt, setPrompt] = useState(lab.prompt);
   const [engineId, setEngineId] = useState(lab.engines[0].id);
   const [duration, setDuration] = useState(lab.duration);
@@ -131,7 +134,16 @@ function ParamsPanel() {
           </div>
           <div className="relative mt-2 h-28 overflow-hidden rounded-xl border border-cream/10">
             <div className={cx("absolute inset-0", lab.startFrame.swatch)} />
-            <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
+            {startFrameUrl ? (
+              <img
+                src={startFrameUrl}
+                alt=""
+                draggable={false}
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
+            )}
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/80 to-transparent px-2.5 pb-2 pt-5">
               <div className="truncate text-[11px] text-cream/90">{lab.startFrame.name}</div>
               <div className="text-[10px] text-fog">{lab.startFrame.meta}</div>
@@ -212,8 +224,22 @@ function ParamsPanel() {
       </div>
 
       <div className="p-4 pt-2">
-        <GoldButton className="w-full justify-center py-3 text-[13px] uppercase tracking-widest">
-          <Sparkles size={14} /> Generate
+        <GoldButton
+          onClick={() =>
+            lab.generate({
+              prompt,
+              durationSec: parseInt(duration) || 5,
+              resolution,
+              motionStrength: motion,
+            })
+          }
+          className={cx(
+            "w-full justify-center py-3 text-[13px] uppercase tracking-widest",
+            (lab.busy || !canGenerate || !prompt.trim()) && "pointer-events-none opacity-50",
+          )}
+        >
+          <Sparkles size={14} />{" "}
+          {lab.busy ? "Generating…" : canGenerate ? "Generate" : "Needs a start frame"}
         </GoldButton>
       </div>
     </aside>
@@ -232,7 +258,16 @@ function TakeCard({ take, active, onSelect }: { take: VideoTake; active: boolean
       )}
     >
       <div className={cx("absolute inset-0", take.swatch)} />
-      <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
+      {take.url ? (
+        <video
+          src={take.url}
+          muted
+          preload="metadata"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      ) : (
+        <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
+      )}
       {take.starred && (
         <Star size={12} className="absolute right-2 top-2 text-gold" fill="currentColor" />
       )}
@@ -257,6 +292,14 @@ function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: str
   const lab = useVideoLab();
   const [playing, setPlaying] = useState(true);
   const take = lab.takes.find((t) => t.id === takeId) ?? lab.takes[0];
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (playing) void el.play().catch(() => {});
+    else el.pause();
+  }, [playing, take.url]);
 
   return (
     <section className="flex min-w-0 flex-1 flex-col p-4">
@@ -275,8 +318,20 @@ function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: str
       {/* player */}
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border hairline">
         <div className={cx("absolute inset-0", take.swatch)} />
-        {/* stand-in composition until real frames flow through the seam */}
-        <div className="absolute inset-0 bg-[radial-gradient(90%_70%_at_50%_35%,rgba(237,234,228,0.09),transparent_65%)]" />
+        {take.url ? (
+          <video
+            ref={videoRef}
+            src={take.url}
+            muted
+            loop
+            playsInline
+            autoPlay
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          /* stand-in composition until real frames flow through the seam */
+          <div className="absolute inset-0 bg-[radial-gradient(90%_70%_at_50%_35%,rgba(237,234,228,0.09),transparent_65%)]" />
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-transparent to-ink/20" />
 
         <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 px-4 pb-3">

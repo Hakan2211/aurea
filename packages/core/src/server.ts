@@ -14,7 +14,12 @@ import { JobEngine } from "./jobs.js";
 import { SystemMonitor } from "./system.js";
 import { SettingsStore } from "./settings.js";
 import { ProjectStore } from "./projects.js";
+import { Labs } from "./labs.js";
 import { VideofastAdapter } from "./adapters/videofast.js";
+import { ImageAdapter } from "./adapters/image.js";
+import { TtsAdapter } from "./adapters/tts.js";
+import { MusicAdapter } from "./adapters/music.js";
+import { LtxVideoAdapter } from "./adapters/ltx.js";
 import { serveMedia } from "./media.js";
 import { appRouter } from "./router.js";
 import type { Context } from "./trpc.js";
@@ -45,12 +50,19 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
   const projects = new ProjectStore(settings);
   projects.ensureDefault();
   const engine = new JobEngine({
-    adapters: [new VideofastAdapter(settings)],
+    adapters: [
+      new VideofastAdapter(settings),
+      new ImageAdapter(settings),
+      new TtsAdapter(settings),
+      new MusicAdapter(settings),
+      new LtxVideoAdapter(settings),
+    ],
     storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),
     importOutput: (job) => projects.importJobOutput(job),
   });
   const monitor = new SystemMonitor(settings);
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects };
+  const labs = new Labs(settings);
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,

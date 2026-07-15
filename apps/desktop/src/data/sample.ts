@@ -221,6 +221,10 @@ export interface VoiceTake {
   waveSeed: number;
   /** the take loaded in the player */
   selected?: boolean;
+  /** playable media URL once the take is a real asset */
+  url?: string;
+  /** still synthesizing (running/queued job) */
+  generating?: boolean;
 }
 
 export const voiceLab = {
@@ -277,6 +281,8 @@ export interface MusicTrack {
   /** the track loaded in the inspector */
   selected?: boolean;
   generating?: { progress: number; stage: string };
+  /** playable media URL once the track is a real asset */
+  url?: string;
 }
 
 export const musicLab = {
@@ -658,6 +664,8 @@ export interface VideoTake {
   starred?: boolean;
   /** the take loaded in the preview player */
   selected?: boolean;
+  /** playable media URL once the take is a real asset */
+  url?: string;
 }
 
 export interface VideoStage {
@@ -817,6 +825,8 @@ export interface ImageTile {
   /** present while the tile is still rendering */
   generating?: { progress: number };
   liked?: boolean;
+  /** real thumbnail URL once the tile is a real asset */
+  url?: string;
 }
 
 export interface ImageHistoryEntry {
@@ -825,6 +835,8 @@ export interface ImageHistoryEntry {
   count: number;
   aspect: string;
   swatches: string[];
+  /** real thumbnail URLs paired with swatches, once the entries are assets */
+  urls?: (string | undefined)[];
   /** the batch currently shown on the canvas */
   current?: boolean;
 }

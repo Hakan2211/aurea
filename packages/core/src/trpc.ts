@@ -3,6 +3,7 @@ import type { JobEngine } from "./jobs.js";
 import type { SystemMonitor } from "./system.js";
 import type { SettingsStore } from "./settings.js";
 import type { ProjectStore } from "./projects.js";
+import type { Labs } from "./labs.js";
 
 export interface Context {
   /** did the request present the boot token (HTTP bearer / WS connectionParams)? */
@@ -11,6 +12,7 @@ export interface Context {
   monitor: SystemMonitor;
   settings: SettingsStore;
   projects: ProjectStore;
+  labs: Labs;
 }
 
 const t = initTRPC.context<Context>().create();

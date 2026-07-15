@@ -39,10 +39,31 @@ export function detectVideofastDir(): string | null {
   return null;
 }
 
+/** Probe the machine's known engine install conventions. Candidates come from
+ * the videofast operator docs (each engine owns one venv); first hit wins. */
+export function detectEnginePaths(): Pick<
+  Settings["engines"],
+  "chatterboxPython" | "qwenTtsPython" | "acestepDir"
+> {
+  const first = (candidates: string[], probe: (c: string) => string = (c) => c) =>
+    candidates.find((c) => fs.existsSync(probe(c))) ?? null;
+  return {
+    chatterboxPython: first(["D:/ttsenvs/chatterbox/Scripts/python.exe"]),
+    qwenTtsPython: first([
+      path.join(homedir(), "localai", "envs", "qwen-tts", "Scripts", "python.exe"),
+    ]),
+    acestepDir: first(
+      [path.join(homedir(), "acestep1.5", "ACE-Step-1.5"), "D:/acestep1.5/ACE-Step-1.5"],
+      (c) => path.join(c, ".venv", "Scripts", "python.exe"),
+    ),
+  };
+}
+
 const defaults = (): Settings =>
   settingsSchema.parse({
     storage: { dataRoot: process.env.AUREA_DATA_ROOT ?? path.join(homedir(), "Aurea") },
     paths: { videofastDir: detectVideofastDir() },
+    engines: detectEnginePaths(),
     providers: {},
     general: {},
     advanced: {},
@@ -65,6 +86,7 @@ export class SettingsStore extends EventEmitter {
       ...this.settings,
       storage: { ...this.settings.storage, ...patch.storage },
       paths: { ...this.settings.paths, ...patch.paths },
+      engines: { ...this.settings.engines, ...patch.engines },
       providers: { ...this.settings.providers, ...patch.providers },
       general: { ...this.settings.general, ...patch.general },
       advanced: { ...this.settings.advanced, ...patch.advanced },
@@ -97,9 +119,21 @@ export class SettingsStore extends EventEmitter {
     try {
       const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
       const settings = settingsSchema.parse(raw);
+      let dirty = false;
       // re-run detection if the stored path went stale (repo moved)
       if (settings.paths.videofastDir && !isVideofastRoot(settings.paths.videofastDir)) {
         settings.paths.videofastDir = detectVideofastDir();
+        dirty = true;
+      }
+      // engine paths added after this settings file was written: detect once
+      const detected = detectEnginePaths();
+      for (const key of ["chatterboxPython", "qwenTtsPython", "acestepDir"] as const) {
+        if (settings.engines[key] === null && detected[key] !== null) {
+          settings.engines[key] = detected[key];
+          dirty = true;
+        }
+      }
+      if (dirty) {
         this.settings = settings;
         this.save();
       }

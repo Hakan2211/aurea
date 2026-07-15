@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { jobSchema, type EnqueueJob, type Job, type JobPriority } from "@aurea/shared";
+import { jobSchema, type EnqueueJobResolved, type Job, type JobPriority } from "@aurea/shared";
 import type { AdapterRun, EngineAdapter } from "./adapters/types.js";
 
 const PRIORITY_RANK: Record<JobPriority, number> = { interactive: 0, preview: 1, batch: 2 };
@@ -98,7 +98,7 @@ export class JobEngine extends EventEmitter {
       .map(({ startedAt: _s, seq: _q, ...job }) => job);
   }
 
-  enqueue(input: Required<Pick<EnqueueJob, "priority">> & EnqueueJob): Job {
+  enqueue(input: EnqueueJobResolved): Job {
     const job: TrackedJob = {
       id: `j-${randomUUID().slice(0, 8)}`,
       status: "queued",

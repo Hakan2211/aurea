@@ -2,19 +2,34 @@
  * the desktop renderer, the CLI, and the MCP server are all equal clients. */
 
 import { on } from "node:events";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   enqueueJobSchema,
+  imageGenerateSchema,
+  musicGenerateSchema,
   projectCreateSchema,
   projectRenameSchema,
   settingsUpdateSchema,
+  ttsGenerateSchema,
+  videoGenerateSchema,
   type Job,
+  type JobPayload,
   type Vram,
 } from "@aurea/shared";
+import { labEnqueue } from "./labs.js";
 import { scanLibrary } from "./library.js";
-import { procedure, router } from "./trpc.js";
+import { procedure, router, type Context } from "./trpc.js";
 
 const jobId = z.object({ id: z.string() });
+
+/** enqueue a lab job into the target project (which must actually exist) */
+function generate(ctx: Context, payload: JobPayload, project: string): Job {
+  if (!ctx.projects.list().some((p) => p.id === project)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `unknown project "${project}"` });
+  }
+  return ctx.engine.enqueue(labEnqueue(payload, project));
+}
 
 export const appRouter = router({
   system: router({
@@ -71,6 +86,37 @@ export const appRouter = router({
     list: procedure.query(({ ctx }) => ({
       assets: scanLibrary(ctx.settings.get().storage.dataRoot, ctx.projects),
     })),
+  }),
+
+  labs: router({
+    image: router({
+      catalog: procedure.query(({ ctx }) => ctx.labs.imageCatalog()),
+      generate: procedure.input(imageGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "image", ...payload }, project);
+      }),
+    }),
+    voice: router({
+      catalog: procedure.query(({ ctx }) => ctx.labs.voiceCatalog()),
+      generate: procedure.input(ttsGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "tts", ...payload }, project);
+      }),
+    }),
+    music: router({
+      catalog: procedure.query(({ ctx }) => ctx.labs.musicCatalog()),
+      generate: procedure.input(musicGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "music", ...payload }, project);
+      }),
+    }),
+    video: router({
+      catalog: procedure.query(({ ctx }) => ctx.labs.videoCatalog()),
+      generate: procedure.input(videoGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "video", ...payload }, project);
+      }),
+    }),
   }),
 
   settings: router({

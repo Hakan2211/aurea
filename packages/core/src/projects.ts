@@ -127,8 +127,9 @@ export class ProjectStore {
 
     const base = slugify(job.title || path.basename(job.output, path.extname(job.output)));
     if (fs.statSync(job.output).isFile()) {
-      const kind = EXT_KIND[path.extname(job.output).slice(1).toLowerCase()];
-      return this.importFile(id, kind ?? JOB_KIND_DIR[job.kind], job.output, base);
+      // the job kind decides the shelf (a music wav is music, not voice);
+      // the extension only speaks for files the kind can't explain
+      return this.importFile(id, JOB_KIND_DIR[job.kind], job.output, base);
     }
 
     let primary: string | undefined;

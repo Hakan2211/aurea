@@ -22,6 +22,7 @@ import {
 import { useMusicLab } from "@/hooks";
 import type { MusicStem, MusicTrack } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Waveform, cx } from "@/components/ui";
+import { useAudioPlayer, type AudioPlayer } from "@/components/useAudioPlayer";
 
 /* Music lab — UI-Design/Music lab.jpg. Create panel (description → style →
  * duration → arrangement → cloned-voice vocals) over ACE-Step local; generated
@@ -64,10 +65,11 @@ function CreatePanel() {
   const [styles, setStyles] = useState(lab.styles);
   const [duration, setDuration] = useState(lab.durationSec);
   const [arrangement, setArrangement] = useState(lab.arrangement);
-  const [voiceId, setVoiceId] = useState(lab.singVoices[0].id);
+  const [voiceId, setVoiceId] = useState(lab.singVoices[0]?.id ?? "");
   const [voiceOpen, setVoiceOpen] = useState(false);
 
   const voice = lab.singVoices.find((v) => v.id === voiceId) ?? lab.singVoices[0];
+  const canGenerate = !lab.busy && !!description.trim();
   const fmt = (sec: number) =>
     `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
 
@@ -213,8 +215,23 @@ function CreatePanel() {
       </div>
 
       <div className="p-4 pt-2">
-        <GoldButton className="w-full justify-center py-3 text-[13px] uppercase tracking-widest">
-          <Sparkles size={14} /> Generate
+        <GoldButton
+          onClick={() =>
+            canGenerate &&
+            lab.generate({
+              description,
+              styles,
+              durationSec: duration,
+              arrangement,
+              singVoice: arrangement === "vocals" ? voiceId : undefined,
+            })
+          }
+          className={cx(
+            "w-full justify-center py-3 text-[13px] uppercase tracking-widest",
+            !canGenerate && "pointer-events-none opacity-40",
+          )}
+        >
+          <Sparkles size={14} /> {lab.busy ? "Generating…" : "Generate"}
         </GoldButton>
         <p className="mt-1.5 text-center text-[10px] text-fog/70">{lab.engine.note}</p>
       </div>
@@ -227,14 +244,14 @@ function CreatePanel() {
 function TrackCard({
   track,
   active,
+  player,
   onSelect,
 }: {
   track: MusicTrack;
   active: boolean;
+  player: AudioPlayer;
   onSelect: () => void;
 }) {
-  const [playing, setPlaying] = useState(false);
-
   if (track.generating) {
     return (
       <div className="rounded-xl border hairline bg-surface/50 p-3.5">
@@ -261,6 +278,7 @@ function TrackCard({
     );
   }
 
+  const loaded = !!track.url && player.src === track.url;
   return (
     <button
       onClick={onSelect}
@@ -276,21 +294,26 @@ function TrackCard({
         <span
           onClick={(e) => {
             e.stopPropagation();
-            setPlaying((p) => !p);
+            player.toggle(track.url);
           }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110"
         >
-          {playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+          {loaded && player.playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-[13px] font-medium text-cream">{track.title}</span>
             {track.starred && <Star size={11} className="shrink-0 text-gold" fill="currentColor" />}
             <Chip tone="muted" className="ml-auto shrink-0 text-[9px] tabular-nums">
-              {track.bpm} BPM
+              {track.bpm ? `${track.bpm} BPM` : "—"}
             </Chip>
           </div>
-          <Waveform seed={track.waveSeed} bars={72} played={active ? 0.29 : 0} className="mt-1.5 h-7!" />
+          <Waveform
+            seed={track.waveSeed}
+            bars={72}
+            played={loaded ? player.played : 0}
+            className="mt-1.5 h-7!"
+          />
           <div className="mt-1 text-[10px] tabular-nums text-fog">{track.duration}</div>
         </div>
         <MoreVertical size={14} className="shrink-0 text-fog/60" />
@@ -301,9 +324,11 @@ function TrackCard({
 
 function TracksPanel({
   trackId,
+  player,
   onSelect,
 }: {
   trackId: string;
+  player: AudioPlayer;
   onSelect: (id: string) => void;
 }) {
   const lab = useMusicLab();
@@ -325,7 +350,13 @@ function TracksPanel({
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-3">
         {lab.tracks.map((t) => (
-          <TrackCard key={t.id} track={t} active={t.id === trackId} onSelect={() => onSelect(t.id)} />
+          <TrackCard
+            key={t.id}
+            track={t}
+            active={t.id === trackId}
+            player={player}
+            onSelect={() => onSelect(t.id)}
+          />
         ))}
       </div>
 
@@ -340,7 +371,7 @@ function TracksPanel({
 
 const stemIcons = { vocals: Mic, drums: Drum, bass: Guitar, other: AudioWaveform } as const;
 
-function StemsInspector({ track }: { track: MusicTrack }) {
+function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPlayer }) {
   const lab = useMusicLab();
   const [tab, setTab] = useState<"stems" | "lyrics" | "details">("stems");
   const [stems, setStems] = useState<MusicStem[]>(lab.stems);
@@ -364,12 +395,17 @@ function StemsInspector({ track }: { track: MusicTrack }) {
               )}
             </div>
             <p className="mt-0.5 text-[10px] tabular-nums text-fog">
-              {track.duration} · {track.bpm} BPM · {track.key}
+              {track.duration} · {track.bpm ? `${track.bpm} BPM` : "—"} · {track.key || "—"}
             </p>
           </div>
           <MoreVertical size={14} className="shrink-0 text-fog/60" />
         </div>
-        <Waveform seed={track.waveSeed} bars={88} played={0.29} className="mt-3 h-9!" />
+        <Waveform
+          seed={track.waveSeed}
+          bars={88}
+          played={track.url && player.src === track.url ? player.played : 0}
+          className="mt-3 h-9!"
+        />
       </div>
 
       {/* tabs */}
@@ -465,8 +501,8 @@ function StemsInspector({ track }: { track: MusicTrack }) {
             {(
               [
                 ["Engine", "ACE-Step · local"],
-                ["Tempo", `${track.bpm} BPM`],
-                ["Key", track.key],
+                ["Tempo", track.bpm ? `${track.bpm} BPM` : "—"],
+                ["Key", track.key || "—"],
                 ["Duration", track.duration],
                 ["Arrangement", track.arrangement],
                 ["Format", "WAV · 48 kHz · stems"],
@@ -497,17 +533,18 @@ function StemsInspector({ track }: { track: MusicTrack }) {
 
 export function MusicLab() {
   const lab = useMusicLab();
+  const player = useAudioPlayer();
   const playable = lab.tracks.filter((t) => !t.generating);
   const [trackId, setTrackId] = useState(
-    (lab.tracks.find((t) => t.selected) ?? playable[0]).id,
+    (lab.tracks.find((t) => t.selected) ?? playable[0])?.id ?? "",
   );
-  const track = playable.find((t) => t.id === trackId) ?? playable[0];
+  const track: MusicTrack | undefined = playable.find((t) => t.id === trackId) ?? playable[0];
 
   return (
     <div className="flex h-full">
       <CreatePanel />
-      <TracksPanel trackId={track.id} onSelect={setTrackId} />
-      <StemsInspector track={track} />
+      <TracksPanel trackId={track?.id ?? ""} player={player} onSelect={setTrackId} />
+      {track && <StemsInspector track={track} player={player} />}
     </div>
   );
 }

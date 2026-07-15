@@ -27,6 +27,8 @@ const PROMPT_MAX = 1000;
 /** seed of the batch on the canvas — what the refresh button restores */
 const LAST_SEED = 746583928;
 
+type Aspect = "1:1" | "3:2" | "16:9" | "4:3" | "9:16";
+
 /* ---------- left panel ---------- */
 
 function PanelLabel({ children, hint }: { children: React.ReactNode; hint?: boolean }) {
@@ -43,7 +45,7 @@ function ParamsPanel() {
   const [prompt, setPrompt] = useState(lab.prompt);
   const [modelId, setModelId] = useState(lab.models[0].id);
   const [modelOpen, setModelOpen] = useState(false);
-  const [aspect, setAspect] = useState("3:2");
+  const [aspect, setAspect] = useState<Aspect>("3:2");
   const [preset, setPreset] = useState("Cinematic");
   const [seed, setSeed] = useState(String(lab.seed));
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -105,7 +107,7 @@ function ParamsPanel() {
       <section>
         <PanelLabel>Aspect ratio</PanelLabel>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {lab.aspects.map((a) => (
+          {(lab.aspects as Aspect[]).map((a) => (
             <button
               key={a}
               onClick={() => setAspect(a)}
@@ -194,8 +196,21 @@ function ParamsPanel() {
       </section>
 
       <div className="mt-auto flex gap-px pt-2">
-        <button className="flex flex-1 items-center justify-center gap-2 rounded-l-xl bg-gradient-to-b from-gold to-gold-deep py-2.5 text-[13px] font-semibold text-ink transition hover:brightness-110 active:brightness-95">
-          <Sparkles size={13} /> Generate
+        <button
+          disabled={lab.busy || !prompt.trim()}
+          onClick={() =>
+            lab.generate({
+              prompt,
+              model: modelId,
+              aspect,
+              preset,
+              seed: /^\d+$/.test(seed) ? Number(seed) : undefined,
+              count: 1,
+            })
+          }
+          className="flex flex-1 items-center justify-center gap-2 rounded-l-xl bg-gradient-to-b from-gold to-gold-deep py-2.5 text-[13px] font-semibold text-ink transition hover:brightness-110 active:brightness-95 disabled:pointer-events-none disabled:opacity-50"
+        >
+          <Sparkles size={13} /> {lab.busy ? "Generating…" : "Generate"}
         </button>
         <button className="flex w-9 items-center justify-center rounded-r-xl bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110">
           <ChevronDown size={14} />
@@ -226,8 +241,17 @@ function ResultTile({ tile }: { tile: ImageTile }) {
   return (
     <div className="group relative overflow-hidden rounded-xl">
       <div className={cx("absolute inset-0", tile.swatch)} />
-      {/* stand-in composition lines until real thumbnails flow through the seam */}
-      <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
+      {tile.url ? (
+        <img
+          src={tile.url}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      ) : (
+        /* stand-in composition lines until real thumbnails flow through the seam */
+        <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
+      )}
 
       <button
         className={cx(
@@ -274,9 +298,13 @@ function HistoryRow({ entry }: { entry: ImageHistoryEntry }) {
       )}
     >
       <div className="flex gap-1">
-        {entry.swatches.map((sw, i) => (
-          <span key={i} className={cx("h-10 w-10 rounded-md", sw)} />
-        ))}
+        {entry.swatches.map((sw, i) =>
+          entry.urls?.[i] ? (
+            <img key={i} src={entry.urls[i]} alt="" className="h-10 w-10 rounded-md object-cover" />
+          ) : (
+            <span key={i} className={cx("h-10 w-10 rounded-md", sw)} />
+          ),
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-cream/85">{entry.when}</div>

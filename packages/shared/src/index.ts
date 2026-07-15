@@ -17,17 +17,76 @@ export const jobPrioritySchema = z.enum(["interactive", "preview", "batch"]);
 export type JobPriority = z.infer<typeof jobPrioritySchema>;
 
 /** What an engine adapter needs to actually execute the job. Jobs without a
- * payload run on the simulated worker (UI demos, seed fixtures). */
+ * payload run on the simulated worker (UI demos, seed fixtures). Payloads
+ * carry user intent — adapters map them onto engine flags and ignore knobs
+ * their engine doesn't have. */
+export const imageAspectSchema = z.enum(["1:1", "3:2", "16:9", "4:3", "9:16"]);
+export type ImageAspect = z.infer<typeof imageAspectSchema>;
+
+export const videofastPayloadSchema = z.object({
+  type: z.literal("videofast"),
+  /** account id — resolved to <videofastDir>/accounts/<id>.json */
+  account: z.string().min(1),
+  topic: z.string().min(1),
+  seed: z.number().int().optional(),
+  /** third topic-CSV cell: title hint, or attribution for the quote format */
+  titleHint: z.string().optional(),
+});
+
+export const imagePayloadSchema = z.object({
+  type: z.literal("image"),
+  prompt: z.string().min(1),
+  /** engine id from the image-lab catalog (krea2 / z-image today) */
+  model: z.string().default("krea2"),
+  aspect: imageAspectSchema.default("3:2"),
+  /** style preset name folded into the prompt by the adapter */
+  preset: z.string().optional(),
+  seed: z.number().int().optional(),
+  /** images per run — each lands as its own asset */
+  count: z.number().int().min(1).max(4).default(1),
+});
+
+export const ttsPayloadSchema = z.object({
+  type: z.literal("tts"),
+  text: z.string().min(1),
+  /** character/voice id from the voice-lab roster */
+  voice: z.string().min(1),
+  engine: z.string().default("chatterbox"),
+  pace: z.number().min(0.5).max(1.5).default(1),
+  emotion: z.number().min(0).max(1).default(0.65),
+});
+
+export const musicPayloadSchema = z.object({
+  type: z.literal("music"),
+  description: z.string().min(1),
+  styles: z.array(z.string()).default([]),
+  durationSec: z.number().int().min(5).max(180).default(30),
+  arrangement: z.enum(["instrumental", "vocals"]).default("instrumental"),
+  /** cloned character voice for sung vocals (arrangement === "vocals") */
+  singVoice: z.string().optional(),
+});
+
+export const videoPayloadSchema = z.object({
+  type: z.literal("video"),
+  prompt: z.string().min(1),
+  engine: z.string().default("ltx2"),
+  /** start frame as a dataRoot-relative library path (i2v); required by LTX */
+  startFrame: z.string().optional(),
+  /** dialogue audio as a dataRoot-relative library path (switches to ia2v lip-sync) */
+  audio: z.string().optional(),
+  durationSec: z.number().min(1).max(15).default(5),
+  /** "1280 × 720" style; adapter parses W/H */
+  resolution: z.string().default("1280 × 720"),
+  motionStrength: z.number().min(0).max(1).optional(),
+  seed: z.number().int().optional(),
+});
+
 export const jobPayloadSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("videofast"),
-    /** account id — resolved to <videofastDir>/accounts/<id>.json */
-    account: z.string().min(1),
-    topic: z.string().min(1),
-    seed: z.number().int().optional(),
-    /** third topic-CSV cell: title hint, or attribution for the quote format */
-    titleHint: z.string().optional(),
-  }),
+  videofastPayloadSchema,
+  imagePayloadSchema,
+  ttsPayloadSchema,
+  musicPayloadSchema,
+  videoPayloadSchema,
 ]);
 export type JobPayload = z.infer<typeof jobPayloadSchema>;
 
@@ -64,6 +123,26 @@ export const enqueueJobSchema = z.object({
   payload: jobPayloadSchema.optional(),
 });
 export type EnqueueJob = z.input<typeof enqueueJobSchema>;
+/** post-parse shape (defaults applied) — what JobEngine.enqueue actually takes */
+export type EnqueueJobResolved = z.infer<typeof enqueueJobSchema>;
+
+/* ---------- lab generate inputs ---------- */
+/* Each lab's generate mutation takes its payload (minus the discriminant)
+ * plus the project the artifact should land in. */
+
+const projectField = { project: z.string().min(1) };
+
+export const imageGenerateSchema = imagePayloadSchema.omit({ type: true }).extend(projectField);
+export type ImageGenerate = z.input<typeof imageGenerateSchema>;
+
+export const ttsGenerateSchema = ttsPayloadSchema.omit({ type: true }).extend(projectField);
+export type TtsGenerate = z.input<typeof ttsGenerateSchema>;
+
+export const musicGenerateSchema = musicPayloadSchema.omit({ type: true }).extend(projectField);
+export type MusicGenerate = z.input<typeof musicGenerateSchema>;
+
+export const videoGenerateSchema = videoPayloadSchema.omit({ type: true }).extend(projectField);
+export type VideoGenerate = z.input<typeof videoGenerateSchema>;
 
 /* ---------- system ---------- */
 
@@ -109,6 +188,21 @@ export const settingsSchema = z.object({
     /** videofast repo root — drives the first engine adapter; null until detected/set */
     videofastDir: z.string().nullable().default(null),
   }),
+  /** Where the local generation engines live — detected on boot from the
+   * machine's known install conventions, editable like every other path.
+   * null = not found, the matching lab reports the engine unavailable. */
+  engines: z
+    .object({
+      /** ComfyUI HTTP API (image gen + LTX video) */
+      comfyUrl: z.string().default("http://127.0.0.1:8000"),
+      /** python.exe of the Chatterbox TTS venv (character voices) */
+      chatterboxPython: z.string().nullable().default(null),
+      /** python.exe of the Qwen3-TTS venv (narrator voices) */
+      qwenTtsPython: z.string().nullable().default(null),
+      /** ACE-Step 1.5 checkout (its .venv/Scripts/python.exe runs music gen) */
+      acestepDir: z.string().nullable().default(null),
+    })
+    .default({}),
   providers: z.object({
     default: z.enum(["claude", "openrouter", "ollama"]).default("claude"),
     openrouterApiKey: z.string().default(""),
@@ -133,6 +227,7 @@ export type Settings = z.infer<typeof settingsSchema>;
 export const settingsUpdateSchema = z.object({
   storage: settingsSchema.shape.storage.partial().optional(),
   paths: settingsSchema.shape.paths.partial().optional(),
+  engines: settingsSchema.shape.engines.removeDefault().partial().optional(),
   providers: settingsSchema.shape.providers.partial().optional(),
   general: settingsSchema.shape.general.partial().optional(),
   advanced: settingsSchema.shape.advanced.partial().optional(),

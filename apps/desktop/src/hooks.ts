@@ -1,5 +1,15 @@
 import { useMemo } from "react";
-import type { LibraryAsset as CoreAsset, LibraryKind, Settings } from "@aurea/shared";
+import type {
+  ImageGenerate,
+  Job,
+  JobPayload,
+  LibraryAsset as CoreAsset,
+  LibraryKind,
+  MusicGenerate,
+  Settings,
+  TtsGenerate,
+  VideoGenerate,
+} from "@aurea/shared";
 import {
   assetLibrary,
   assets,
@@ -14,7 +24,12 @@ import {
   videoLab,
   voiceLab,
   vram,
+  type ImageHistoryEntry,
+  type ImageTile,
   type LibraryAsset,
+  type MusicTrack,
+  type VideoTake,
+  type VoiceTake,
 } from "@/data/sample";
 import { FORMATS, STYLE_PACKS } from "@/data/formats";
 import { useMediaBase } from "@/StudiodProvider";
@@ -71,16 +86,224 @@ export function useFormats() {
   return { formats: FORMATS, packs: STYLE_PACKS };
 }
 
+/* ---------- labs (LIVE) ----------
+ *
+ * A lab's results are just two live streams the app already has: its running
+ * jobs (generating tiles, progress pushed by the snapshot subscription) and
+ * its finished assets (the library scan, invalidated when a job completes).
+ * The lab routers only add catalogs + generate mutations. Sample data still
+ * stands in for a dead core, and for knobs no store owns yet (stems, rating). */
+
+const LAB_SWATCHES = [
+  "bg-gradient-to-br from-[#5a4426] to-[#170f06]",
+  "bg-gradient-to-br from-[#2c3a4a] to-[#0a0e14]",
+  "bg-gradient-to-br from-[#2a3a2e] to-[#0b110d]",
+  "bg-gradient-to-br from-[#2f2a4a] to-[#0d0b16]",
+  "bg-gradient-to-br from-[#432f3a] to-[#140d11]",
+  "bg-gradient-to-br from-[#3a2a1a] to-[#120d06]",
+];
+const labSwatch = (id: string) => LAB_SWATCHES[waveSeed(id) % LAB_SWATCHES.length];
+
+const strip = (name: string) => name.replace(/\.[^.]+$/, "");
+
+function relTime(iso: string): string {
+  const mins = Math.max(0, (Date.now() - new Date(iso).getTime()) / 60_000);
+  if (mins < 2) return "Just now";
+  if (mins < 60) return `${Math.round(mins)}m ago`;
+  if (mins < 24 * 60) return `${Math.round(mins / 60)}h ago`;
+  if (mins < 48 * 60) return "Yesterday";
+  return `${Math.round(mins / (24 * 60))} days ago`;
+}
+
+type LabJob<T extends JobPayload["type"]> = Job & { payload: Extract<JobPayload, { type: T }> };
+
+const labJobs = <T extends JobPayload["type"]>(all: Job[] | undefined, type: T) =>
+  (all ?? []).filter(
+    (j): j is LabJob<T> =>
+      j.payload?.type === type && (j.status === "running" || j.status === "queued"),
+  );
+
+/** the project new lab takes land in — the switcher's active (first) project */
+function useActiveProjectId(): string {
+  const list = trpc.projects.list.useQuery(undefined, { placeholderData: projects }).data;
+  return list?.[0]?.id ?? "";
+}
+
+/** shared per-lab live inputs: catalog + assets of the lab's kind + its jobs */
+function useLabData(kind: LibraryKind) {
+  const media = useMediaBase();
+  const assets = trpc.library.list.useQuery().data?.assets;
+  const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const invalidate = { onSuccess: () => void utils.jobs.invalidate() };
+  return {
+    media,
+    project,
+    invalidate,
+    jobsData,
+    kindAssets: useMemo(() => assets?.filter((a) => a.kind === kind), [assets, kind]),
+  };
+}
+
 export function useImageLab() {
-  return imageLab;
+  const catalog = trpc.labs.image.catalog.useQuery().data;
+  const { media, project, invalidate, jobsData, kindAssets } = useLabData("image");
+  const mutation = trpc.labs.image.generate.useMutation(invalidate);
+  const { mutate } = mutation;
+
+  return useMemo(() => {
+    const generate = (input: Omit<ImageGenerate, "project">) => mutate({ ...input, project });
+    if (!catalog || !kindAssets) return { ...imageLab, generate, busy: false };
+
+    const active = labJobs(jobsData, "image");
+    const tiles: ImageTile[] = [
+      ...active.flatMap((j) =>
+        Array.from({ length: j.payload.count }, (_, i) => ({
+          id: `${j.id}:${i}`,
+          swatch: labSwatch(`${j.id}${i}`),
+          generating: { progress: j.progress },
+        })),
+      ),
+      ...kindAssets.map((a) => ({
+        id: a.id,
+        swatch: labSwatch(a.id),
+        url: media ? media(a.url) : undefined,
+      })),
+    ].slice(0, 4);
+
+    // history = the image roll grouped by day, newest first
+    const byDay = new Map<string, CoreAsset[]>();
+    for (const a of kindAssets) {
+      const day = a.createdAt.slice(0, 10);
+      byDay.set(day, [...(byDay.get(day) ?? []), a]);
+    }
+    const history: ImageHistoryEntry[] = [...byDay.entries()].slice(0, 6).map(([day, group], i) => ({
+      id: day,
+      when: relTime(group[0].createdAt),
+      count: group.length,
+      aspect: "",
+      swatches: group.slice(0, 4).map((a) => labSwatch(a.id)),
+      urls: group.slice(0, 4).map((a) => (media ? media(a.url) : undefined)),
+      current: i === 0,
+    }));
+
+    return {
+      ...imageLab,
+      models: catalog.models.map(({ available, ...m }) =>
+        available ? m : { ...m, note: "not installed" },
+      ),
+      aspects: catalog.aspects,
+      presets: catalog.presets,
+      batch: tiles,
+      history,
+      generate,
+      busy: mutation.isPending || active.length > 0,
+    };
+  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending]);
 }
 
 export function useVoiceLab() {
-  return voiceLab;
+  const catalog = trpc.labs.voice.catalog.useQuery().data;
+  const { media, project, invalidate, jobsData, kindAssets } = useLabData("audio");
+  const mutation = trpc.labs.voice.generate.useMutation(invalidate);
+  const { mutate } = mutation;
+
+  return useMemo(() => {
+    const generate = (input: Omit<TtsGenerate, "project">) => mutate({ ...input, project });
+    if (!catalog || !kindAssets) return { ...voiceLab, generate, busy: false };
+
+    const active = labJobs(jobsData, "tts");
+    const takes: VoiceTake[] = [
+      ...active.map((j) => ({
+        id: j.id,
+        label: j.title,
+        duration: j.stage ?? "Queued",
+        rating: 0,
+        waveSeed: waveSeed(j.id),
+        generating: true,
+      })),
+      ...kindAssets.map((a, i) => ({
+        id: a.id,
+        label: strip(a.name),
+        duration: fmtBytes(a.sizeBytes),
+        rating: 0,
+        waveSeed: waveSeed(a.id),
+        url: media ? media(a.url) : undefined,
+        selected: i === 0,
+      })),
+    ].slice(0, 14);
+
+    return {
+      ...voiceLab,
+      engines: catalog.engines.map(({ available, ...e }) =>
+        available ? e : { ...e, note: "not installed" },
+      ),
+      voices: catalog.voices.map((v) => ({ ...v, swatch: labSwatch(v.id) })),
+      scriptMax: catalog.scriptMax,
+      takes,
+      playback: { position: "00:00.0", total: "", played: 0 },
+      generate,
+      busy: mutation.isPending || active.length > 0,
+    };
+  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending]);
 }
 
+const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
+
 export function useMusicLab() {
-  return musicLab;
+  const catalog = trpc.labs.music.catalog.useQuery().data;
+  const { media, project, invalidate, jobsData, kindAssets } = useLabData("music");
+  const mutation = trpc.labs.music.generate.useMutation(invalidate);
+  const { mutate } = mutation;
+
+  return useMemo(() => {
+    const generate = (input: Omit<MusicGenerate, "project">) => mutate({ ...input, project });
+    if (!catalog || !kindAssets) return { ...musicLab, generate, busy: false };
+
+    const active = labJobs(jobsData, "music");
+    const tracks: MusicTrack[] = [
+      ...active.map((j) => ({
+        id: j.id,
+        title: j.title,
+        bpm: 0,
+        key: "",
+        duration: fmtClock(j.payload.durationSec),
+        waveSeed: waveSeed(j.id),
+        swatch: labSwatch(j.id),
+        arrangement: j.payload.arrangement,
+        generating: { progress: j.progress, stage: j.stage ?? "Queued" },
+      })),
+      ...kindAssets.map((a, i) => ({
+        id: a.id,
+        title: strip(a.name),
+        bpm: 0,
+        key: "",
+        duration: fmtBytes(a.sizeBytes),
+        waveSeed: waveSeed(a.id),
+        swatch: labSwatch(a.id),
+        arrangement: "instrumental" as const,
+        url: media ? media(a.url) : undefined,
+        selected: i === 0,
+      })),
+    ].slice(0, 12);
+
+    return {
+      ...musicLab,
+      engine: {
+        label: catalog.engine.label,
+        note: catalog.engine.available ? catalog.engine.note : "not installed",
+      },
+      styleLibrary: catalog.styleLibrary,
+      durationMin: catalog.durationMin,
+      durationMax: catalog.durationMax,
+      descriptionMax: catalog.descriptionMax,
+      singVoices: catalog.singVoices,
+      tracks,
+      generate,
+      busy: mutation.isPending || active.length > 0,
+    };
+  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending]);
 }
 
 /* ---------- asset library (LIVE) ---------- */
@@ -178,7 +401,100 @@ export function useAssetLibrary() {
 }
 
 export function useVideoLab() {
-  return videoLab;
+  const catalog = trpc.labs.video.catalog.useQuery().data;
+  const { media, project, invalidate, jobsData, kindAssets } = useLabData("video");
+  const images = trpc.library.list.useQuery().data?.assets.filter((a) => a.kind === "image");
+  const mutation = trpc.labs.video.generate.useMutation(invalidate);
+  const { mutate } = mutation;
+
+  return useMemo(() => {
+    if (!catalog || !kindAssets) {
+      return {
+        ...videoLab,
+        generate: (_: Omit<VideoGenerate, "project">) => {},
+        busy: false,
+        canGenerate: true,
+      };
+    }
+
+    // newest image in the library anchors identity (LTX i2v start frame)
+    const frame = images?.[0];
+    const startFrame = frame
+      ? {
+          name: frame.name,
+          meta: `${fmtBytes(frame.sizeBytes)} · ${frame.ext.toUpperCase()}`,
+          swatch: labSwatch(frame.id),
+          url: media ? media(frame.url) : undefined,
+          relPath: frame.relPath,
+        }
+      : { ...videoLab.startFrame, url: undefined, relPath: undefined };
+
+    const generate = (input: Omit<VideoGenerate, "project" | "startFrame">) =>
+      mutate({ ...input, startFrame: startFrame.relPath, project });
+
+    const takes: VideoTake[] = kindAssets.slice(0, 8).map((a, i) => ({
+      id: a.id,
+      label: strip(a.name),
+      swatch: labSwatch(a.id),
+      url: media ? media(a.url) : undefined,
+      selected: i === 0,
+    }));
+
+    // the job rail mirrors the lab's most relevant video job
+    const active = labJobs(jobsData, "video");
+    const j = active[0] ?? (jobsData ?? []).find((x) => x.payload?.type === "video");
+    const stageStatus = (mine: "queued" | "running", after: boolean) =>
+      j!.status === mine ? ("running" as const) : after ? ("completed" as const) : ("pending" as const);
+    const job = j
+      ? {
+          id: j.id,
+          status: j.status.charAt(0).toUpperCase() + j.status.slice(1),
+          elapsed: j.elapsed ?? "",
+          stages: [
+            {
+              id: "queue",
+              label: "Queued",
+              detail: `${j.priority} priority`,
+              status: stageStatus("queued", j.status !== "queued"),
+            },
+            {
+              id: "render",
+              label: j.stage ?? "Rendering",
+              detail: j.detail ?? "",
+              status: stageStatus("running", j.status === "completed" || j.status === "failed"),
+              progress: j.status === "running" ? j.progress : undefined,
+            },
+            {
+              id: "deliver",
+              label: "Save to assets",
+              detail: j.status === "failed" ? (j.error ?? "failed") : "",
+              status: j.status === "completed" ? ("completed" as const) : ("pending" as const),
+            },
+          ],
+        }
+      : { id: "—", status: "Idle", elapsed: "", stages: [] };
+
+    return {
+      ...videoLab,
+      engines: catalog.engines.map(({ available, ...e }) =>
+        available ? e : { ...e, note: "not installed" },
+      ),
+      engineNotes: catalog.engineNotes,
+      durations: catalog.durations,
+      duration: "5 seconds",
+      resolutions: catalog.resolutions,
+      resolution: catalog.resolutions[0],
+      promptMax: catalog.promptMax,
+      tip: catalog.tip,
+      startFrame,
+      takes,
+      job,
+      playback: { position: "", total: "", played: 0 },
+      generate,
+      canGenerate: !!frame,
+      busy: mutation.isPending || active.length > 0,
+    };
+  }, [catalog, kindAssets, images, jobsData, media, project, mutate, mutation.isPending]);
 }
 
 /* sample toggle ids ↔ persisted settings fields */
