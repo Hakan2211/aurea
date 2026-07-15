@@ -162,6 +162,31 @@ export function useChat() {
   }, [query.data, jobsData, project, mutate, mutation.isPending]);
 }
 
+/* ---------- director model picker (LIVE) ---------- */
+
+export type DirectorModel = Settings["providers"]["claudeModel"];
+
+/** what the composer offers — aliases the local Claude Code resolves itself */
+export const DIRECTOR_MODELS: Array<{ id: DirectorModel; label: string; detail: string }> = [
+  { id: "sonnet", label: "Claude Sonnet", detail: "fast, everyday directing" },
+  { id: "opus", label: "Claude Opus", detail: "deepest reasoning, slower" },
+  { id: "haiku", label: "Claude Haiku", detail: "instant, lightweight" },
+];
+
+/** LIVE — persisted in ~/.aurea/settings.json; the next Director run picks it up. */
+export function useDirectorModel() {
+  const live = trpc.settings.get.useQuery().data;
+  const utils = trpc.useUtils();
+  const { mutate } = trpc.settings.update.useMutation({
+    onSuccess: (next) => utils.settings.get.setData(undefined, next),
+  });
+  return {
+    model: live?.providers.claudeModel ?? ("sonnet" as DirectorModel),
+    live: !!live,
+    setModel: (m: DirectorModel) => mutate({ providers: { claudeModel: m } }),
+  };
+}
+
 export function useFormats() {
   return { formats: FORMATS, packs: STYLE_PACKS };
 }

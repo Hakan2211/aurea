@@ -205,6 +205,8 @@ export const settingsSchema = z.object({
     .default({}),
   providers: z.object({
     default: z.enum(["claude", "openrouter", "ollama"]).default("claude"),
+    /** Claude Code model alias the Director runs on (resolved by the local CLI) */
+    claudeModel: z.enum(["sonnet", "opus", "haiku"]).default("sonnet"),
     openrouterApiKey: z.string().default(""),
     ollamaBaseUrl: z.string().default("http://localhost:11434"),
     ollamaModel: z.string().default("llama3.1:8b-instruct-q4_K_M"),

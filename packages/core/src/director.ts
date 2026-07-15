@@ -155,6 +155,8 @@ export class DirectorService extends EventEmitter {
       abortController: abort,
       cwd: this.projectDir(project),
       systemPrompt: systemPrompt(project),
+      // alias ("sonnet" | "opus" | "haiku") — the local Claude Code resolves it
+      model: this.settings.get().providers.claudeModel,
       maxTurns: MAX_TURNS,
       mcpServers: {
         aurea: createSdkMcpServer({ name: "aurea", version: "0.1.0", tools: sdkTools }),

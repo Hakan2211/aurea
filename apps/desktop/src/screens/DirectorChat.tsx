@@ -18,10 +18,20 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useAssets, useChat, useJobs, useProjects, type UiChatMessage, type UiToolCall } from "@/hooks";
+import {
+  DIRECTOR_MODELS,
+  useAssets,
+  useChat,
+  useDirectorModel,
+  useJobs,
+  useProjects,
+  type UiChatMessage,
+  type UiToolCall,
+} from "@/hooks";
 import type { Asset, Job } from "@/data/sample";
 import { composer } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Progress, Waveform, cx } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 
 const kindIcon = {
   image: FileImage,
@@ -148,16 +158,16 @@ function Message({ message }: { message: UiChatMessage }) {
         </span>
         <span>{message.time}</span>
       </div>
-      {message.text && (
-        <p
-          className={cx(
-            "whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[13px] leading-relaxed",
-            isUser ? "rounded-tr-sm bg-gold/12 text-cream" : "rounded-tl-sm bg-surface text-cream/90",
-          )}
-        >
-          {message.text}
-        </p>
-      )}
+      {message.text &&
+        (isUser ? (
+          <p className="whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-gold/12 px-4 py-2.5 text-[13px] leading-relaxed text-cream">
+            {message.text}
+          </p>
+        ) : (
+          <div className="rounded-2xl rounded-tl-sm bg-surface px-4 py-2.5 text-[13px] leading-relaxed text-cream/90">
+            <Markdown>{message.text}</Markdown>
+          </div>
+        ))}
       {message.toolCall && <ToolCallCard tool={message.toolCall} />}
       {message.card?.type === "images" && <ImageResultCard items={message.card.items} />}
       {message.card?.type === "video" && (
@@ -293,6 +303,58 @@ function AudioTakeCard({
   );
 }
 
+function ModelPicker() {
+  const { model, live, setModel } = useDirectorModel();
+  const [open, setOpen] = useState(false);
+  const current = DIRECTOR_MODELS.find((m) => m.id === model) ?? DIRECTOR_MODELS[0];
+
+  if (!live) {
+    return (
+      <span className="rounded-full border border-cream/10 px-2.5 py-1 text-[11px] text-fog">
+        {composer.model}
+      </span>
+    );
+  }
+
+  return (
+    <div className="relative">
+      {open && <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={cx(
+          "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition",
+          open ? "border-gold/40 text-cream" : "border-cream/10 text-cream/80 hover:border-gold/40",
+        )}
+      >
+        {current.label} <ChevronDown size={11} className={cx("transition", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 z-20 mb-2 w-[240px] rounded-xl border hairline bg-raised p-1 shadow-xl shadow-ink/60">
+          {DIRECTOR_MODELS.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => {
+                setModel(m.id);
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition hover:bg-cream/5"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] text-cream">{m.label}</div>
+                <div className="text-[10px] text-fog">{m.detail}</div>
+              </div>
+              {m.id === model && <Check size={13} className="shrink-0 text-gold" />}
+            </button>
+          ))}
+          <p className="border-t hairline px-2.5 pb-1 pt-1.5 text-[10px] text-fog/70">
+            Runs on your Claude Code subscription
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Composer({ busy, onSend }: { busy: boolean; onSend: (text: string) => void }) {
   const [text, setText] = useState("");
 
@@ -319,10 +381,8 @@ function Composer({ busy, onSend }: { busy: boolean; onSend: (text: string) => v
           className="w-full resize-none bg-transparent text-[13px] text-cream placeholder:text-fog focus:outline-none"
         />
         <div className="mt-2.5 flex items-center gap-2">
-          <button className="flex items-center gap-1.5 rounded-full border border-cream/10 px-2.5 py-1 text-[11px] text-cream/80 transition hover:border-gold/40">
-            {composer.model} <ChevronDown size={11} />
-          </button>
-          <Chip tone="muted">{busy ? "thinking…" : composer.estimate}</Chip>
+          <ModelPicker />
+          {busy && <Chip tone="muted">thinking…</Chip>}
           <div className="ml-auto flex items-center gap-1.5">
             <button className="flex h-8 w-8 items-center justify-center rounded-lg text-fog transition hover:bg-cream/5 hover:text-cream">
               <Paperclip size={15} />
