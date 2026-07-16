@@ -1,11 +1,13 @@
 /* Interop with videofast's <videofastDir>/batches/.gpu.lock — the legacy
- * CLI's one-batch-at-a-time guard (webapp/scripts/batch/run-batch.ts). Both
- * sides speak the same file: run-batch.ts refuses to start while the lock
- * names a live pid, and studiod's JobEngine holds back its queue for the same
- * reason. While studiod runs a lab job it takes the lock under its own pid so
- * a manually launched CLI batch refuses cleanly instead of colliding on the
- * GPU. Videofast-format jobs are the exception: the spawned run-batch.ts
- * acquires the lock itself, so studiod must not pre-hold it.
+ * CLI's one-batch-at-a-time guard (webapp/scripts/batch/run-batch.ts). This
+ * file is MIGRATION INTEROP ONLY: the GpuScheduler (scheduler.ts) is what
+ * serializes studiod's own jobs now. Both sides still speak the same file:
+ * run-batch.ts refuses to start while the lock names a live pid, and the
+ * scheduler parks the gpu lane for the same reason. While studiod runs an
+ * exclusive job the scheduler takes the lock under its own pid so a manually
+ * launched CLI batch refuses cleanly instead of colliding on the GPU.
+ * Videofast-format jobs are the exception: the spawned run-batch.ts acquires
+ * the lock itself, so studiod must not pre-hold it.
  *
  * Staleness matches the CLI exactly: pid liveness (signal-0 probe), no TTL.
  * The lock is advisory — if the file can't be written the queue keeps going. */

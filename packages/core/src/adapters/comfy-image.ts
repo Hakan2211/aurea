@@ -18,6 +18,7 @@ import {
   type ImageGraphSpec,
 } from "../comfy/graphs.js";
 import { jobRunDir } from "./proc.js";
+import type { JobResources } from "../scheduler.js";
 import type { AdapterProgress, AdapterRun, EngineAdapter } from "./types.js";
 
 /** aspect → generation size (SDXL-class buckets both engines handle well) */
@@ -51,6 +52,14 @@ export class ComfyImageAdapter implements EngineAdapter {
       job.payload?.type === "image" &&
       (job.payload.model === "z-image" || job.payload.model === "krea2")
     );
+  }
+
+  resources(): JobResources {
+    // managed sidecar: ~14 GB once z-image is loaded; when it's already warm
+    // the engineId lets the scheduler skip preflight. External ComfyUI owns
+    // its own memory — no estimate.
+    const managed = this.settings.get().engines.comfyMode === "managed";
+    return { klass: "gpu", engineId: "comfy", vramGb: managed ? 14 : undefined };
   }
 
   start(job: Job, report: (p: AdapterProgress) => void): AdapterRun {

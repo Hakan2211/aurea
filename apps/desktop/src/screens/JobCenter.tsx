@@ -179,6 +179,13 @@ function JobTableRow({ job }: { job: Job }) {
             </span>
           </div>
         )}
+        {job.status === "queued" && job.stage && (
+          // scheduler wait reason (external batch owns the GPU, VRAM headroom)
+          <div className="mt-2 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-fog">
+            <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-fog/60" />
+            {job.stage}
+          </div>
+        )}
       </div>
 
       <div className="w-[88px] text-right">

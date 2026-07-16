@@ -66,6 +66,13 @@ export class SystemMonitor extends EventEmitter {
     }
   }
 
+  /** free VRAM in GB for the scheduler's preflight; null when nvidia-smi
+   * isn't live (never block the queue on stale figures) */
+  freeGb(): number | null {
+    if (!this.live) return null;
+    return Math.max(0, Math.round((this.vram.total - this.vram.allocated) * 10) / 10);
+  }
+
   /** VRAM headroom message for the job center's preflight strip */
   preflight(): Preflight {
     const free = Math.max(0, this.vram.total - this.vram.allocated);

@@ -1,5 +1,8 @@
-/* JobEngine — the single GPU owner (PRD Part 2). Holds the queue, enforces
- * one exclusive job at a time, and streams snapshots to subscribers.
+/* JobEngine — the single GPU owner (PRD Part 2). Holds the queue, streams
+ * snapshots to subscribers, and starts queued jobs when the GpuScheduler
+ * admits them: one exclusive "gpu"-class job at a time, "cpu"-class jobs
+ * concurrently beside it, FIFO within each lane (an open lane may pass a
+ * blocked one, a later job never passes an earlier one in its own lane).
  *
  * Execution: jobs with a payload run on a matching engine adapter (videofast
  * batch pipeline today; ComfyUI sidecar, TTS venvs next). Jobs without one —
@@ -18,7 +21,7 @@ import path from "node:path";
 import { z } from "zod";
 import { jobSchema, type EnqueueJobResolved, type Job, type JobPriority } from "@aurea/shared";
 import type { AdapterRun, EngineAdapter } from "./adapters/types.js";
-import type { GpuLock } from "./gpulock.js";
+import { GpuScheduler, type JobResources, type ResourceClass } from "./scheduler.js";
 
 const PRIORITY_RANK: Record<JobPriority, number> = { interactive: 0, preview: 1, batch: 2 };
 
@@ -59,8 +62,9 @@ export interface JobEngineOptions {
   storeFile?: () => string;
   /** move a finished adapter job's artifact into its project; returns the new path */
   importOutput?: (job: Job) => string | undefined;
-  /** shared .gpu.lock interop with the legacy videofast CLI (see gpulock.ts) */
-  gpuLock?: GpuLock;
+  /** admission control (lanes, VRAM preflight, legacy-lock interop);
+   * defaults to a bare scheduler — gpu lane exclusive, no preflight */
+  scheduler?: GpuScheduler;
 }
 
 export class JobEngine extends EventEmitter {
@@ -71,10 +75,12 @@ export class JobEngine extends EventEmitter {
   private execs = new Map<string, AdapterRun>();
   private adapters: EngineAdapter[];
   private saveTimer: NodeJS.Timeout | undefined;
+  private scheduler: GpuScheduler;
 
   constructor(private opts: JobEngineOptions = {}) {
     super();
     this.adapters = opts.adapters ?? [];
+    this.scheduler = opts.scheduler ?? new GpuScheduler();
     for (const job of this.load()) {
       // whatever was in flight when the last studiod died goes back in line
       const revived: TrackedJob =
@@ -143,7 +149,7 @@ export class JobEngine extends EventEmitter {
     clearInterval(this.timer);
     for (const exec of this.execs.values()) exec.cancel();
     this.execs.clear();
-    this.opts.gpuLock?.release();
+    this.scheduler.close();
     clearTimeout(this.saveTimer);
     this.save();
     this.removeAllListeners();
@@ -193,46 +199,57 @@ export class JobEngine extends EventEmitter {
     }
   }
 
+  /** what this job will occupy — its adapter's declaration, or the exclusive
+   * gpu lane for adapterless (simulated) jobs */
+  private resourcesFor(job: TrackedJob): { adapter?: EngineAdapter; res: JobResources } {
+    const adapter = this.adapters.find((a) => a.canRun(job));
+    return { adapter, res: adapter?.resources?.(job) ?? { klass: "gpu" } };
+  }
+
   private tick() {
-    const running = [...this.jobs.values()].find((j) => j.status === "running");
-    if (running) {
-      if (this.execs.has(running.id)) {
+    let changed = false;
+    const running = [...this.jobs.values()].filter((j) => j.status === "running");
+    for (const job of running) {
+      if (this.execs.has(job.id)) {
         // adapter pushes progress; the tick only keeps the wall clock moving
-        if (running.startedAt) running.elapsed = fmtDuration(Date.now() - running.startedAt);
+        if (job.startedAt) job.elapsed = fmtDuration(Date.now() - job.startedAt);
       } else {
-        this.advance(running);
+        this.advance(job);
       }
-      this.publish();
-      return;
+      changed = true;
     }
-    const next = [...this.jobs.values()]
+    // admission: FIFO within each lane; a blocked lane never reorders, but an
+    // open lane may start jobs past it
+    const queued = [...this.jobs.values()]
       .filter((j) => j.status === "queued")
-      .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.seq - b.seq)[0];
-    if (next) {
-      const adapter = this.adapters.find((a) => a.canRun(next));
-      if (adapter && this.opts.gpuLock) {
-        const held = this.opts.gpuLock.heldByOther();
-        if (held) {
-          // an external videofast batch owns the GPU — hold the queue, don't fail
-          const stage = `Waiting for GPU — external batch ${held.batchId} (pid ${held.pid})`;
-          if (next.stage !== stage) {
-            next.stage = stage;
-            this.publish();
-          }
-          return;
+      .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.seq - b.seq);
+    const runningRes = running.map((j) => this.resourcesFor(j).res);
+    const blocked = new Set<ResourceClass>();
+    for (const next of queued) {
+      const { adapter, res } = this.resourcesFor(next);
+      if (blocked.has(res.klass)) continue;
+      const verdict = this.scheduler.admit(res, runningRes);
+      if (!verdict.ok) {
+        blocked.add(res.klass);
+        // surface the wait reason (external batch, VRAM) on the lane head
+        if (next.stage !== verdict.stage) {
+          next.stage = verdict.stage;
+          changed = true;
         }
+        continue;
       }
       next.status = "running";
       next.startedAt = Date.now();
       next.progress = 0;
       next.stage = undefined;
       if (adapter) {
-        // videofast jobs skip this: the spawned run-batch.ts takes the lock itself
-        if (next.payload?.type !== "videofast") this.opts.gpuLock?.acquire(`aurea:${next.id}`);
+        this.scheduler.started(next, res);
         this.startAdapter(next, adapter);
       }
-      this.publish();
+      runningRes.push(res);
+      changed = true;
     }
+    if (changed) this.publish();
   }
 
   /* ---------- adapter execution ---------- */
@@ -272,7 +289,7 @@ export class JobEngine extends EventEmitter {
       })
       .finally(() => {
         this.execs.delete(job.id);
-        this.opts.gpuLock?.release(); // no-op unless this process holds it
+        this.scheduler.finished(job); // releases the legacy lock if this job held it
         this.publish();
       });
   }

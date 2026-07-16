@@ -4,6 +4,7 @@
  * they were started with and report progress back. */
 
 import type { Job } from "@aurea/shared";
+import type { JobResources } from "../scheduler.js";
 
 export interface AdapterProgress {
   /** 0–100; omit to keep the current value */
@@ -23,5 +24,8 @@ export interface AdapterRun {
 export interface EngineAdapter {
   id: string;
   canRun(job: Job): boolean;
+  /** what the job occupies while running (lane + VRAM estimate for the
+   * scheduler's preflight); omitted = exclusive GPU, no preflight */
+  resources?(job: Job): JobResources;
   start(job: Job, report: (p: AdapterProgress) => void): AdapterRun;
 }

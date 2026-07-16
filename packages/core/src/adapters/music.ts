@@ -15,6 +15,7 @@ import type { ModelManager } from "../models/manager.js";
 import type { EngineRuntime } from "../runtime/runtime.js";
 import { jobRunDir, LastError, runProcess } from "./proc.js";
 import { ACESTEP_SCRIPT } from "./music-script.js";
+import type { JobResources } from "../scheduler.js";
 import type { AdapterProgress, AdapterRun, EngineAdapter } from "./types.js";
 
 export class MusicAdapter implements EngineAdapter {
@@ -28,6 +29,13 @@ export class MusicAdapter implements EngineAdapter {
 
   canRun(job: Job): boolean {
     return job.payload?.type === "music";
+  }
+
+  resources(): JobResources {
+    // managed ACE-Step loads DiT + the 1.7B LM fresh each job (~10 GB);
+    // the external checkout owns its own memory — no estimate
+    const managed = this.settings.get().engines.musicMode === "managed";
+    return { klass: "gpu", vramGb: managed ? 10 : undefined };
   }
 
   start(job: Job, report: (p: AdapterProgress) => void): AdapterRun {

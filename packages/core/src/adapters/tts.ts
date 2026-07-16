@@ -15,6 +15,7 @@ import type { ModelManager } from "../models/manager.js";
 import type { EngineRuntime } from "../runtime/runtime.js";
 import { jobRunDir, LastError, runProcess } from "./proc.js";
 import { CHATTERBOX_SCRIPT } from "./tts-script.js";
+import type { JobResources } from "../scheduler.js";
 import type { AdapterProgress, AdapterRun, EngineAdapter } from "./types.js";
 
 const CHATTERBOX_CHARS = ["sterling", "grant", "milo", "bruno", "jax", "barney"];
@@ -45,6 +46,16 @@ export class TtsAdapter implements EngineAdapter {
 
   canRun(job: Job): boolean {
     return job.payload?.type === "tts" && ["chatterbox", "qwen"].includes(job.payload.engine);
+  }
+
+  resources(job: Job): JobResources {
+    // managed chatterbox loads its model fresh each job (~4 GB); external
+    // venvs own their own memory — no estimate
+    const managed =
+      job.payload?.type === "tts" &&
+      job.payload.engine === "chatterbox" &&
+      this.settings.get().engines.ttsMode === "managed";
+    return { klass: "gpu", vramGb: managed ? 4 : undefined };
   }
 
   start(job: Job, report: (p: AdapterProgress) => void): AdapterRun {

@@ -71,6 +71,16 @@ export class ComfyService {
     return this.starting;
   }
 
+  /** managed sidecar is resident (holding VRAM) — external is never "warm" */
+  warm(): boolean {
+    return this.proc !== null;
+  }
+
+  /** resident, idle, and not mid-boot — safe for the scheduler to evict */
+  canEvict(): boolean {
+    return this.proc !== null && this.busy === 0 && !this.starting;
+  }
+
   /** shut the managed sidecar down (external instances are never touched) */
   stop(): void {
     clearTimeout(this.idleTimer);

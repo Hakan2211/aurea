@@ -2,6 +2,13 @@ export { startStudiod, type StudiodOptions, type StudiodHandle } from "./server.
 export { appRouter, type AppRouter } from "./router.js";
 export { JobEngine } from "./jobs.js";
 export { GpuLock, type GpuLockHolder } from "./gpulock.js";
+export {
+  GpuScheduler,
+  type JobResources,
+  type ResourceClass,
+  type WarmEngine,
+  type VramSource,
+} from "./scheduler.js";
 export { SystemMonitor } from "./system.js";
 export { SettingsStore, detectVideofastDir, detectEnginePaths, SETTINGS_FILE } from "./settings.js";
 export { Labs, labEnqueue } from "./labs.js";

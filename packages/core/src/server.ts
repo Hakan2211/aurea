@@ -12,6 +12,7 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
 import { JobEngine } from "./jobs.js";
 import { GpuLock } from "./gpulock.js";
+import { GpuScheduler } from "./scheduler.js";
 import { SystemMonitor } from "./system.js";
 import { SettingsStore } from "./settings.js";
 import { ProjectStore } from "./projects.js";
@@ -57,6 +58,17 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
   const models = new ModelManager(settings);
   const runtime = new EngineRuntime(settings);
   const comfy = new ComfyService(settings, runtime);
+  const monitor = new SystemMonitor(settings);
+  const scheduler = new GpuScheduler({
+    lock: new GpuLock(() => {
+      const vf = settings.get().paths.videofastDir;
+      return vf ? path.join(vf, "batches", ".gpu.lock") : null;
+    }),
+    vram: { freeGb: () => monitor.freeGb() },
+    engines: [
+      { id: "comfy", warm: () => comfy.warm(), canEvict: () => comfy.canEvict(), evict: () => comfy.stop() },
+    ],
+  });
   const engine = new JobEngine({
     adapters: [
       new VideofastAdapter(settings),
@@ -67,12 +79,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     ],
     storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),
     importOutput: (job) => projects.importJobOutput(job),
-    gpuLock: new GpuLock(() => {
-      const vf = settings.get().paths.videofastDir;
-      return vf ? path.join(vf, "batches", ".gpu.lock") : null;
-    }),
+    scheduler,
   });
-  const monitor = new SystemMonitor(settings);
   const labs = new Labs(settings, models, runtime);
   // the Director's tools call back into this very server; coords resolve after listen
   let selfCoords: { port: number; token: string } | null = null;
