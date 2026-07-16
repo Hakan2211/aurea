@@ -752,6 +752,10 @@ export function useSettings() {
       setComfyUrl(url: string) {
         if (url.trim()) update({ engines: { comfyUrl: url.trim() } });
       },
+      ttsMode: live?.engines.ttsMode ?? "managed",
+      setTtsMode(mode: Settings["engines"]["ttsMode"]) {
+        update({ engines: { ttsMode: mode } });
+      },
       setDefaultProvider(id: Settings["providers"]["default"]) {
         update({ providers: { default: id } });
       },

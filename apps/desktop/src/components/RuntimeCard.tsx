@@ -27,7 +27,8 @@ export function RuntimeCard() {
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-cream">Managed engine runtime</div>
           <div className="mt-0.5 text-[10px] text-fog">
-            A private Python + headless ComfyUI inside your data root — no system installs.
+            A private Python, headless ComfyUI and voice engine inside your data root — no system
+            installs.
           </div>
         </div>
         {status.ready ? (

@@ -86,7 +86,7 @@ export class ComfyService {
   /* ---------- managed spawn ---------- */
 
   private async spawn(): Promise<string> {
-    if (!this.runtime.status().ready) {
+    if (!this.runtime.componentReady("comfy")) {
       throw new Error(
         "The managed engine runtime is not installed — Settings → Engines → Install engine runtime",
       );

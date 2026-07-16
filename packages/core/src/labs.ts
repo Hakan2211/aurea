@@ -49,7 +49,7 @@ export class Labs {
           label: "z-image-turbo · local",
           note: managed ? "fast drafts · managed engine" : "fast drafts",
           // managed: needs the runtime + weights; external: the user's ComfyUI has its own
-          available: managed ? this.runtime.status().ready && zInstalled : true,
+          available: managed ? this.runtime.componentReady("comfy") && zInstalled : true,
         },
         {
           id: "krea2",
@@ -64,31 +64,41 @@ export class Labs {
     };
   }
 
-  /** cloned roster = every frozen reference clip in videofast's char_refs */
+  /** cloned roster = every frozen reference clip in <dataRoot>/voices plus
+   * videofast's char_refs (studio's own folder wins on id collisions) */
   voiceCatalog() {
-    const { engines } = this.settings.get();
+    const { storage, engines } = this.settings.get();
     const vf = this.vf();
     const voices: LabVoice[] = [];
-    const refDir = vf ? path.join(vf, "assets", "vo", "char_refs") : null;
-    if (refDir && fs.existsSync(refDir)) {
+    const refDirs = [
+      path.join(storage.dataRoot, "voices"),
+      ...(vf ? [path.join(vf, "assets", "vo", "char_refs")] : []),
+    ];
+    for (const refDir of refDirs) {
+      if (!fs.existsSync(refDir)) continue;
       for (const entry of fs.readdirSync(refDir)) {
-        if (entry.endsWith(".wav")) {
-          const id = entry.slice(0, -4).toLowerCase();
-          voices.push({ id, name: cap(id), kind: "cloned", engine: "Chatterbox" });
-        }
+        if (!entry.endsWith(".wav")) continue;
+        const id = entry.slice(0, -4).toLowerCase();
+        if (voices.some((v) => v.id === id)) continue;
+        voices.push({ id, name: cap(id), kind: "cloned", engine: "Chatterbox" });
       }
     }
     voices.push(
       { id: "gravel", name: "Gravel narrator", kind: "preset", engine: "Qwen3-TTS" },
       { id: "aiden", name: "Aiden", kind: "preset", engine: "Qwen3-TTS" },
     );
+    const managed = engines.ttsMode === "managed";
+    const chatterboxReady = managed
+      ? this.runtime.componentReady("chatterbox") &&
+        this.models.list().find((m) => m.id === "chatterbox-tts")?.status.state === "installed"
+      : !!engines.chatterboxPython;
     return {
       engines: [
         {
           id: "chatterbox",
           label: "Chatterbox · local",
-          note: "cloned voices · default",
-          available: !!engines.chatterboxPython && voices.some((v) => v.kind === "cloned"),
+          note: managed ? "cloned voices · managed engine" : "cloned voices · default",
+          available: chatterboxReady && voices.some((v) => v.kind === "cloned"),
         },
         {
           id: "qwen",

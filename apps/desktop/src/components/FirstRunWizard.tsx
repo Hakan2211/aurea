@@ -117,7 +117,7 @@ function EnginesStep({ settings }: { settings: Settings }) {
       <StepHeader
         icon={Cpu}
         title="The generation engine"
-        sub="Aurea installs its own Python and ComfyUI into your data root — downloads keep running while you continue. Anything below that was already on this machine is picked up too."
+        sub="Aurea installs its own Python, ComfyUI and voice engine into your data root — downloads keep running while you continue. Anything below that was already on this machine is picked up too."
       />
       <RuntimeCard />
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-raised/50">

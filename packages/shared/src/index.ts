@@ -200,6 +200,11 @@ export const settingsSchema = z.object({
       comfyMode: z.enum(["managed", "external"]).default("managed"),
       /** ComfyUI HTTP API when comfyMode is "external" */
       comfyUrl: z.string().default("http://127.0.0.1:8000"),
+      /** "managed" = character voices run in the runtime's own Chatterbox
+       * venv with model-manager weights; "external" = spawn chatterboxPython
+       * against the videofast scripts (narrator/qwen voices are always
+       * external — no managed build yet) */
+      ttsMode: z.enum(["managed", "external"]).default("managed"),
       /** python.exe of the Chatterbox TTS venv (character voices) */
       chatterboxPython: z.string().nullable().default(null),
       /** python.exe of the Qwen3-TTS venv (narrator voices) */
@@ -418,9 +423,10 @@ export const modelDownloadSchema = z.object({
 
 /* ---------- engine runtime ---------- */
 
-/** The two managed pieces under <dataRoot>/runtime/: a portable CPython and a
- * headless ComfyUI checkout with its own venv. */
-export const runtimeComponentIdSchema = z.enum(["python", "comfy"]);
+/** The managed pieces under <dataRoot>/runtime/: a portable CPython, a
+ * headless ComfyUI checkout with its own venv, and one venv per Python
+ * engine ("chatterbox" is the first of the venv engines). */
+export const runtimeComponentIdSchema = z.enum(["python", "comfy", "chatterbox"]);
 export type RuntimeComponentId = z.infer<typeof runtimeComponentIdSchema>;
 
 export const runtimeComponentStateSchema = z.enum(["absent", "installing", "ready", "error"]);

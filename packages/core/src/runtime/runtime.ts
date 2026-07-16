@@ -36,6 +36,44 @@ export const COMFY_PIN = {
   url: "https://github.com/Comfy-Org/ComfyUI/archive/refs/tags/v0.28.0.zip",
 };
 
+/** A Python engine that runs in its own venv under runtime/venvs/<id> —
+ * the protocol behind every non-ComfyUI local engine. Bumping `version`
+ * (or changing a pin) makes the component read as absent → reinstall. */
+export interface VenvEngineSpec {
+  id: RuntimeComponentId;
+  name: string;
+  /** recorded in runtime.json; shown as the component's pinned version */
+  version: string;
+  /** pip install invocations, run in order inside the venv */
+  steps: { stage: string; args: string[] }[];
+  /** import check: `python -c code` must print a line matching expect */
+  check: { code: string; expect: RegExp };
+  /** rough installed footprint (venv + wheel cache), progress estimation only */
+  expectedBytes: number;
+}
+
+export const CHATTERBOX_PIN: VenvEngineSpec = {
+  id: "chatterbox",
+  name: "Chatterbox TTS",
+  version: "0.1.7",
+  steps: [
+    {
+      stage: "Installing PyTorch (CUDA 12.4) — several GB, takes a while",
+      // chatterbox-tts pins torch==2.6.0; install the CUDA build first so
+      // PyPI's CPU-only wheel can never satisfy the pin
+      args: ["torch==2.6.0", "torchaudio==2.6.0", "--index-url", "https://download.pytorch.org/whl/cu124"],
+    },
+    { stage: "Installing Chatterbox TTS", args: ["chatterbox-tts==0.1.7"] },
+  ],
+  check: {
+    code: "import chatterbox.tts, torch; print('chatterbox ok cuda='+str(torch.cuda.is_available()))",
+    expect: /chatterbox ok cuda=/,
+  },
+  expectedBytes: 6 * 1024 ** 3,
+};
+
+export const VENV_ENGINES: VenvEngineSpec[] = [CHATTERBOX_PIN];
+
 const TORCH_INDEX = "https://download.pytorch.org/whl/cu128";
 /** rough site-packages + wheel cache footprint of the torch + requirements
  * installs, for progress estimation only */
@@ -59,6 +97,8 @@ const COMFY_CATEGORIES = [
 interface RuntimeRecord {
   python?: string;
   comfy?: string;
+  /** venv engine id -> installed spec version */
+  venvs?: Record<string, string>;
   installedAt?: string;
 }
 
@@ -106,6 +146,14 @@ export class EngineRuntime extends EventEmitter {
     return path.join(this.root(), "extra_model_paths.yaml");
   }
 
+  venvDir(id: RuntimeComponentId): string {
+    return path.join(this.root(), "venvs", id);
+  }
+
+  venvEnginePython(id: RuntimeComponentId): string {
+    return path.join(this.venvDir(id), "Scripts", "python.exe");
+  }
+
   /* ---------- status ---------- */
 
   status(): RuntimeStatus {
@@ -146,12 +194,31 @@ export class EngineRuntime extends EventEmitter {
         this.comfyReady(record),
         record.comfy ?? null,
       ),
+      ...VENV_ENGINES.map((spec) =>
+        component(
+          spec.id,
+          spec.name,
+          spec.version,
+          this.venvEngineReady(spec, record),
+          record.venvs?.[spec.id] ?? null,
+        ),
+      ),
     ];
     return {
       ready: components.every((c) => c.state === "ready"),
       installing: this.ctrl !== null,
       components,
     };
+  }
+
+  /** Is this one component usable right now? (status().ready means ALL of
+   * them — adapters gate on the piece they actually spawn.) */
+  componentReady(id: RuntimeComponentId): boolean {
+    const record = this.record();
+    if (id === "python") return this.pythonReady(record);
+    if (id === "comfy") return this.comfyReady(record);
+    const spec = VENV_ENGINES.find((s) => s.id === id);
+    return spec ? this.venvEngineReady(spec, record) : false;
   }
 
   private pythonReady(record: RuntimeRecord): boolean {
@@ -163,6 +230,12 @@ export class EngineRuntime extends EventEmitter {
       record.comfy === COMFY_PIN.tag &&
       fs.existsSync(path.join(this.comfyDir(), "main.py")) &&
       fs.existsSync(this.venvPython())
+    );
+  }
+
+  private venvEngineReady(spec: VenvEngineSpec, record: RuntimeRecord): boolean {
+    return (
+      record.venvs?.[spec.id] === spec.version && fs.existsSync(this.venvEnginePython(spec.id))
     );
   }
 
@@ -178,6 +251,11 @@ export class EngineRuntime extends EventEmitter {
       const record = this.record();
       if (!this.pythonReady(record)) await this.installPython(ctrl.signal);
       if (!this.comfyReady(this.record())) await this.installComfy(ctrl.signal);
+      for (const spec of VENV_ENGINES) {
+        if (!this.venvEngineReady(spec, this.record())) {
+          await this.installVenvEngine(spec, ctrl.signal);
+        }
+      }
     })()
       .then(() => this.live.clear())
       .catch((err: unknown) => {
@@ -374,6 +452,61 @@ export class EngineRuntime extends EventEmitter {
     this.publish();
   }
 
+  /* ---------- venv engines ---------- */
+
+  private async installVenvEngine(spec: VenvEngineSpec, signal: AbortSignal): Promise<void> {
+    const live = this.begin(spec.id);
+    const venvDir = this.venvDir(spec.id);
+    const cacheDir = path.join(this.root(), "pip-cache");
+
+    if (!fs.existsSync(this.venvEnginePython(spec.id))) {
+      live.stage = "Creating environment";
+      live.progress = 3;
+      this.publish();
+      // a half-created venv (crash mid-install) can't be resumed by `-m venv`
+      fs.rmSync(venvDir, { recursive: true, force: true });
+      await this.run(this.pythonExe(), ["-m", "venv", venvDir], signal, live);
+    }
+
+    // pip runs are resumable as a whole: already-satisfied packages are no-ops
+    const python = this.venvEnginePython(spec.id);
+    const poller = this.startSizePoller([venvDir, cacheDir], live, 6, 90, spec.expectedBytes);
+    try {
+      const span = (90 - 6) / spec.steps.length;
+      for (const [i, step] of spec.steps.entries()) {
+        poller.band(6 + span * i, 6 + span * (i + 1));
+        live.stage = step.stage;
+        live.progress = Math.max(live.progress, 6 + span * i);
+        this.publish();
+        await this.run(
+          python,
+          [
+            "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
+            "--cache-dir", cacheDir, ...step.args,
+          ],
+          signal,
+          live,
+        );
+      }
+    } finally {
+      poller.stop();
+    }
+
+    live.stage = "Checking";
+    live.progress = 92;
+    live.detail = null;
+    this.publish();
+    const out = await this.capture(python, ["-c", spec.check.code], signal);
+    if (!spec.check.expect.test(out)) {
+      throw new Error(`${spec.name} check failed: ${out || "(no output)"}`);
+    }
+    live.detail = out;
+
+    this.saveRecord({ venvs: { ...this.record().venvs, [spec.id]: spec.version } });
+    this.live.delete(spec.id);
+    this.publish();
+  }
+
   /** Regenerated on every write so a moved dataRoot stays correct. */
   writeExtraModelPaths(): void {
     const models = path.join(this.settings.get().storage.dataRoot, "models").replaceAll("\\", "/");
@@ -470,13 +603,14 @@ export class EngineRuntime extends EventEmitter {
     live: LiveComponent,
     from: number,
     to: number,
+    expectedBytes = PIP_EXPECTED_BYTES,
   ): { band: (from: number, to: number) => void; stop: () => void } {
     let lo = from;
     let hi = to;
     const base = dirs.map((d) => dirSize(d));
     const timer = setInterval(() => {
       const grown = dirs.reduce((sum, d, i) => sum + Math.max(0, dirSize(d) - base[i]), 0);
-      const frac = Math.min(0.98, grown / PIP_EXPECTED_BYTES);
+      const frac = Math.min(0.98, grown / expectedBytes);
       live.progress = Math.max(live.progress, lo + (hi - lo) * frac);
       this.publish();
     }, 4000);

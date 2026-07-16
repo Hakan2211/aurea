@@ -61,7 +61,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     adapters: [
       new VideofastAdapter(settings),
       new ComfyImageAdapter(settings, comfy),
-      new TtsAdapter(settings),
+      new TtsAdapter(settings, runtime, models),
       new MusicAdapter(settings),
       new LtxVideoAdapter(settings),
     ],

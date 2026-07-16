@@ -436,7 +436,8 @@ function ModelsSection() {
 /* ---------- engines ---------- */
 
 function EnginesSection() {
-  const { engines, comfyMode, comfyUrl, setComfyMode, setComfyUrl } = useSettings();
+  const { engines, comfyMode, comfyUrl, setComfyMode, setComfyUrl, ttsMode, setTtsMode } =
+    useSettings();
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
   return (
     <div className="space-y-5">
@@ -482,6 +483,31 @@ function EnginesSection() {
             className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
           />
         )}
+      </div>
+      <div className="rounded-2xl border hairline bg-surface/50 p-4">
+        <div className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-cream">Voice engine</div>
+            <div className="mt-0.5 text-[10px] text-fog">
+              Managed clones character voices in the runtime above; external uses your own
+              Chatterbox venv.
+            </div>
+          </div>
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+            {(["managed", "external"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setTtsMode(m)}
+                className={cx(
+                  "px-3 py-1.5 capitalize transition",
+                  ttsMode === m ? "bg-gold text-ink" : "text-fog hover:text-cream",
+                )}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
         {engines.map((e) => (
