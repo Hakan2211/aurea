@@ -19,6 +19,7 @@ import {
   type Job,
   type JobPayload,
   type ModelEntry,
+  type RuntimeStatus,
   type Vram,
 } from "@aurea/shared";
 import { labEnqueue } from "./labs.js";
@@ -179,6 +180,24 @@ export const appRouter = router({
       yield ctx.models.list();
       for await (const [list] of on(ctx.models, "update", { signal })) {
         yield list as ModelEntry[];
+      }
+    }),
+  }),
+
+  runtime: router({
+    /** the managed engine substrate (portable Python + headless ComfyUI) */
+    status: procedure.query(({ ctx }) => ctx.runtime.status()),
+
+    /** install (or resume installing) whatever isn't ready; idempotent */
+    install: procedure.mutation(({ ctx }) => ctx.runtime.install()),
+
+    /** stop an in-flight install — archives keep their partials */
+    cancel: procedure.mutation(({ ctx }) => ctx.runtime.cancel()),
+
+    onUpdate: procedure.subscription(async function* ({ ctx, signal }) {
+      yield ctx.runtime.status();
+      for await (const [status] of on(ctx.runtime, "update", { signal })) {
+        yield status as RuntimeStatus;
       }
     }),
   }),

@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { EnqueueJobResolved, JobPayload } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
+import type { ModelManager } from "./models/manager.js";
+import type { EngineRuntime } from "./runtime/runtime.js";
 
 export interface LabEngine {
   id: string;
@@ -26,20 +28,35 @@ export interface LabVoice {
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export class Labs {
-  constructor(private settings: SettingsStore) {}
+  constructor(
+    private settings: SettingsStore,
+    private models: ModelManager,
+    private runtime: EngineRuntime,
+  ) {}
 
   private vf(): string | null {
     return this.settings.get().paths.videofastDir;
   }
 
   imageCatalog() {
-    const vf = this.vf();
-    const workflow = (name: string) =>
-      !!vf && fs.existsSync(path.join(vf, "images", "workflows", `${name}.json`));
+    const managed = this.settings.get().engines.comfyMode === "managed";
+    const zInstalled =
+      this.models.list().find((m) => m.id === "z-image-turbo")?.status.state === "installed";
     return {
       models: [
-        { id: "krea2", label: "Krea 2 · local", note: "photoreal · free", available: workflow("krea2") },
-        { id: "z-image", label: "z-image-turbo · local", note: "fast drafts", available: workflow("z-image-turbo") },
+        {
+          id: "z-image",
+          label: "z-image-turbo · local",
+          note: managed ? "fast drafts · managed engine" : "fast drafts",
+          // managed: needs the runtime + weights; external: the user's ComfyUI has its own
+          available: managed ? this.runtime.status().ready && zInstalled : true,
+        },
+        {
+          id: "krea2",
+          label: "Krea 2 · local",
+          note: managed ? "needs external ComfyUI (GGUF)" : "photoreal · free",
+          available: !managed,
+        },
       ] satisfies LabEngine[],
       aspects: ["1:1", "3:2", "16:9", "4:3", "9:16"],
       presets: ["Cinematic", "Photographic", "Concept Art", "Minimal", "Moody", "Vintage", "Fantasy"],

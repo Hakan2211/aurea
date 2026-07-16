@@ -258,7 +258,7 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       name: "generate_image",
       title: "Generate image",
       description:
-        "Enqueue a local image generation (ComfyUI: krea2 photoreal / z-image fast drafts). Returns the " +
+        "Enqueue a local image generation (ComfyUI: z-image default, runs managed; krea2 photoreal needs external ComfyUI). Returns the " +
         "job — wait_for_job for the file. Check lab_catalog('image') for models/aspects/presets.",
       schema: withProjectDefault(imageGenerateSchema.omit({ project: true })),
       handler: async ({ project, ...payload }) => {

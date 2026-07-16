@@ -18,8 +18,10 @@ import { ProjectStore } from "./projects.js";
 import { Labs } from "./labs.js";
 import { DirectorService } from "./director.js";
 import { ModelManager } from "./models/manager.js";
+import { EngineRuntime } from "./runtime/runtime.js";
+import { ComfyService } from "./comfy/service.js";
 import { VideofastAdapter } from "./adapters/videofast.js";
-import { ImageAdapter } from "./adapters/image.js";
+import { ComfyImageAdapter } from "./adapters/comfy-image.js";
 import { TtsAdapter } from "./adapters/tts.js";
 import { MusicAdapter } from "./adapters/music.js";
 import { LtxVideoAdapter } from "./adapters/ltx.js";
@@ -52,10 +54,13 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
   const settings = new SettingsStore();
   const projects = new ProjectStore(settings);
   projects.ensureDefault();
+  const models = new ModelManager(settings);
+  const runtime = new EngineRuntime(settings);
+  const comfy = new ComfyService(settings, runtime);
   const engine = new JobEngine({
     adapters: [
       new VideofastAdapter(settings),
-      new ImageAdapter(settings),
+      new ComfyImageAdapter(settings, comfy),
       new TtsAdapter(settings),
       new MusicAdapter(settings),
       new LtxVideoAdapter(settings),
@@ -68,15 +73,14 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     }),
   });
   const monitor = new SystemMonitor(settings);
-  const labs = new Labs(settings);
+  const labs = new Labs(settings, models, runtime);
   // the Director's tools call back into this very server; coords resolve after listen
   let selfCoords: { port: number; token: string } | null = null;
   const director = new DirectorService(settings, () => {
     if (!selfCoords) throw new Error("studiod is not listening yet");
     return selfCoords;
   });
-  const models = new ModelManager(settings);
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models };
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,
@@ -142,7 +146,9 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     close: async () => {
       wsHandler.broadcastReconnectNotification();
       engine.close();
+      comfy.close();
       models.close();
+      runtime.close();
       monitor.close();
       wss.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

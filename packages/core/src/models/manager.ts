@@ -11,13 +11,11 @@
  * <dataRoot>/models/manifest.json. */
 
 import { EventEmitter } from "node:events";
-import { createHash, type Hash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Readable, Transform } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import type { ModelEntry, ModelFile, ModelInfo, ModelStatus } from "@aurea/shared";
 import type { SettingsStore } from "../settings.js";
+import { downloadFile } from "../runtime/download.js";
 import { MODEL_REGISTRY } from "./registry.js";
 
 interface Manifest {
@@ -35,8 +33,6 @@ interface ActiveDownload {
 const PUBLISH_MS = 400;
 /** transfer-rate window */
 const RATE_WINDOW_MS = 5_000;
-/** abort a transfer that delivers no bytes for this long (first byte included) */
-const STALL_MS = Number(process.env.AUREA_MODEL_STALL_MS ?? 45_000);
 
 export class ModelManager extends EventEmitter {
   private active = new Map<string, ActiveDownload>();
@@ -245,94 +241,22 @@ export class ModelManager extends EventEmitter {
     status: ModelStatus,
     tick: (fileBytes: number) => void,
   ): Promise<void> {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    const part = `${target}.part`;
-    let hash = createHash("sha256");
-    let start = 0;
-
-    // resume: bytes already on disk enter the digest before the wire bytes
-    try {
-      start = fs.statSync(part).size;
-    } catch {
-      /* fresh download */
-    }
-    if (start > file.sizeBytes) {
-      // corrupt partial (registry changed?) — start over
-      fs.rmSync(part, { force: true });
-      start = 0;
-    }
-    if (start > 0) {
-      status.state = "verifying";
-      this.publish(true);
-      await pipeline(fs.createReadStream(part), hashSink(hash), { signal });
-      status.state = "downloading";
-    }
-
-    if (start < file.sizeBytes) {
-      // stall watchdog: dead connections abort instead of hanging at 0 B/s
-      const stall = new AbortController();
-      const wire = AbortSignal.any([signal, stall.signal]);
-      let watchdog = setTimeout(() => stall.abort(), STALL_MS);
-      watchdog.unref();
-      const alive = () => {
-        clearTimeout(watchdog);
-        watchdog = setTimeout(() => stall.abort(), STALL_MS);
-        watchdog.unref();
-      };
-      try {
-        const res = await fetch(file.url, {
-          signal: wire,
-          headers: start > 0 ? { range: `bytes=${start}-` } : {},
-          redirect: "follow",
-        });
-        if (start > 0 && res.status === 200) {
-          // server ignored the range — restart from zero
-          start = 0;
-          hash = createHash("sha256");
-          fs.rmSync(part, { force: true });
-        }
-        if (!res.ok || !res.body) {
-          throw new Error(`${file.name}: HTTP ${res.status}`);
-        }
-        let received = 0;
-        const h = hash;
-        const tap = new Transform({
-          transform(chunk: Buffer, _enc, cb) {
-            alive();
-            h.update(chunk);
-            received += chunk.length;
-            tick(start + received);
-            cb(null, chunk);
-          },
-        });
-        await pipeline(
-          Readable.fromWeb(res.body as import("node:stream/web").ReadableStream),
-          tap,
-          fs.createWriteStream(part, { flags: start > 0 ? "a" : "w" }),
-          { signal: wire },
-        );
-      } catch (err) {
-        if (stall.signal.aborted && !signal.aborted) {
-          throw new Error(
-            `${file.name}: no data for ${Math.round(STALL_MS / 1000)}s — check your connection and resume`,
-          );
-        }
-        throw err;
-      } finally {
-        clearTimeout(watchdog);
-      }
-    }
-
-    const size = fs.statSync(part).size;
-    if (size !== file.sizeBytes) {
-      throw new Error(`${file.name}: expected ${file.sizeBytes} bytes, got ${size}`);
-    }
-    const digest = hash.digest("hex");
-    if (file.sha256 && digest !== file.sha256) {
-      fs.rmSync(part, { force: true });
-      throw new Error(`${file.name}: sha256 mismatch — download corrupted, removed`);
-    }
-    fs.renameSync(part, target);
+    await downloadFile(
+      { url: file.url, label: file.name, sizeBytes: file.sizeBytes, sha256: file.sha256 },
+      target,
+      signal,
+      {
+        onBytes: (n) => {
+          status.state = "downloading";
+          tick(n);
+        },
+        onVerifying: () => {
+          status.state = "verifying";
+          this.publish(true);
+        },
+      },
+    );
+    status.state = "downloading";
   }
 
   /* ---------- publish / manifest ---------- */
@@ -368,14 +292,4 @@ export class ModelManager extends EventEmitter {
     fs.writeFileSync(tmp, JSON.stringify(this.manifest, null, 2));
     fs.renameSync(tmp, this.manifestFile());
   }
-}
-
-/** a Writable that only feeds the hash (resume pre-pass) */
-function hashSink(hash: Hash): Transform {
-  return new Transform({
-    transform(chunk: Buffer, _enc, cb) {
-      hash.update(chunk);
-      cb();
-    },
-  });
 }

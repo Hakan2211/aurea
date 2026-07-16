@@ -26,6 +26,7 @@ import type { ModelEntry } from "@aurea/shared";
 import { useModels, useSettings } from "@/hooks";
 import type { Provider } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Progress, cx } from "@/components/ui";
+import { RuntimeCard } from "@/components/RuntimeCard";
 
 /* Settings — UI-Design/settings.jpg. Sub-nav on the left (General, AI
  * Providers, Storage, Engines, Shortcuts, Advanced); AI Providers is the
@@ -435,13 +436,53 @@ function ModelsSection() {
 /* ---------- engines ---------- */
 
 function EnginesSection() {
-  const { engines } = useSettings();
+  const { engines, comfyMode, comfyUrl, setComfyMode, setComfyUrl } = useSettings();
+  const [urlDraft, setUrlDraft] = useState<string | null>(null);
   return (
     <div className="space-y-5">
       <SectionHeader
         title="Engines"
         sub="The generation stack behind every lab. Local engines run free on your GPU."
       />
+      <RuntimeCard />
+      <div className="rounded-2xl border hairline bg-surface/50 p-4">
+        <div className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-cream">ComfyUI source</div>
+            <div className="mt-0.5 text-[10px] text-fog">
+              Managed uses the runtime above; external talks to a ComfyUI you run yourself.
+            </div>
+          </div>
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+            {(["managed", "external"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setComfyMode(m)}
+                className={cx(
+                  "px-3 py-1.5 capitalize transition",
+                  comfyMode === m ? "bg-gold text-ink" : "text-fog hover:text-cream",
+                )}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+        {comfyMode === "external" && (
+          <input
+            value={urlDraft ?? comfyUrl}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            onBlur={() => {
+              if (urlDraft !== null && urlDraft !== comfyUrl) setComfyUrl(urlDraft);
+              setUrlDraft(null);
+            }}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            spellCheck={false}
+            placeholder="http://127.0.0.1:8000"
+            className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+          />
+        )}
+      </div>
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
         {engines.map((e) => (
           <div key={e.id} className="flex items-center gap-4 px-4 py-3">

@@ -8,6 +8,7 @@ import type {
   LibraryKind,
   ModelEntry,
   MusicGenerate,
+  RuntimeStatus,
   Settings,
   TtsGenerate,
   VideoGenerate,
@@ -227,6 +228,25 @@ export function useModels() {
     download: (id: string, acceptLicense = false) => download({ id, acceptLicense }),
     cancel: (id: string) => cancel({ id }),
     remove: (id: string) => remove({ id }),
+  };
+}
+
+/** LIVE — the managed engine substrate (portable Python + headless ComfyUI);
+ * status streams over runtime.onUpdate while an install runs */
+export function useRuntime() {
+  const query = trpc.runtime.status.useQuery();
+  const utils = trpc.useUtils();
+  const refresh = {
+    onSuccess: (s: RuntimeStatus) => utils.runtime.status.setData(undefined, s),
+    onError: () => void utils.runtime.status.invalidate(),
+  };
+  const { mutate: install } = trpc.runtime.install.useMutation(refresh);
+  const { mutate: cancel } = trpc.runtime.cancel.useMutation(refresh);
+  return {
+    status: (query.data ?? null) as RuntimeStatus | null,
+    live: !!query.data,
+    install: () => install(),
+    cancel: () => cancel(),
   };
 }
 
@@ -723,6 +743,14 @@ export function useSettings() {
       },
       setVideofastDir(dir: string) {
         update({ paths: { videofastDir: dir.trim() || null } });
+      },
+      comfyMode: live?.engines.comfyMode ?? "managed",
+      comfyUrl: live?.engines.comfyUrl ?? "",
+      setComfyMode(mode: Settings["engines"]["comfyMode"]) {
+        update({ engines: { comfyMode: mode } });
+      },
+      setComfyUrl(url: string) {
+        if (url.trim()) update({ engines: { comfyUrl: url.trim() } });
       },
       setDefaultProvider(id: Settings["providers"]["default"]) {
         update({ providers: { default: id } });

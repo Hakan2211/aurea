@@ -36,8 +36,9 @@ export const videofastPayloadSchema = z.object({
 export const imagePayloadSchema = z.object({
   type: z.literal("image"),
   prompt: z.string().min(1),
-  /** engine id from the image-lab catalog (krea2 / z-image today) */
-  model: z.string().default("krea2"),
+  /** engine id from the image-lab catalog; z-image runs on the managed
+   * engine, krea2 needs an external ComfyUI (GGUF custom node) */
+  model: z.string().default("z-image"),
   aspect: imageAspectSchema.default("3:2"),
   /** style preset name folded into the prompt by the adapter */
   preset: z.string().optional(),
@@ -193,7 +194,11 @@ export const settingsSchema = z.object({
    * null = not found, the matching lab reports the engine unavailable. */
   engines: z
     .object({
-      /** ComfyUI HTTP API (image gen + LTX video) */
+      /** "managed" = studiod spawns its own headless ComfyUI from
+       * <dataRoot>/runtime/; "external" = talk to comfyUrl (the escape hatch
+       * for machines that already run ComfyUI Desktop or a custom install) */
+      comfyMode: z.enum(["managed", "external"]).default("managed"),
+      /** ComfyUI HTTP API when comfyMode is "external" */
       comfyUrl: z.string().default("http://127.0.0.1:8000"),
       /** python.exe of the Chatterbox TTS venv (character voices) */
       chatterboxPython: z.string().nullable().default(null),
@@ -410,6 +415,40 @@ export const modelDownloadSchema = z.object({
   /** records acceptance of a gated license before starting */
   acceptLicense: z.boolean().default(false),
 });
+
+/* ---------- engine runtime ---------- */
+
+/** The two managed pieces under <dataRoot>/runtime/: a portable CPython and a
+ * headless ComfyUI checkout with its own venv. */
+export const runtimeComponentIdSchema = z.enum(["python", "comfy"]);
+export type RuntimeComponentId = z.infer<typeof runtimeComponentIdSchema>;
+
+export const runtimeComponentStateSchema = z.enum(["absent", "installing", "ready", "error"]);
+
+export const runtimeComponentSchema = z.object({
+  id: runtimeComponentIdSchema,
+  name: z.string(),
+  state: runtimeComponentStateSchema,
+  /** pinned upstream version this studiod installs (display) */
+  pinned: z.string(),
+  /** installed version; null until ready */
+  version: z.string().nullable(),
+  /** 0–100 within this component's install */
+  progress: z.number(),
+  stage: z.string().nullable(),
+  /** live sub-line under the stage (current package, bytes moved, …) */
+  detail: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type RuntimeComponent = z.infer<typeof runtimeComponentSchema>;
+
+export const runtimeStatusSchema = z.object({
+  /** every component ready — managed ComfyUI can be spawned */
+  ready: z.boolean(),
+  installing: z.boolean(),
+  components: z.array(runtimeComponentSchema),
+});
+export type RuntimeStatus = z.infer<typeof runtimeStatusSchema>;
 
 /* ---------- studiod discovery ---------- */
 

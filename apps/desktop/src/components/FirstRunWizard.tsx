@@ -14,6 +14,7 @@ import {
 import type { ModelEntry, Settings } from "@aurea/shared";
 import { useModels, useOnboarding, useSettings } from "@/hooks";
 import { Chip, GhostButton, GoldButton, Progress, cx } from "@/components/ui";
+import { RuntimeCard } from "@/components/RuntimeCard";
 
 /* First-run wizard — PLATFORM-PRD P1. Shown once over the whole app while
  * settings.general.onboarded is false: storage location, detected engines,
@@ -91,11 +92,6 @@ function StorageStep() {
 function EnginesStep({ settings }: { settings: Settings }) {
   const rows: Array<{ label: string; note: string; value: string | null }> = [
     {
-      label: "ComfyUI",
-      note: "image + video generation backend",
-      value: settings.engines.comfyUrl,
-    },
-    {
       label: "Videofast pipeline",
       note: "formats: quote, motivational, whiteboard…",
       value: settings.paths.videofastDir,
@@ -120,9 +116,10 @@ function EnginesStep({ settings }: { settings: Settings }) {
     <div className="space-y-4 py-2">
       <StepHeader
         icon={Cpu}
-        title="Local engines"
-        sub="Aurea probed this machine for known installs. Missing engines just mean the matching lab waits until you add them."
+        title="The generation engine"
+        sub="Aurea installs its own Python and ComfyUI into your data root — downloads keep running while you continue. Anything below that was already on this machine is picked up too."
       />
+      <RuntimeCard />
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-raised/50">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center gap-3 px-4 py-3">

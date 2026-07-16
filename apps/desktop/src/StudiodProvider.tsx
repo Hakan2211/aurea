@@ -97,6 +97,10 @@ function LiveSync() {
     onData: (models) => utils.models.list.setData(undefined, models),
   });
 
+  trpc.runtime.onUpdate.useSubscription(undefined, {
+    onData: (status) => utils.runtime.status.setData(undefined, status),
+  });
+
   return null;
 }
 
