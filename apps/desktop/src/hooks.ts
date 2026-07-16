@@ -756,6 +756,10 @@ export function useSettings() {
       setTtsMode(mode: Settings["engines"]["ttsMode"]) {
         update({ engines: { ttsMode: mode } });
       },
+      musicMode: live?.engines.musicMode ?? "managed",
+      setMusicMode(mode: Settings["engines"]["musicMode"]) {
+        update({ engines: { musicMode: mode } });
+      },
       setDefaultProvider(id: Settings["providers"]["default"]) {
         update({ providers: { default: id } });
       },

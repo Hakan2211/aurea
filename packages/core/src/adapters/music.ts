@@ -1,19 +1,30 @@
-/* Music adapter — description → wav through ACE-Step 1.5, via videofast's
- * audio/gen_music_cli.py run inside ACE-Step's own venv. Style chips fold
+/* Music adapter — description → wav through ACE-Step 1.5. Style chips fold
  * into the caption; "vocals" uses ACE-Step's native singing (the cloned-voice
- * conversion pass is a later rung). Model init dominates wall-clock. */
+ * conversion pass is a later rung). Model init dominates wall-clock.
+ *
+ * Default is the MANAGED engine: the runtime's pinned source checkout + its
+ * own venv + model-manager checkpoints, driven by an embedded entry script.
+ * Setting engines.musicMode = "external" is the escape hatch back to the
+ * operator's own ACE-Step checkout running videofast's gen_music_cli.py. */
 
 import fs from "node:fs";
 import path from "node:path";
 import type { Job } from "@aurea/shared";
 import type { SettingsStore } from "../settings.js";
+import type { ModelManager } from "../models/manager.js";
+import type { EngineRuntime } from "../runtime/runtime.js";
 import { jobRunDir, LastError, runProcess } from "./proc.js";
+import { ACESTEP_SCRIPT } from "./music-script.js";
 import type { AdapterProgress, AdapterRun, EngineAdapter } from "./types.js";
 
 export class MusicAdapter implements EngineAdapter {
   id = "acestep";
 
-  constructor(private settings: SettingsStore) {}
+  constructor(
+    private settings: SettingsStore,
+    private runtime: EngineRuntime,
+    private models: ModelManager,
+  ) {}
 
   canRun(job: Job): boolean {
     return job.payload?.type === "music";
@@ -26,11 +37,7 @@ export class MusicAdapter implements EngineAdapter {
     const done = (async () => {
       const payload = job.payload;
       if (payload?.type !== "music") throw new Error("not a music job");
-      const { paths, engines } = this.settings.get();
-      if (!paths.videofastDir) throw new Error("videofast path not set — Settings → Storage");
-      if (!engines.acestepDir) {
-        throw new Error("ACE-Step not found — set its checkout in Settings → Engines");
-      }
+      const { storage, paths, engines } = this.settings.get();
 
       const runDir = jobRunDir(job.id);
       const out = path.join(runDir, "out", "track.wav");
@@ -38,22 +45,56 @@ export class MusicAdapter implements EngineAdapter {
         .filter(Boolean)
         .join(", ");
 
+      let exe: string;
+      let args: string[];
+      let cwd: string;
+      const env: Record<string, string> = {};
+
+      if (engines.musicMode === "managed") {
+        if (!this.runtime.componentReady("acestep")) {
+          throw new Error("ACE-Step engine not installed — Settings → Engines → Install");
+        }
+        const weights = this.models.list().find((m) => m.id === "acestep-v15");
+        if (weights?.status.state !== "installed") {
+          throw new Error("ACE-Step checkpoints not installed — Settings → Models");
+        }
+        const script = path.join(runDir, "music_acestep.py");
+        fs.writeFileSync(script, ACESTEP_SCRIPT);
+        exe = this.runtime.venvEnginePython("acestep");
+        args = [script];
+        cwd = runDir;
+        env.AUREA_ACESTEP_ROOT = this.runtime.engineRepoDir("acestep");
+        env.AUREA_CHECKPOINT_ROOT = path.join(storage.dataRoot, "models", "acestep-v15");
+        env.AUREA_CAPTION = caption;
+        env.AUREA_DURATION = String(payload.durationSec);
+        env.AUREA_VOCALS = payload.arrangement === "vocals" ? "1" : "0";
+        env.AUREA_OUT_WAV = out;
+      } else {
+        // external: the operator's own checkout runs videofast's CLI
+        if (!paths.videofastDir) throw new Error("videofast path not set — Settings → Storage");
+        if (!engines.acestepDir) {
+          throw new Error("ACE-Step not found — set its checkout in Settings → Engines");
+        }
+        exe = path.join(engines.acestepDir, ".venv", "Scripts", "python.exe");
+        args = [
+          path.join(paths.videofastDir, "audio", "gen_music_cli.py"),
+          "--caption", caption,
+          "--duration", String(payload.durationSec),
+          "--out", out,
+          "--acestep-root", engines.acestepDir,
+        ];
+        if (payload.arrangement === "vocals") args.push("--vocals");
+        cwd = engines.acestepDir;
+      }
+
       const err = new LastError();
       report({ progress: 2, stage: "Starting ACE-Step" });
 
-      const args = [
-        path.join(paths.videofastDir, "audio", "gen_music_cli.py"),
-        "--caption", caption,
-        "--duration", String(payload.durationSec),
-        "--out", out,
-        "--acestep-root", engines.acestepDir,
-      ];
-      if (payload.arrangement === "vocals") args.push("--vocals");
-
       proc = runProcess({
-        exe: path.join(engines.acestepDir, ".venv", "Scripts", "python.exe"),
+        exe,
         args,
-        cwd: engines.acestepDir,
+        cwd,
+        env,
         logFile: path.join(runDir, "run.log"),
         onLine: (line) => {
           err.note(line);

@@ -205,6 +205,10 @@ export const settingsSchema = z.object({
        * against the videofast scripts (narrator/qwen voices are always
        * external — no managed build yet) */
       ttsMode: z.enum(["managed", "external"]).default("managed"),
+      /** "managed" = music runs in the runtime's own ACE-Step venv (pinned
+       * source checkout + model-manager checkpoints); "external" = spawn the
+       * acestepDir checkout's own venv against the videofast CLI */
+      musicMode: z.enum(["managed", "external"]).default("managed"),
       /** python.exe of the Chatterbox TTS venv (character voices) */
       chatterboxPython: z.string().nullable().default(null),
       /** python.exe of the Qwen3-TTS venv (narrator voices) */
@@ -360,6 +364,10 @@ export const modelFileSchema = z.object({
   /** hex sha256 of the complete file (from the publisher's LFS metadata);
    * null for tiny non-LFS files — those install unverified */
   sha256: z.string().nullable(),
+  /** the engine rewrites this file in place after install (e.g. ACE-Step
+   * syncs its remote-code .py files into the checkpoint dir) — installed
+   * means it exists, not that it still matches size/sha */
+  mutable: z.boolean().optional(),
 });
 export type ModelFile = z.infer<typeof modelFileSchema>;
 
@@ -425,8 +433,8 @@ export const modelDownloadSchema = z.object({
 
 /** The managed pieces under <dataRoot>/runtime/: a portable CPython, a
  * headless ComfyUI checkout with its own venv, and one venv per Python
- * engine ("chatterbox" is the first of the venv engines). */
-export const runtimeComponentIdSchema = z.enum(["python", "comfy", "chatterbox"]);
+ * engine ("chatterbox" and "acestep" are the venv engines so far). */
+export const runtimeComponentIdSchema = z.enum(["python", "comfy", "chatterbox", "acestep"]);
 export type RuntimeComponentId = z.infer<typeof runtimeComponentIdSchema>;
 
 export const runtimeComponentStateSchema = z.enum(["absent", "installing", "ready", "error"]);

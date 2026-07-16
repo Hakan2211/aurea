@@ -115,12 +115,17 @@ export class Labs {
   musicCatalog() {
     const { engines } = this.settings.get();
     const cloned = this.voiceCatalog().voices.filter((v) => v.kind === "cloned");
+    const managed = engines.musicMode === "managed";
+    const acestepReady = managed
+      ? this.runtime.componentReady("acestep") &&
+        this.models.list().find((m) => m.id === "acestep-v15")?.status.state === "installed"
+      : !!engines.acestepDir;
     return {
       engine: {
         id: "acestep",
         label: "ACE-Step · local",
-        note: "songs + stems · $0.00",
-        available: !!engines.acestepDir,
+        note: managed ? "songs + stems · managed engine" : "songs + stems · $0.00",
+        available: acestepReady,
       } satisfies LabEngine,
       styleLibrary: [
         "Retro funk", "Sitcom brass", "Upbeat", "Lo-fi", "Orchestral",

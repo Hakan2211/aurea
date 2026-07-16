@@ -62,7 +62,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new VideofastAdapter(settings),
       new ComfyImageAdapter(settings, comfy),
       new TtsAdapter(settings, runtime, models),
-      new MusicAdapter(settings),
+      new MusicAdapter(settings, runtime, models),
       new LtxVideoAdapter(settings),
     ],
     storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),

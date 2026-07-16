@@ -137,7 +137,8 @@ export class ModelManager extends EventEmitter {
   private filesPresent(info: ModelInfo): boolean {
     return info.files.every((f) => {
       try {
-        return fs.statSync(path.join(this.dir(), info.id, f.name)).size === f.sizeBytes;
+        const size = fs.statSync(path.join(this.dir(), info.id, f.name)).size;
+        return f.mutable ? size > 0 : size === f.sizeBytes;
       } catch {
         return false;
       }
@@ -201,7 +202,9 @@ export class ModelManager extends EventEmitter {
     for (const file of info.files) {
       const target = path.join(this.dir(), info.id, file.name);
       try {
-        if (fs.statSync(target).size === file.sizeBytes) {
+        const size = fs.statSync(target).size;
+        // a mutable file the engine already rewrote must not be clobbered
+        if (file.mutable ? size > 0 : size === file.sizeBytes) {
           doneBytes += file.sizeBytes;
           continue;
         }

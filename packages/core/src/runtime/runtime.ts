@@ -44,6 +44,16 @@ export interface VenvEngineSpec {
   name: string;
   /** recorded in runtime.json; shown as the component's pinned version */
   version: string;
+  /** optional pinned source checkout (engines that run from a repo, not a
+   * pip package) — extracted to runtime/engines/<id> like the ComfyUI
+   * install; "{repo}" in step args and check.code resolves to that path */
+  repo?: {
+    /** commit/tag archive zip (GitHub generates these — no published sha,
+     * verified structurally via marker instead) */
+    url: string;
+    /** posix-relative file that must exist after extraction */
+    marker: string;
+  };
   /** pip install invocations, run in order inside the venv */
   steps: { stage: string; args: string[] }[];
   /** import check: `python -c code` must print a line matching expect */
@@ -72,7 +82,56 @@ export const CHATTERBOX_PIN: VenvEngineSpec = {
   expectedBytes: 6 * 1024 ** 3,
 };
 
-export const VENV_ENGINES: VenvEngineSpec[] = [CHATTERBOX_PIN];
+export const ACESTEP_PIN: VenvEngineSpec = {
+  id: "acestep",
+  name: "ACE-Step Music",
+  // upstream pyproject version @ pinned commit (post-v0.1.5, MP3-export fix)
+  version: "1.5.0-f1f8f6c",
+  repo: {
+    url: "https://github.com/ACE-Step/ACE-Step-1.5/archive/f1f8f6c1c9db9ada7a4b68c38c25589752133026.zip",
+    marker: "acestep/handler.py",
+  },
+  steps: [
+    {
+      stage: "Installing PyTorch (CUDA 12.8) — several GB, takes a while",
+      // upstream pins torch==2.7.1+cu128 on Windows; CUDA index first so
+      // PyPI's CPU-only build can never satisfy the pin
+      args: [
+        "torch==2.7.1", "torchvision==0.22.1", "torchaudio==2.7.1",
+        "--index-url", "https://download.pytorch.org/whl/cu128",
+      ],
+    },
+    {
+      stage: "Installing ACE-Step dependencies",
+      // pinned to the versions of a proven working install; torch-coupled
+      // packages (torchcodec/torchao) MUST stay pinned or pip upgrades torch
+      // to a newer CPU build to satisfy them
+      args: [
+        "transformers==4.57.6", "diffusers==0.37.1", "accelerate==1.13.0",
+        "safetensors==0.7.0", "einops==0.8.2", "soundfile==0.13.1",
+        "numba==0.64.0", "vector-quantize-pytorch==1.28.0",
+        "torchao==0.15.0", "torchcodec==0.11.0",
+        "gradio==6.2.0", "matplotlib", "scipy", "loguru", "fastapi",
+        "uvicorn[standard]", "diskcache", "toml", "xxhash==3.6.0",
+        "modelscope==1.35.3", "peft==0.18.1", "lycoris-lora==3.4.0",
+        "lightning==2.6.1", "tensorboard", "typer-slim",
+      ],
+    },
+    {
+      // bundled LM runtime — pure-python on 3.12 (triton/flash-attn markers
+      // self-exclude; nano-vllm falls back to SDPA attention)
+      stage: "Installing nano-vllm (bundled LM runtime)",
+      args: ["{repo}/acestep/third_parts/nano-vllm"],
+    },
+  ],
+  check: {
+    code: 'import sys; sys.path.insert(0, r"{repo}"); from acestep.handler import AceStepHandler; import nanovllm, torch; print("acestep ok cuda="+str(torch.cuda.is_available()))',
+    expect: /acestep ok cuda=/,
+  },
+  expectedBytes: 8 * 1024 ** 3,
+};
+
+export const VENV_ENGINES: VenvEngineSpec[] = [CHATTERBOX_PIN, ACESTEP_PIN];
 
 const TORCH_INDEX = "https://download.pytorch.org/whl/cu128";
 /** rough site-packages + wheel cache footprint of the torch + requirements
@@ -99,6 +158,10 @@ interface RuntimeRecord {
   comfy?: string;
   /** venv engine id -> installed spec version */
   venvs?: Record<string, string>;
+  /** venv engine id -> spec version its source checkout came from (recorded
+   * at extraction, before the venv finishes — keeps resumes cheap while a
+   * pin change still re-fetches) */
+  repos?: Record<string, string>;
   installedAt?: string;
 }
 
@@ -152,6 +215,11 @@ export class EngineRuntime extends EventEmitter {
 
   venvEnginePython(id: RuntimeComponentId): string {
     return path.join(this.venvDir(id), "Scripts", "python.exe");
+  }
+
+  /** a venv engine's pinned source checkout (specs with `repo`) */
+  engineRepoDir(id: RuntimeComponentId): string {
+    return path.join(this.root(), "engines", id);
   }
 
   /* ---------- status ---------- */
@@ -235,8 +303,14 @@ export class EngineRuntime extends EventEmitter {
 
   private venvEngineReady(spec: VenvEngineSpec, record: RuntimeRecord): boolean {
     return (
-      record.venvs?.[spec.id] === spec.version && fs.existsSync(this.venvEnginePython(spec.id))
+      record.venvs?.[spec.id] === spec.version &&
+      fs.existsSync(this.venvEnginePython(spec.id)) &&
+      (!spec.repo || fs.existsSync(this.repoMarker(spec)))
     );
+  }
+
+  private repoMarker(spec: VenvEngineSpec): string {
+    return path.join(this.engineRepoDir(spec.id), ...(spec.repo?.marker.split("/") ?? []));
   }
 
   /* ---------- install ---------- */
@@ -458,6 +532,52 @@ export class EngineRuntime extends EventEmitter {
     const live = this.begin(spec.id);
     const venvDir = this.venvDir(spec.id);
     const cacheDir = path.join(this.root(), "pip-cache");
+    const repoDir = this.engineRepoDir(spec.id);
+    // "{repo}" in step args / check code resolves to the pinned checkout
+    const sub = (s: string) => s.replaceAll("{repo}", repoDir);
+
+    // a pin change re-fetches the checkout so code and version can't drift
+    if (spec.repo && (!fs.existsSync(this.repoMarker(spec)) || this.record().repos?.[spec.id] !== spec.version)) {
+      live.stage = `Downloading ${spec.name} source`;
+      this.publish();
+      const archive = path.join(this.root(), "downloads", `${spec.id}-${spec.version}.zip`);
+      // GitHub generates commit archives on the fly — size unknown, no resume
+      await downloadFile(
+        { url: spec.repo.url, label: `${spec.name} source`, sizeBytes: null, sha256: null },
+        archive,
+        signal,
+        {
+          onBytes: (n) => {
+            live.progress = Math.min(3, n / (10 * 1024 ** 2));
+            live.detail = fmtBytes(n);
+            this.publish();
+          },
+        },
+      );
+
+      live.stage = "Unpacking";
+      live.progress = 3;
+      live.detail = null;
+      this.publish();
+      const staging = path.join(this.root(), `.staging-${spec.id}`);
+      fs.rmSync(staging, { recursive: true, force: true });
+      fs.rmSync(repoDir, { recursive: true, force: true });
+      fs.mkdirSync(staging, { recursive: true });
+      await this.extract(archive, staging, signal);
+      // archive root is <repo>-<sha>; take the single entry
+      const entries = fs.readdirSync(staging);
+      if (
+        entries.length !== 1 ||
+        !fs.existsSync(path.join(staging, entries[0], ...spec.repo.marker.split("/")))
+      ) {
+        throw new Error(`unexpected ${spec.name} archive layout: ${entries.join(", ")}`);
+      }
+      fs.mkdirSync(path.dirname(repoDir), { recursive: true });
+      fs.renameSync(path.join(staging, entries[0]), repoDir);
+      fs.rmSync(staging, { recursive: true, force: true });
+      fs.rmSync(archive, { force: true });
+      this.saveRecord({ repos: { ...this.record().repos, [spec.id]: spec.version } });
+    }
 
     if (!fs.existsSync(this.venvEnginePython(spec.id))) {
       live.stage = "Creating environment";
@@ -482,7 +602,7 @@ export class EngineRuntime extends EventEmitter {
           python,
           [
             "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
-            "--cache-dir", cacheDir, ...step.args,
+            "--cache-dir", cacheDir, ...step.args.map(sub),
           ],
           signal,
           live,
@@ -496,7 +616,7 @@ export class EngineRuntime extends EventEmitter {
     live.progress = 92;
     live.detail = null;
     this.publish();
-    const out = await this.capture(python, ["-c", spec.check.code], signal);
+    const out = await this.capture(python, ["-c", sub(spec.check.code)], signal);
     if (!spec.check.expect.test(out)) {
       throw new Error(`${spec.name} check failed: ${out || "(no output)"}`);
     }

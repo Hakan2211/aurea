@@ -436,8 +436,17 @@ function ModelsSection() {
 /* ---------- engines ---------- */
 
 function EnginesSection() {
-  const { engines, comfyMode, comfyUrl, setComfyMode, setComfyUrl, ttsMode, setTtsMode } =
-    useSettings();
+  const {
+    engines,
+    comfyMode,
+    comfyUrl,
+    setComfyMode,
+    setComfyUrl,
+    ttsMode,
+    setTtsMode,
+    musicMode,
+    setMusicMode,
+  } = useSettings();
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
   return (
     <div className="space-y-5">
@@ -501,6 +510,31 @@ function EnginesSection() {
                 className={cx(
                   "px-3 py-1.5 capitalize transition",
                   ttsMode === m ? "bg-gold text-ink" : "text-fog hover:text-cream",
+                )}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="rounded-2xl border hairline bg-surface/50 p-4">
+        <div className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-cream">Music engine</div>
+            <div className="mt-0.5 text-[10px] text-fog">
+              Managed composes with the runtime&apos;s own ACE-Step; external uses your own
+              checkout.
+            </div>
+          </div>
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+            {(["managed", "external"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMusicMode(m)}
+                className={cx(
+                  "px-3 py-1.5 capitalize transition",
+                  musicMode === m ? "bg-gold text-ink" : "text-fog hover:text-cream",
                 )}
               >
                 {m}
