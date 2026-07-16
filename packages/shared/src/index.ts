@@ -306,6 +306,8 @@ export const directorMessageSchema = z.object({
   at: z.string(),
   text: z.string().optional(),
   tool: directorToolCallSchema.optional(),
+  /** transient — this text is still arriving token by token; never true on disk */
+  streaming: z.boolean().optional(),
 });
 export type DirectorMessage = z.infer<typeof directorMessageSchema>;
 

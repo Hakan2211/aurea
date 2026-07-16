@@ -137,6 +137,11 @@ export const appRouter = router({
       }
     }),
 
+    /** abort the in-flight Claude run; no-op when the Director is idle */
+    stop: procedure
+      .input(z.object({ project: z.string().min(1) }))
+      .mutation(({ ctx, input }) => ctx.director.stop(input.project)),
+
     /** full-thread snapshots per update — chats are short, so no delta protocol */
     onUpdate: procedure
       .input(z.object({ project: z.string().min(1) }))

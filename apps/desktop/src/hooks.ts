@@ -106,6 +106,8 @@ export interface UiToolCall extends Omit<DirectorToolCall, "jobId"> {
 
 export interface UiChatMessage extends ChatMessage {
   toolCall?: UiToolCall;
+  /** this director reply is still arriving token by token */
+  streaming?: boolean;
 }
 
 const fmtTime = (iso: string) =>
@@ -130,18 +132,29 @@ export function useChat() {
   const mutation = trpc.director.send.useMutation({
     onSuccess: (state) => utils.director.get.setData({ project }, state),
   });
+  const stopMutation = trpc.director.stop.useMutation({
+    onSuccess: (state) => utils.director.get.setData({ project }, state),
+  });
   const { mutate } = mutation;
+  const { mutate: stopMutate } = stopMutation;
 
   return useMemo(() => {
     const state = query.data;
     if (!state) {
-      return { messages: chat as UiChatMessage[], busy: false, live: false, send: (_: string) => {} };
+      return {
+        messages: chat as UiChatMessage[],
+        busy: false,
+        live: false,
+        send: (_: string) => {},
+        stop: () => {},
+      };
     }
     const messages: UiChatMessage[] = state.messages.map((m) => ({
       id: m.id,
       role: m.role,
       time: fmtTime(m.at),
       text: m.text,
+      streaming: m.streaming,
       toolCall: m.tool
         ? {
             name: m.tool.name,
@@ -158,8 +171,9 @@ export function useChat() {
       send: (text: string) => {
         if (text.trim()) mutate({ project, text });
       },
+      stop: () => stopMutate({ project }),
     };
-  }, [query.data, jobsData, project, mutate, mutation.isPending]);
+  }, [query.data, jobsData, project, mutate, stopMutate, mutation.isPending]);
 }
 
 /* ---------- director model picker (LIVE) ---------- */

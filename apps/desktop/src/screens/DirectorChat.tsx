@@ -15,6 +15,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Square,
   Wrench,
   X,
 } from "lucide-react";
@@ -103,12 +104,15 @@ function AssetThumb({ asset }: { asset: Asset }) {
 /* ---------- center: chat thread ---------- */
 
 function Thread() {
-  const { messages, busy, send } = useChat();
+  const { messages, busy, send, stop } = useChat();
   const endRef = useRef<HTMLDivElement>(null);
+  const last = messages[messages.length - 1];
+  const streamingNow = !!last?.streaming;
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, busy]);
+    // instant follow while text streams; smooth glide for whole new messages
+    endRef.current?.scrollIntoView({ behavior: streamingNow ? "auto" : "smooth", block: "end" });
+  }, [messages.length, last?.text?.length, streamingNow, busy]);
 
   return (
     <section className="flex min-w-0 flex-1 flex-col">
@@ -134,7 +138,7 @@ function Thread() {
         {messages.map((m) => (
           <Message key={m.id} message={m} />
         ))}
-        {busy && (
+        {busy && !streamingNow && (
           <div className="flex items-center gap-2 text-[11px] text-fog">
             <Loader2 size={12} className="animate-spin text-gold/70" />
             The Director is thinking…
@@ -143,7 +147,7 @@ function Thread() {
         <div ref={endRef} />
       </div>
 
-      <Composer busy={busy} onSend={send} />
+      <Composer busy={busy} onSend={send} onStop={stop} />
     </section>
   );
 }
@@ -166,6 +170,9 @@ function Message({ message }: { message: UiChatMessage }) {
         ) : (
           <div className="rounded-2xl rounded-tl-sm bg-surface px-4 py-2.5 text-[13px] leading-relaxed text-cream/90">
             <Markdown>{message.text}</Markdown>
+            {message.streaming && (
+              <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-sm bg-gold/80 align-text-bottom" />
+            )}
           </div>
         ))}
       {message.toolCall && <ToolCallCard tool={message.toolCall} />}
@@ -355,7 +362,15 @@ function ModelPicker() {
   );
 }
 
-function Composer({ busy, onSend }: { busy: boolean; onSend: (text: string) => void }) {
+function Composer({
+  busy,
+  onSend,
+  onStop,
+}: {
+  busy: boolean;
+  onSend: (text: string) => void;
+  onStop: () => void;
+}) {
   const [text, setText] = useState("");
 
   const submit = () => {
@@ -387,13 +402,23 @@ function Composer({ busy, onSend }: { busy: boolean; onSend: (text: string) => v
             <button className="flex h-8 w-8 items-center justify-center rounded-lg text-fog transition hover:bg-cream/5 hover:text-cream">
               <Paperclip size={15} />
             </button>
-            <button
-              onClick={submit}
-              disabled={busy || !text.trim()}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110 disabled:opacity-40"
-            >
-              <Send size={14} />
-            </button>
+            {busy ? (
+              <button
+                onClick={onStop}
+                title="Stop the Director"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/15 text-cream/80 transition hover:border-ember/60 hover:text-ember"
+              >
+                <Square size={11} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={!text.trim()}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110 disabled:opacity-40"
+              >
+                <Send size={14} />
+              </button>
+            )}
           </div>
         </div>
       </div>

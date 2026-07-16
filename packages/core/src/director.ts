@@ -33,6 +33,8 @@ import { buildTools, createStudiodApi, type AureaTool } from "./tools.js";
 
 const RUN_TIMEOUT_MS = 15 * 60_000;
 const MAX_TURNS = 24;
+/** minimum gap between full-thread snapshots while text is streaming */
+const STREAM_EMIT_MS = 80;
 
 const systemPrompt = (project: string) =>
   [
@@ -85,9 +87,18 @@ function extractJobId(raw: string): string | undefined {
   return undefined;
 }
 
+/** one in-flight Claude run — the handle director.stop aborts */
+interface ActiveRun {
+  abort: AbortController;
+  /** set by stop() so the abort reads as "user pressed stop", not an engine failure */
+  stopped: boolean;
+}
+
 export class DirectorService extends EventEmitter {
   private chats = new Map<string, DirectorChatFile>();
-  private busy = new Set<string>();
+  private runs = new Map<string, ActiveRun>();
+  private lastEmit = new Map<string, number>();
+  private emitTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private settings: SettingsStore,
@@ -103,45 +114,76 @@ export class DirectorService extends EventEmitter {
 
   /** append the user message and kick off a Claude run (async, streams updates) */
   send(project: string, text: string): DirectorState {
-    if (this.busy.has(project)) throw new Error("the Director is still working on the last message");
+    if (this.runs.has(project)) throw new Error("the Director is still working on the last message");
     const chat = this.chat(project);
     chat.messages.push({ id: randomUUID(), role: "user", at: new Date().toISOString(), text });
     this.persist(project);
-    this.busy.add(project);
+    const run: ActiveRun = { abort: new AbortController(), stopped: false };
+    this.runs.set(project, run);
     this.emitState(project);
-    void this.run(project, text).finally(() => {
-      this.busy.delete(project);
+    void this.run(project, text, run).finally(() => {
+      this.runs.delete(project);
       this.persist(project);
       this.emitState(project);
     });
     return this.state(project);
   }
 
+  /** abort the in-flight run, if any — the thread gets a "Stopped." note, not an error */
+  stop(project: string): DirectorState {
+    const run = this.runs.get(project);
+    if (run && !run.stopped) {
+      run.stopped = true;
+      run.abort.abort();
+    }
+    return this.state(project);
+  }
+
   /* ---------- the run ---------- */
 
-  private async run(project: string, prompt: string): Promise<void> {
+  private async run(project: string, prompt: string, run: ActiveRun): Promise<void> {
     const chat = this.chat(project);
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), RUN_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      run.abort.abort();
+    }, RUN_TIMEOUT_MS);
     /** tool_use id → the chat message rendering that call */
     const toolMessages = new Map<string, DirectorMessage>();
+    /** content-block index → text message growing from stream deltas, until the
+     * final assistant message confirms (or supersedes) it */
+    const streams = new Map<number, DirectorMessage>();
 
     try {
-      const q = query({ prompt, options: this.options(project, chat.sessionId, abort) });
+      const q = query({ prompt, options: this.options(project, chat.sessionId, run.abort) });
       for await (const message of q) {
-        this.absorb(project, chat, message, toolMessages);
+        this.absorb(project, chat, message, toolMessages, streams);
       }
     } catch (err) {
-      const detail = String((err as Error)?.message ?? err);
-      this.push(chat, {
-        text:
-          "I couldn't reach the local Claude engine. Make sure Claude Code is installed and " +
-          `logged in (run \`claude\` in a terminal once). — ${detail}`,
-      });
+      if (run.stopped) {
+        this.push(chat, { text: "*Stopped.*" });
+      } else if (timedOut) {
+        this.push(chat, { text: "The Director run timed out after 15 minutes." });
+      } else {
+        const detail = String((err as Error)?.message ?? err);
+        this.push(chat, {
+          text:
+            "I couldn't reach the local Claude engine. Make sure Claude Code is installed and " +
+            `logged in (run \`claude\` in a terminal once). — ${detail}`,
+        });
+      }
       this.persist(project);
       this.emitState(project);
     } finally {
       clearTimeout(timer);
+      // an aborted run leaves loose ends — settle them so nothing spins forever
+      for (const entry of streams.values()) {
+        if (entry.text?.trim()) delete entry.streaming;
+        else chat.messages.splice(chat.messages.indexOf(entry), 1);
+      }
+      for (const entry of toolMessages.values()) {
+        if (entry.tool?.status === "running") entry.tool.status = "error";
+      }
     }
   }
 
@@ -155,6 +197,8 @@ export class DirectorService extends EventEmitter {
       abortController: abort,
       cwd: this.projectDir(project),
       systemPrompt: systemPrompt(project),
+      // stream text deltas so replies render token by token
+      includePartialMessages: true,
       // alias ("sonnet" | "opus" | "haiku") — the local Claude Code resolves it
       model: this.settings.get().providers.claudeModel,
       maxTurns: MAX_TURNS,
@@ -176,17 +220,51 @@ export class DirectorService extends EventEmitter {
     chat: DirectorChatFile,
     message: SDKMessage,
     toolMessages: Map<string, DirectorMessage>,
+    streams: Map<number, DirectorMessage>,
   ): void {
     let dirty = false;
+
+    if (message.type === "stream_event") {
+      if (message.parent_tool_use_id) return; // subagent chatter — not this thread
+      const ev = message.event;
+      if (ev.type === "content_block_start" && ev.content_block.type === "text") {
+        const entry = this.push(chat, { text: "" });
+        entry.streaming = true;
+        streams.set(ev.index, entry);
+      } else if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+        const entry = streams.get(ev.index);
+        if (entry) {
+          entry.text = (entry.text ?? "") + ev.delta.text;
+          this.emitStreaming(project);
+        }
+      }
+      return; // deltas never persist — the final assistant message does
+    }
 
     if (message.type === "system" && message.subtype === "init") {
       chat.sessionId = message.session_id;
       dirty = true;
     } else if (message.type === "assistant") {
+      let index = -1;
       for (const block of message.message.content) {
-        if (block.type === "text" && block.text.trim()) {
-          this.push(chat, { text: block.text.trim() });
-          dirty = true;
+        index += 1;
+        if (block.type === "text") {
+          const streamed = streams.get(index);
+          const text = block.text.trim();
+          if (streamed) {
+            // finalize the message that grew from deltas instead of duplicating it
+            streams.delete(index);
+            if (text) {
+              streamed.text = text;
+              delete streamed.streaming;
+            } else {
+              chat.messages.splice(chat.messages.indexOf(streamed), 1);
+            }
+            dirty = true;
+          } else if (text) {
+            this.push(chat, { text });
+            dirty = true;
+          }
         } else if (block.type === "tool_use") {
           const entry = this.push(chat, {
             tool: {
@@ -249,13 +327,31 @@ export class DirectorService extends EventEmitter {
   private state(project: string): DirectorState {
     return {
       project,
-      status: this.busy.has(project) ? "thinking" : "idle",
+      status: this.runs.has(project) ? "thinking" : "idle",
       messages: this.chat(project).messages,
     };
   }
 
   private emitState(project: string): void {
+    this.lastEmit.set(project, Date.now());
     this.emit("update", this.state(project));
+  }
+
+  /** deltas arrive token by token; coalesce full-thread snapshots to ~12/s */
+  private emitStreaming(project: string): void {
+    if (this.emitTimers.has(project)) return;
+    const since = Date.now() - (this.lastEmit.get(project) ?? 0);
+    if (since >= STREAM_EMIT_MS) {
+      this.emitState(project);
+      return;
+    }
+    this.emitTimers.set(
+      project,
+      setTimeout(() => {
+        this.emitTimers.delete(project);
+        this.emitState(project);
+      }, STREAM_EMIT_MS - since),
+    );
   }
 
   private projectDir(project: string): string {
