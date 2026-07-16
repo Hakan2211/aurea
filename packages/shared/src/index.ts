@@ -145,6 +145,20 @@ export type MusicGenerate = z.input<typeof musicGenerateSchema>;
 export const videoGenerateSchema = videoPayloadSchema.omit({ type: true }).extend(projectField);
 export type VideoGenerate = z.input<typeof videoGenerateSchema>;
 
+/* ---------- voice cloning ---------- */
+
+/** Freeze a reference clip as a named cloned voice. The renderer re-encodes
+ * whatever the user uploaded or recorded into a PCM WAV before sending, so
+ * studiod only ever stores canonical RIFF/WAVE files in <dataRoot>/voices/. */
+export const voiceAddSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  /** base64 of the complete WAV file */
+  wavBase64: z.string().min(100),
+});
+export type VoiceAdd = z.input<typeof voiceAddSchema>;
+
+export const voiceRemoveSchema = z.object({ id: z.string().min(1) });
+
 /* ---------- system ---------- */
 
 export const vramSchema = z.object({

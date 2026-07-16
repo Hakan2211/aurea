@@ -213,6 +213,8 @@ export interface Voice {
   kind: "cloned" | "preset";
   engine: string;
   swatch: string;
+  /** where the reference clip lives — only "studio" voices are deletable */
+  source?: "studio" | "videofast";
 }
 
 export interface VoiceTake {

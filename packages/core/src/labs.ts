@@ -23,9 +23,16 @@ export interface LabVoice {
   name: string;
   kind: "cloned" | "preset";
   engine: string;
+  /** where the reference clip lives — only "studio" voices are deletable */
+  source?: "studio" | "videofast";
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** "studio-narrator" → "Studio Narrator" */
+const voiceName = (id: string) => id.split(/[-_]+/).filter(Boolean).map(cap).join(" ");
+
+const VOICE_ID = /^[a-z0-9][a-z0-9-]*$/;
+const VOICE_MAX_BYTES = 64 * 1024 * 1024;
 
 export class Labs {
   constructor(
@@ -70,17 +77,17 @@ export class Labs {
     const { storage, engines } = this.settings.get();
     const vf = this.vf();
     const voices: LabVoice[] = [];
-    const refDirs = [
-      path.join(storage.dataRoot, "voices"),
-      ...(vf ? [path.join(vf, "assets", "vo", "char_refs")] : []),
+    const refDirs: Array<[string, NonNullable<LabVoice["source"]>]> = [
+      [path.join(storage.dataRoot, "voices"), "studio"],
     ];
-    for (const refDir of refDirs) {
+    if (vf) refDirs.push([path.join(vf, "assets", "vo", "char_refs"), "videofast"]);
+    for (const [refDir, source] of refDirs) {
       if (!fs.existsSync(refDir)) continue;
       for (const entry of fs.readdirSync(refDir)) {
         if (!entry.endsWith(".wav")) continue;
         const id = entry.slice(0, -4).toLowerCase();
         if (voices.some((v) => v.id === id)) continue;
-        voices.push({ id, name: cap(id), kind: "cloned", engine: "Chatterbox" });
+        voices.push({ id, name: voiceName(id), kind: "cloned", engine: "Chatterbox", source });
       }
     }
     voices.push(
@@ -110,6 +117,44 @@ export class Labs {
       voices,
       scriptMax: 5000,
     };
+  }
+
+  /** clone a voice: freeze the (already wav-encoded) sample as
+   * <dataRoot>/voices/<id>.wav — from then on it's on every roster */
+  addVoice(name: string, wav: Buffer): LabVoice {
+    const id = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (!VOICE_ID.test(id)) {
+      throw new Error("voice name needs at least one letter or digit");
+    }
+    if (wav.length > VOICE_MAX_BYTES) {
+      throw new Error("reference clip too large (64 MB max)");
+    }
+    if (
+      wav.length < 1024 ||
+      wav.toString("ascii", 0, 4) !== "RIFF" ||
+      wav.toString("ascii", 8, 12) !== "WAVE"
+    ) {
+      throw new Error("sample is not a WAV file");
+    }
+    if (this.voiceCatalog().voices.some((v) => v.id === id)) {
+      throw new Error(`a voice named "${id}" already exists`);
+    }
+    const dir = path.join(this.settings.get().storage.dataRoot, "voices");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${id}.wav`), wav);
+    return { id, name: voiceName(id), kind: "cloned", engine: "Chatterbox", source: "studio" };
+  }
+
+  /** delete a studio voice's reference clip; videofast char_refs and presets
+   * aren't ours to delete */
+  removeVoice(id: string): void {
+    if (!VOICE_ID.test(id)) throw new Error(`invalid voice id "${id}"`);
+    const file = path.join(this.settings.get().storage.dataRoot, "voices", `${id}.wav`);
+    if (!fs.existsSync(file)) throw new Error(`"${id}" is not a studio voice`);
+    fs.unlinkSync(file);
   }
 
   musicCatalog() {

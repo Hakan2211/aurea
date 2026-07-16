@@ -15,6 +15,8 @@ import {
   settingsUpdateSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
+  voiceAddSchema,
+  voiceRemoveSchema,
   type DirectorState,
   type Job,
   type JobPayload,
@@ -106,6 +108,22 @@ export const appRouter = router({
       generate: procedure.input(ttsGenerateSchema).mutation(({ ctx, input }) => {
         const { project, ...payload } = input;
         return generate(ctx, { type: "tts", ...payload }, project);
+      }),
+      /** freeze an uploaded/recorded sample as a named cloned voice */
+      add: procedure.input(voiceAddSchema).mutation(({ ctx, input }) => {
+        try {
+          return ctx.labs.addVoice(input.name, Buffer.from(input.wavBase64, "base64"));
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+      /** delete a studio voice's reference clip (videofast/preset voices are read-only) */
+      remove: procedure.input(voiceRemoveSchema).mutation(({ ctx, input }) => {
+        try {
+          ctx.labs.removeVoice(input.id);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
       }),
     }),
     music: router({

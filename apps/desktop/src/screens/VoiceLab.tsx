@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRightLeft,
   AudioLines,
@@ -20,14 +20,18 @@ import {
   Plus,
   SkipBack,
   SkipForward,
+  Square,
   Star,
   Store,
+  Trash2,
   Volume2,
+  X,
 } from "lucide-react";
 import { useVoiceLab } from "@/hooks";
 import type { Voice, VoiceTake } from "@/data/sample";
 import { Chip, GoldButton, Waveform, cx } from "@/components/ui";
 import { useAudioPlayer, type AudioPlayer } from "@/components/useAudioPlayer";
+import { sampleFromBlob, useMicRecorder, type VoiceSample } from "@/components/voiceSample";
 
 /* Voice lab — UI-Design/voice lab (TTS,cloning,voice-conversion).jpg.
  * Speak (script → TTS) and Convert (voice-to-voice) over the real engine
@@ -43,69 +47,313 @@ function PanelLabel({ children, hint }: { children: React.ReactNode; hint?: bool
   );
 }
 
+/* ---------- clone-a-voice modal ---------- */
+
+function AddVoiceModal({
+  initialFile,
+  onClose,
+  onAdded,
+}: {
+  /** a file dragged onto the center-stage dropzone arrives preloaded */
+  initialFile: File | null;
+  onClose: () => void;
+  onAdded: (id: string) => void;
+}) {
+  const lab = useVoiceLab();
+  const mic = useMicRecorder();
+  const player = useAudioPlayer();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState("");
+  const [sample, setSample] = useState<VoiceSample | null>(null);
+  const [sampleLabel, setSampleLabel] = useState("");
+  const [decoding, setDecoding] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadBlob = async (blob: Blob, label: string) => {
+    setError("");
+    setDecoding(true);
+    try {
+      const next = await sampleFromBlob(blob);
+      setSample((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return next;
+      });
+      setSampleLabel(label);
+    } catch (err) {
+      setError((err as Error).message || "could not decode that audio");
+    } finally {
+      setDecoding(false);
+    }
+  };
+
+  useEffect(() => {
+    if (initialFile) void loadBlob(initialFile, initialFile.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
+
+  const toggleRecord = async () => {
+    setError("");
+    if (mic.seconds === null) {
+      try {
+        await mic.start();
+      } catch {
+        setError("microphone unavailable");
+      }
+    } else {
+      try {
+        await loadBlob(await mic.stop(), "Mic recording");
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    }
+  };
+
+  const canSave = !!sample && !!name.trim() && !lab.adding;
+  const save = async () => {
+    if (!canSave || !sample) return;
+    setError("");
+    try {
+      const voice = await lab.addVoice(name, sample.wavBase64);
+      onAdded(voice.id);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-ink/85 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-[460px] rounded-2xl border border-cream/12 bg-raised p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-serif text-[18px] font-semibold text-cream">Clone a voice</h3>
+          <button onClick={onClose} className="text-fog/60 transition hover:text-cream">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-fog">
+          10 seconds of clean speech is enough — Chatterbox speaks as this voice from then on.
+        </p>
+
+        <label className="mt-4 block">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+            Voice name
+          </span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value.slice(0, 40))}
+            placeholder="e.g. Studio narrator"
+            className="mt-1.5 w-full rounded-xl border border-cream/10 bg-surface px-3 py-2 text-[12px] text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
+          />
+        </label>
+
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
+          <button
+            onClick={() => fileRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files[0];
+              if (f) void loadBlob(f, f.name);
+            }}
+            className="flex flex-col items-center gap-1 rounded-xl border border-dashed border-cream/15 px-3 py-4 transition hover:border-gold/50 hover:bg-gold/4"
+          >
+            <CloudUpload size={18} strokeWidth={1.5} className="text-gold/80" />
+            <span className="text-[11px] font-medium text-cream/90">Upload a file</span>
+            <span className="text-[9px] text-fog/60">WAV, MP3, M4A — drop it here</span>
+          </button>
+          <button
+            onClick={() => void toggleRecord()}
+            disabled={!mic.supported}
+            className={cx(
+              "flex flex-col items-center gap-1 rounded-xl border px-3 py-4 transition",
+              mic.seconds !== null
+                ? "border-gold/60 bg-gold/8"
+                : "border-dashed border-cream/15 hover:border-gold/50 hover:bg-gold/4",
+              !mic.supported && "opacity-40",
+            )}
+          >
+            {mic.seconds !== null ? (
+              <Square size={18} className="text-gold" />
+            ) : (
+              <Mic size={18} strokeWidth={1.5} className="text-gold/80" />
+            )}
+            <span className="text-[11px] font-medium text-cream/90">
+              {mic.seconds !== null ? `Recording ${mic.seconds.toFixed(0)}s — stop` : "Record from mic"}
+            </span>
+            <span className="text-[9px] text-fog/60">
+              {mic.seconds !== null ? "click to finish" : "speak naturally for ~15s"}
+            </span>
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void loadBlob(f, f.name);
+            e.target.value = "";
+          }}
+        />
+
+        {(sample || decoding) && (
+          <div className="mt-3 flex items-center gap-2.5 rounded-xl border hairline bg-surface/60 p-2.5">
+            <button
+              onClick={() => sample && player.toggle(sample.url)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-cream/15 text-cream/80 transition hover:border-gold/50 hover:text-gold"
+            >
+              {sample && player.src === sample.url && player.playing ? (
+                <Pause size={12} />
+              ) : (
+                <Play size={12} className="ml-0.5" />
+              )}
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] text-cream">
+                {decoding ? "Decoding…" : sampleLabel}
+              </div>
+              <div className="text-[10px] text-fog">
+                {sample ? `${sample.seconds.toFixed(1)}s · mono WAV` : ""}
+              </div>
+            </div>
+            {sample && !decoding && <Check size={14} className="shrink-0 text-sage" />}
+          </div>
+        )}
+
+        {error && <p className="mt-3 text-[11px] text-[#e07a6b]">{error}</p>}
+
+        <GoldButton
+          onClick={() => void save()}
+          className={cx("mt-4 w-full justify-center py-2.5", !canSave && "pointer-events-none opacity-40")}
+        >
+          <AudioLines size={13} /> {lab.adding ? "Saving…" : "Save voice"}
+        </GoldButton>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- left panel: your voices ---------- */
 
 function VoiceRow({
   voice,
   active,
   onSelect,
+  onRemove,
 }: {
   voice: Voice;
   active: boolean;
   onSelect: () => void;
+  /** present only for studio voices — the rest are read-only */
+  onRemove?: () => void;
 }) {
+  const [menu, setMenu] = useState(false);
+  const [armed, setArmed] = useState(false);
   return (
-    <button
-      onClick={onSelect}
-      className={cx(
-        "flex w-full items-center gap-2.5 rounded-xl border p-2 text-left transition",
-        active
-          ? "border-gold/50 bg-surface"
-          : "border-transparent hover:border-cream/15 hover:bg-surface/60",
-      )}
-    >
-      <span
+    <div className="relative">
+      <button
+        onClick={onSelect}
         className={cx(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
-          voice.swatch,
+          "flex w-full items-center gap-2.5 rounded-xl border p-2 text-left transition",
+          active
+            ? "border-gold/50 bg-surface"
+            : "border-transparent hover:border-cream/15 hover:bg-surface/60",
         )}
       >
-        <AudioLines size={14} className="text-cream/80" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-[12px] font-medium text-cream">{voice.name}</span>
-          {active && <i className="h-1.5 w-1.5 rounded-full bg-sage" />}
+        <span
+          className={cx(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+            voice.swatch,
+          )}
+        >
+          <AudioLines size={14} className="text-cream/80" />
         </span>
-        <Chip tone={voice.kind === "cloned" ? "gold" : "muted"} className="mt-1 text-[9px] uppercase tracking-wider">
-          {voice.kind}
-        </Chip>
-      </span>
-      <MoreVertical size={14} className="shrink-0 text-fog/60" />
-    </button>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span className="truncate text-[12px] font-medium text-cream">{voice.name}</span>
+            {active && <i className="h-1.5 w-1.5 rounded-full bg-sage" />}
+          </span>
+          <Chip tone={voice.kind === "cloned" ? "gold" : "muted"} className="mt-1 text-[9px] uppercase tracking-wider">
+            {voice.kind}
+          </Chip>
+        </span>
+        <span
+          onClick={(e) => {
+            if (!onRemove) return;
+            e.stopPropagation();
+            setMenu((m) => !m);
+            setArmed(false);
+          }}
+          className={cx("shrink-0 text-fog/60", onRemove && "transition hover:text-cream")}
+        >
+          <MoreVertical size={14} />
+        </span>
+      </button>
+      {menu && onRemove && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
+          <div className="absolute right-1 top-10 z-20 w-48 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
+            <button
+              onClick={() => {
+                if (!armed) {
+                  setArmed(true);
+                  return;
+                }
+                setMenu(false);
+                onRemove();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5"
+            >
+              <Trash2 size={12} /> {armed ? "Click again to confirm" : "Remove voice"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
 function VoicesPanel({
   voiceId,
   onSelect,
+  onAdd,
 }: {
   voiceId: string;
   onSelect: (id: string) => void;
+  onAdd: () => void;
 }) {
   const lab = useVoiceLab();
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
       <div className="flex items-center justify-between p-4 pb-3">
         <PanelLabel>Your voices</PanelLabel>
-        <button className="flex items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[11px] text-cream/80 transition hover:border-gold/40 hover:text-gold">
+        <button
+          onClick={onAdd}
+          className="flex items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[11px] text-cream/80 transition hover:border-gold/40 hover:text-gold"
+        >
           <Plus size={12} /> Add voice
         </button>
       </div>
 
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
         {lab.voices.map((v) => (
-          <VoiceRow key={v.id} voice={v} active={v.id === voiceId} onSelect={() => onSelect(v.id)} />
+          <VoiceRow
+            key={v.id}
+            voice={v}
+            active={v.id === voiceId}
+            onSelect={() => onSelect(v.id)}
+            onRemove={
+              v.source === "studio"
+                ? () => lab.removeVoice(v.id).catch((err) => console.error("remove voice:", err))
+                : undefined
+            }
+          />
         ))}
       </div>
 
@@ -171,10 +419,13 @@ function CenterStage({
   voice,
   selectedTake,
   player,
+  onClone,
 }: {
   voice: Voice;
   selectedTake: VoiceTake | undefined;
   player: AudioPlayer;
+  /** open the clone modal, optionally preloaded with a dropped file */
+  onClone: (file?: File) => void;
 }) {
   const lab = useVoiceLab();
   const [script, setScript] = useState(lab.script);
@@ -280,11 +531,19 @@ function CenterStage({
 
       {/* clone from sample */}
       <section>
-        <PanelLabel hint>Clone from sample (optional)</PanelLabel>
-        <button className="mt-2 flex w-full flex-col items-center gap-1 rounded-xl border border-dashed border-cream/15 px-4 py-5 transition hover:border-gold/50 hover:bg-gold/4">
+        <PanelLabel hint>Clone a new voice (optional)</PanelLabel>
+        <button
+          onClick={() => onClone()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            onClone(e.dataTransfer.files[0] ?? undefined);
+          }}
+          className="mt-2 flex w-full flex-col items-center gap-1 rounded-xl border border-dashed border-cream/15 px-4 py-5 transition hover:border-gold/50 hover:bg-gold/4"
+        >
           <CloudUpload size={20} strokeWidth={1.5} className="text-gold/80" />
           <span className="text-[12px] font-medium text-cream/90">
-            Drop an audio file here or click to upload
+            Drop an audio file here, upload, or record from the mic
           </span>
           <span className="text-[10px] text-fog/60">WAV, MP3, M4A up to 30 MB · 10s is enough</span>
         </button>
@@ -570,6 +829,10 @@ export function VoiceLab() {
   const player = useAudioPlayer();
   const [voiceId, setVoiceId] = useState(lab.voices[0]?.id ?? "");
   const [takeId, setTakeId] = useState<string | null>(null);
+  const [clone, setClone] = useState<{ open: boolean; file: File | null }>({
+    open: false,
+    file: null,
+  });
   const voice = lab.voices.find((v) => v.id === voiceId) ?? lab.voices[0];
   const selectedTake: VoiceTake | undefined =
     lab.takes.find((t) => t.id === takeId) ?? lab.takes.find((t) => t.selected) ?? lab.takes[0];
@@ -578,11 +841,30 @@ export function VoiceLab() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex min-h-0 flex-1">
-        <VoicesPanel voiceId={voice.id} onSelect={setVoiceId} />
-        <CenterStage voice={voice} selectedTake={selectedTake} player={player} />
+        <VoicesPanel
+          voiceId={voice.id}
+          onSelect={setVoiceId}
+          onAdd={() => setClone({ open: true, file: null })}
+        />
+        <CenterStage
+          voice={voice}
+          selectedTake={selectedTake}
+          player={player}
+          onClone={(file) => setClone({ open: true, file: file ?? null })}
+        />
         <TakesRail selectedId={selectedTake?.id} player={player} onSelect={setTakeId} />
       </div>
       <PlayerBar voice={voice} selectedTake={selectedTake} player={player} />
+      {clone.open && (
+        <AddVoiceModal
+          initialFile={clone.file}
+          onClose={() => setClone({ open: false, file: null })}
+          onAdded={(id) => {
+            setClone({ open: false, file: null });
+            setVoiceId(id);
+          }}
+        />
+      )}
     </div>
   );
 }

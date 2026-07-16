@@ -386,10 +386,20 @@ export function useVoiceLab() {
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("audio");
   const mutation = trpc.labs.voice.generate.useMutation(invalidate);
   const { mutate } = mutation;
+  const utils = trpc.useUtils();
+  // adding/removing a voice reshapes every lab catalog that lists voices
+  const refreshVoices = { onSuccess: () => void utils.labs.invalidate() };
+  const addMutation = trpc.labs.voice.add.useMutation(refreshVoices);
+  const removeMutation = trpc.labs.voice.remove.useMutation(refreshVoices);
+  const { mutateAsync: addAsync } = addMutation;
+  const { mutateAsync: removeAsync } = removeMutation;
 
   return useMemo(() => {
     const generate = (input: Omit<TtsGenerate, "project">) => mutate({ ...input, project });
-    if (!catalog || !kindAssets) return { ...voiceLab, generate, busy: false };
+    const addVoice = (name: string, wavBase64: string) => addAsync({ name, wavBase64 });
+    const removeVoice = (id: string) => removeAsync({ id });
+    const cloning = { addVoice, removeVoice, adding: addMutation.isPending };
+    if (!catalog || !kindAssets) return { ...voiceLab, ...cloning, generate, busy: false };
 
     const active = labJobs(jobsData, "tts");
     const takes: VoiceTake[] = [
@@ -414,6 +424,7 @@ export function useVoiceLab() {
 
     return {
       ...voiceLab,
+      ...cloning,
       engines: catalog.engines.map(({ available, ...e }) =>
         available ? e : { ...e, note: "not installed" },
       ),
@@ -424,7 +435,7 @@ export function useVoiceLab() {
       generate,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending]);
+  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending, addAsync, removeAsync, addMutation.isPending]);
 }
 
 const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
