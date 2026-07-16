@@ -216,6 +216,8 @@ export const settingsSchema = z.object({
     hardwareAcceleration: z.boolean().default(true),
     keepInTray: z.boolean().default(true),
     telemetry: z.boolean().default(false),
+    /** first-run wizard completed (or skipped) — the renderer stops showing it */
+    onboarded: z.boolean().default(false),
   }),
   advanced: z.object({
     prereleaseEngines: z.boolean().default(false),
@@ -332,6 +334,82 @@ export const directorChatFileSchema = z.object({
   messages: z.array(directorMessageSchema).default([]),
 });
 export type DirectorChatFile = z.infer<typeof directorChatFileSchema>;
+
+/* ---------- model manager ---------- */
+
+/** which lab a model powers ("utility" = pipeline stages like upscaling) */
+export const modelUseSchema = z.enum(["image", "video", "voice", "music", "utility"]);
+export type ModelUse = z.infer<typeof modelUseSchema>;
+
+/** One file of a model, downloaded to <dataRoot>/models/<modelId>/<name>. */
+export const modelFileSchema = z.object({
+  /** path relative to the model's folder */
+  name: z.string(),
+  url: z.string(),
+  sizeBytes: z.number(),
+  /** hex sha256 of the complete file (from the publisher's LFS metadata);
+   * null for tiny non-LFS files — those install unverified */
+  sha256: z.string().nullable(),
+});
+export type ModelFile = z.infer<typeof modelFileSchema>;
+
+export const modelLicenseSchema = z.object({
+  name: z.string(),
+  url: z.string(),
+  /** true = the user must explicitly accept before the download can start */
+  gated: z.boolean(),
+});
+
+/** Registry entry — the curated catalog studiod ships with. */
+export const modelInfoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  use: modelUseSchema,
+  /** which engine consumes it (display only) */
+  engine: z.string(),
+  description: z.string(),
+  /** sum of files[].sizeBytes, precomputed for display */
+  sizeBytes: z.number(),
+  files: z.array(modelFileSchema),
+  license: modelLicenseSchema,
+  /** the first-run wizard preselects these */
+  essential: z.boolean(),
+});
+export type ModelInfo = z.infer<typeof modelInfoSchema>;
+
+export const modelStateSchema = z.enum([
+  "absent",
+  "downloading",
+  "verifying",
+  "installed",
+  "error",
+]);
+export type ModelState = z.infer<typeof modelStateSchema>;
+
+/** Live install status. "absent" with bytes > 0 = a paused/partial download
+ * that the next download() call resumes where it stopped. */
+export const modelStatusSchema = z.object({
+  state: modelStateSchema,
+  /** bytes on disk so far, across finished files and .part files */
+  bytes: z.number(),
+  progress: z.number().min(0).max(100),
+  /** live transfer rate; null unless downloading */
+  bytesPerSec: z.number().nullable(),
+  /** file currently transferring (downloading/verifying) */
+  file: z.string().nullable(),
+  error: z.string().nullable(),
+  licenseAccepted: z.boolean(),
+});
+export type ModelStatus = z.infer<typeof modelStatusSchema>;
+
+export const modelEntrySchema = modelInfoSchema.extend({ status: modelStatusSchema });
+export type ModelEntry = z.infer<typeof modelEntrySchema>;
+
+export const modelDownloadSchema = z.object({
+  id: z.string().min(1),
+  /** records acceptance of a gated license before starting */
+  acceptLicense: z.boolean().default(false),
+});
 
 /* ---------- studiod discovery ---------- */
 

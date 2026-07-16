@@ -17,6 +17,7 @@ import { SettingsStore } from "./settings.js";
 import { ProjectStore } from "./projects.js";
 import { Labs } from "./labs.js";
 import { DirectorService } from "./director.js";
+import { ModelManager } from "./models/manager.js";
 import { VideofastAdapter } from "./adapters/videofast.js";
 import { ImageAdapter } from "./adapters/image.js";
 import { TtsAdapter } from "./adapters/tts.js";
@@ -74,7 +75,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     if (!selfCoords) throw new Error("studiod is not listening yet");
     return selfCoords;
   });
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director };
+  const models = new ModelManager(settings);
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,
@@ -140,6 +142,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     close: async () => {
       wsHandler.broadcastReconnectNotification();
       engine.close();
+      models.close();
       monitor.close();
       wss.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

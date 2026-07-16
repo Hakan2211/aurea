@@ -6,6 +6,7 @@ import type {
   JobPayload,
   LibraryAsset as CoreAsset,
   LibraryKind,
+  ModelEntry,
   MusicGenerate,
   Settings,
   TtsGenerate,
@@ -203,6 +204,44 @@ export function useDirectorModel() {
 
 export function useFormats() {
   return { formats: FORMATS, packs: STYLE_PACKS };
+}
+
+/* ---------- model manager (LIVE) ---------- */
+
+/** LIVE — the downloadable-weights registry with per-model install status.
+ * models.onUpdate (mounted in LiveSync) streams progress while downloads run.
+ * No sample fallback: without a core the Models UI shows its empty state. */
+export function useModels() {
+  const query = trpc.models.list.useQuery();
+  const utils = trpc.useUtils();
+  const refresh = {
+    onSuccess: () => void utils.models.list.invalidate(),
+    onError: () => void utils.models.list.invalidate(),
+  };
+  const { mutate: download } = trpc.models.download.useMutation(refresh);
+  const { mutate: cancel } = trpc.models.cancel.useMutation(refresh);
+  const { mutate: remove } = trpc.models.remove.useMutation(refresh);
+  return {
+    models: (query.data ?? []) as ModelEntry[],
+    live: !!query.data,
+    download: (id: string, acceptLicense = false) => download({ id, acceptLicense }),
+    cancel: (id: string) => cancel({ id }),
+    remove: (id: string) => remove({ id }),
+  };
+}
+
+/** whether the first-run wizard should be on screen (live core, not onboarded) */
+export function useOnboarding() {
+  const live = trpc.settings.get.useQuery().data;
+  const utils = trpc.useUtils();
+  const { mutate } = trpc.settings.update.useMutation({
+    onSuccess: (next) => utils.settings.get.setData(undefined, next),
+  });
+  return {
+    showWizard: !!live && !live.general.onboarded,
+    settings: live,
+    finish: () => mutate({ general: { onboarded: true } }),
+  };
 }
 
 /* ---------- labs (LIVE) ----------

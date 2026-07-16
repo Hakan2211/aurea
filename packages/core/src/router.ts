@@ -11,12 +11,14 @@ import {
   projectCreateSchema,
   projectRenameSchema,
   directorSendSchema,
+  modelDownloadSchema,
   settingsUpdateSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
   type DirectorState,
   type Job,
   type JobPayload,
+  type ModelEntry,
   type Vram,
 } from "@aurea/shared";
 import { labEnqueue } from "./labs.js";
@@ -151,6 +153,34 @@ export const appRouter = router({
           if ((state as DirectorState).project === input.project) yield state as DirectorState;
         }
       }),
+  }),
+
+  models: router({
+    /** the curated registry with live install status per entry */
+    list: procedure.query(({ ctx }) => ctx.models.list()),
+
+    /** start (or resume) a download; gated licenses need acceptLicense once */
+    download: procedure.input(modelDownloadSchema).mutation(({ ctx, input }) => {
+      try {
+        return ctx.models.download(input.id, input.acceptLicense);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
+    }),
+
+    /** stop an in-flight download — partial files stay for a later resume */
+    cancel: procedure.input(jobId).mutation(({ ctx, input }) => ctx.models.cancel(input.id)),
+
+    /** delete a model's files from disk */
+    remove: procedure.input(jobId).mutation(({ ctx, input }) => ctx.models.remove(input.id)),
+
+    /** registry snapshots — throttled to ~2/s while a download streams */
+    onUpdate: procedure.subscription(async function* ({ ctx, signal }) {
+      yield ctx.models.list();
+      for await (const [list] of on(ctx.models, "update", { signal })) {
+        yield list as ModelEntry[];
+      }
+    }),
   }),
 
   settings: router({

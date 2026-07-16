@@ -1,5 +1,6 @@
 import { HashRouter, Route, Routes } from "react-router";
 import { AppShell } from "@/components/AppShell";
+import { FirstRunWizard } from "@/components/FirstRunWizard";
 import { AssetLibrary } from "@/screens/AssetLibrary";
 import { DirectorChat } from "@/screens/DirectorChat";
 import { Formats } from "@/screens/Formats";
@@ -15,6 +16,7 @@ import { VoiceLab } from "@/screens/VoiceLab";
 export function App() {
   return (
     <HashRouter>
+      <FirstRunWizard />
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<DirectorChat />} />

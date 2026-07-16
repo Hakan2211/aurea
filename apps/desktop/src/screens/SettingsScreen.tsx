@@ -5,10 +5,15 @@ import {
   ChevronDown,
   Cpu,
   Database,
+  Download,
+  ExternalLink,
   Eye,
   Folder,
+  HardDriveDownload,
   Keyboard,
   MoreVertical,
+  Pause,
+  Play,
   Settings2,
   SlidersHorizontal,
   Sparkles,
@@ -17,9 +22,10 @@ import {
   Trash2,
   Waypoints,
 } from "lucide-react";
-import { useSettings } from "@/hooks";
+import type { ModelEntry } from "@aurea/shared";
+import { useModels, useSettings } from "@/hooks";
 import type { Provider } from "@/data/sample";
-import { Chip, GhostButton, cx } from "@/components/ui";
+import { Chip, GhostButton, GoldButton, Progress, cx } from "@/components/ui";
 
 /* Settings — UI-Design/settings.jpg. Sub-nav on the left (General, AI
  * Providers, Storage, Engines, Shortcuts, Advanced); AI Providers is the
@@ -30,6 +36,7 @@ const SECTIONS = [
   { id: "general", label: "General", icon: Settings2 },
   { id: "providers", label: "AI Providers", icon: Bot },
   { id: "storage", label: "Storage", icon: Database },
+  { id: "models", label: "Models", icon: HardDriveDownload },
   { id: "engines", label: "Engines", icon: Cpu },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "advanced", label: "Advanced", icon: SlidersHorizontal },
@@ -304,6 +311,127 @@ function StorageSection() {
   );
 }
 
+/* ---------- models ---------- */
+
+const fmtSize = (b: number) =>
+  b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : `${Math.round(b / 1024 ** 2)} MB`;
+
+function ModelActions({ m }: { m: ModelEntry }) {
+  const { download, cancel, remove } = useModels();
+  const [confirmLicense, setConfirmLicense] = useState(false);
+  const s = m.status;
+
+  if (s.state === "downloading" || s.state === "verifying")
+    return (
+      <GhostButton onClick={() => cancel(m.id)}>
+        <Pause size={12} /> Pause
+      </GhostButton>
+    );
+
+  if (s.state === "installed")
+    return (
+      <div className="flex items-center gap-2">
+        <Chip tone="sage" className="text-[10px]">
+          <Check size={10} /> Installed
+        </Chip>
+        <button
+          onClick={() => remove(m.id)}
+          title="Remove from disk"
+          className="text-fog/60 transition hover:text-[#e07a6b]"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+    );
+
+  // absent / error — offer download (resume when partial bytes exist)
+  const resume = s.bytes > 0;
+  if (m.license.gated && !s.licenseAccepted && !confirmLicense)
+    return (
+      <GhostButton onClick={() => setConfirmLicense(true)}>
+        <Download size={12} /> {resume ? "Resume" : "Download"}
+      </GhostButton>
+    );
+  if (m.license.gated && !s.licenseAccepted)
+    return (
+      <GoldButton onClick={() => download(m.id, true)}>
+        <Check size={12} /> Accept license &amp; download
+      </GoldButton>
+    );
+  return (
+    <GhostButton onClick={() => download(m.id)}>
+      {resume ? <Play size={12} /> : <Download size={12} />} {resume ? "Resume" : "Download"}
+    </GhostButton>
+  );
+}
+
+function ModelsSection() {
+  const { models, live } = useModels();
+  return (
+    <div className="space-y-5">
+      <SectionHeader
+        title="Models"
+        sub="Downloadable weights for the local engines. Files land in your data root, resume if interrupted, and are checksum-verified."
+      />
+      {!live ? (
+        <div className="rounded-2xl border hairline bg-surface/50 p-8 text-center text-[12px] text-fog">
+          The studio core isn't reachable — model management needs a running studiod.
+        </div>
+      ) : (
+        <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
+          {models.map((m) => {
+            const s = m.status;
+            const busy = s.state === "downloading" || s.state === "verifying";
+            return (
+              <div key={m.id} className="px-4 py-3.5">
+                <div className="flex items-center gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[13px] font-medium text-cream">{m.name}</span>
+                      <span className="truncate text-[10px] text-fog">{m.engine}</span>
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-fog/85">{m.description}</div>
+                    <a
+                      href={m.license.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-fog/70 transition hover:text-gold"
+                    >
+                      {m.license.name} <ExternalLink size={8} />
+                    </a>
+                  </div>
+                  <span className="shrink-0 text-[11px] tabular-nums text-fog">
+                    {s.bytes > 0 && s.state !== "installed"
+                      ? `${fmtSize(s.bytes)} of ${fmtSize(m.sizeBytes)}`
+                      : fmtSize(m.sizeBytes)}
+                  </span>
+                  <div className="flex w-56 shrink-0 items-center justify-end">
+                    <ModelActions m={m} />
+                  </div>
+                </div>
+                {busy && (
+                  <div className="mt-2.5 flex items-center gap-3">
+                    <Progress value={s.progress} className="flex-1" />
+                    <span className="shrink-0 text-[10px] tabular-nums text-fog">
+                      {s.progress.toFixed(0)}%
+                      {s.bytesPerSec ? ` · ${fmtSize(s.bytesPerSec)}/s` : ""}
+                      {s.state === "verifying" ? " · verifying" : ""}
+                      {s.file ? ` · ${s.file}` : ""}
+                    </span>
+                  </div>
+                )}
+                {s.state === "error" && (
+                  <div className="mt-1.5 text-[10px] text-[#e07a6b]">{s.error}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- engines ---------- */
 
 function EnginesSection() {
@@ -456,6 +584,7 @@ export function SettingsScreen() {
           {section === "general" && <GeneralSection />}
           {section === "providers" && <ProvidersSection />}
           {section === "storage" && <StorageSection />}
+          {section === "models" && <ModelsSection />}
           {section === "engines" && <EnginesSection />}
           {section === "shortcuts" && <ShortcutsSection />}
           {section === "advanced" && <AdvancedSection />}

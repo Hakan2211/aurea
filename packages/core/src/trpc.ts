@@ -5,6 +5,7 @@ import type { SettingsStore } from "./settings.js";
 import type { ProjectStore } from "./projects.js";
 import type { Labs } from "./labs.js";
 import type { DirectorService } from "./director.js";
+import type { ModelManager } from "./models/manager.js";
 
 export interface Context {
   /** did the request present the boot token (HTTP bearer / WS connectionParams)? */
@@ -15,6 +16,7 @@ export interface Context {
   projects: ProjectStore;
   labs: Labs;
   director: DirectorService;
+  models: ModelManager;
 }
 
 const t = initTRPC.context<Context>().create();

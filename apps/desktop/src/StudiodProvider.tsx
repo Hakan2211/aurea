@@ -93,6 +93,10 @@ function LiveSync() {
     onData: (vram) => utils.system.vram.setData(undefined, vram),
   });
 
+  trpc.models.onUpdate.useSubscription(undefined, {
+    onData: (models) => utils.models.list.setData(undefined, models),
+  });
+
   return null;
 }
 
