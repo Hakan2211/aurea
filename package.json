@@ -13,6 +13,9 @@
     "package": "npm run package -w @aurea/desktop",
     "studiod": "tsx packages/core/src/bin.ts",
     "mcp": "tsx packages/core/src/mcp.ts",
+    "mcp:on": "node scripts/mcp-toggle.mjs on",
+    "mcp:off": "node scripts/mcp-toggle.mjs off",
+    "mcp:status": "node scripts/mcp-toggle.mjs status",
     "typecheck:core": "tsc --noEmit -p packages/core"
   },
   "devDependencies": {
