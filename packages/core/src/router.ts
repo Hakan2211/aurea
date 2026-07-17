@@ -13,6 +13,7 @@ import {
   directorSendSchema,
   modelDownloadSchema,
   settingsUpdateSchema,
+  timelineUpdateSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
   voiceAddSchema,
@@ -172,6 +173,20 @@ export const appRouter = router({
           if ((state as DirectorState).project === input.project) yield state as DirectorState;
         }
       }),
+  }),
+
+  timeline: router({
+    get: procedure
+      .input(z.object({ project: z.string().min(1) }))
+      .query(({ ctx, input }) => ctx.timelines.get(input.project)),
+
+    /** whole-document save — sequences are small, the renderer owns edit state */
+    update: procedure.input(timelineUpdateSchema).mutation(({ ctx, input }) => {
+      if (!ctx.projects.list().some((p) => p.id === input.project)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `unknown project "${input.project}"` });
+      }
+      return ctx.timelines.update(input.project, input.timeline);
+    }),
   }),
 
   models: router({

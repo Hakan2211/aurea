@@ -34,9 +34,10 @@ export class ComfyService {
   ) {}
 
   /** Run work against a live ComfyUI; the managed sidecar can't idle-unload
-   * underneath it. This is the door adapters use. */
-  async run<T>(fn: (url: string) => Promise<T>): Promise<T> {
-    const url = await this.ensure();
+   * underneath it. This is the door adapters use. mode defaults to the image
+   * pipeline's comfyMode; the video adapter passes its own videoMode. */
+  async run<T>(fn: (url: string) => Promise<T>, mode?: "managed" | "external"): Promise<T> {
+    const url = await this.ensure(mode);
     this.busy += 1;
     clearTimeout(this.idleTimer);
     try {
@@ -48,9 +49,9 @@ export class ComfyService {
   }
 
   /** Base URL of a live ComfyUI, starting the managed sidecar if needed. */
-  async ensure(): Promise<string> {
+  async ensure(mode?: "managed" | "external"): Promise<string> {
     const { engines } = this.settings.get();
-    if (engines.comfyMode === "external") {
+    if ((mode ?? engines.comfyMode) === "external") {
       const url = engines.comfyUrl.replace(/\/$/, "");
       if (!(await new ComfyClient(url).health())) {
         throw new Error(

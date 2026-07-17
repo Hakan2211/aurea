@@ -190,6 +190,7 @@ const COMFY_CATEGORIES = [
   "vae",
   "loras",
   "upscale_models",
+  "latent_upscale_models",
   "clip_vision",
   "controlnet",
 ];

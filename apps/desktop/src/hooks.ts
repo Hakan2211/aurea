@@ -211,6 +211,47 @@ export function useFormats() {
   return { formats: FORMATS, packs: STYLE_PACKS };
 }
 
+/* ---------- timeline (LIVE) ---------- */
+
+/** LIVE — the project's sequence. The screen edits a local copy and saves the
+ * whole document, debounced; timeline.json in the project folder is the truth. */
+export function useTimeline() {
+  const project = useActiveProjectId();
+  const media = useMediaBase();
+  const query = trpc.timeline.get.useQuery({ project }, { enabled: !!project, staleTime: Infinity });
+  const library = trpc.library.list.useQuery().data?.assets;
+  const { mutate } = trpc.timeline.update.useMutation();
+
+  const assetByRel = useMemo(() => {
+    const map = new Map<string, { url?: string; kind: LibraryKind; name: string }>();
+    for (const a of library ?? []) {
+      map.set(a.relPath, { url: media ? media(a.url) : undefined, kind: a.kind, name: a.name });
+    }
+    return map;
+  }, [library, media]);
+
+  return {
+    project,
+    initial: query.data,
+    live: !!query.data,
+    /** media candidates for the shot rail, newest first */
+    pool: useMemo(
+      () =>
+        (library ?? [])
+          .filter((a) => a.kind !== "model3d")
+          .map((a) => ({
+            relPath: a.relPath,
+            name: a.name,
+            kind: a.kind,
+            url: media ? media(a.url) : undefined,
+          })),
+      [library, media],
+    ),
+    resolve: (relPath: string) => assetByRel.get(relPath),
+    save: (timeline: NonNullable<typeof query.data>) => mutate({ project, timeline }),
+  };
+}
+
 /* ---------- model manager (LIVE) ---------- */
 
 /** LIVE — the downloadable-weights registry with per-model install status.
@@ -774,6 +815,10 @@ export function useSettings() {
       musicMode: live?.engines.musicMode ?? "managed",
       setMusicMode(mode: Settings["engines"]["musicMode"]) {
         update({ engines: { musicMode: mode } });
+      },
+      videoMode: live?.engines.videoMode ?? "external",
+      setVideoMode(mode: Settings["engines"]["videoMode"]) {
+        update({ engines: { videoMode: mode } });
       },
       setDefaultProvider(id: Settings["providers"]["default"]) {
         update({ providers: { default: id } });

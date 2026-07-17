@@ -24,6 +24,10 @@ export interface ComfyOutputImage {
   data: Buffer;
 }
 
+/** any saved artifact — SaveImage lists under "images", SaveVideo under
+ * "videos"/"video"; collectOutputs walks every key so both arrive */
+export type ComfyOutputFile = ComfyOutputImage;
+
 const HISTORY_POLL_MS = 2_000;
 
 export class ComfyClient {
@@ -155,24 +159,43 @@ export class ComfyClient {
   }
 
   private async collectImages(entry: unknown): Promise<ComfyOutputImage[]> {
-    const images: ComfyOutputImage[] = [];
+    const files: ComfyOutputFile[] = [];
     const outputs =
-      (entry as { outputs?: Record<string, { images?: Array<Record<string, string>> }> })
-        .outputs ?? {};
+      (entry as { outputs?: Record<string, Record<string, unknown>> }).outputs ?? {};
     for (const node of Object.values(outputs)) {
-      for (const img of node.images ?? []) {
-        if (img.type && img.type !== "output") continue; // skip previews/temp
-        const q = new URLSearchParams({
-          filename: img.filename,
-          subfolder: img.subfolder ?? "",
-          type: img.type ?? "output",
-        });
-        const res = await fetch(`${this.baseUrl}/view?${q}`);
-        if (!res.ok) throw new Error(`ComfyUI /view failed for ${img.filename}`);
-        images.push({ filename: img.filename, data: Buffer.from(await res.arrayBuffer()) });
+      for (const value of Object.values(node)) {
+        if (!Array.isArray(value)) continue;
+        for (const item of value as Array<Record<string, string>>) {
+          if (!item || typeof item !== "object" || !item.filename) continue;
+          if (item.type && item.type !== "output") continue; // skip previews/temp
+          const q = new URLSearchParams({
+            filename: item.filename,
+            subfolder: item.subfolder ?? "",
+            type: item.type ?? "output",
+          });
+          const res = await fetch(`${this.baseUrl}/view?${q}`);
+          if (!res.ok) throw new Error(`ComfyUI /view failed for ${item.filename}`);
+          files.push({ filename: item.filename, data: Buffer.from(await res.arrayBuffer()) });
+        }
       }
     }
-    return images;
+    return files;
+  }
+
+  /** Stage a file into ComfyUI's input tree (multipart /upload/image — the
+   * endpoint takes any media; LoadImage and LoadAudio both read from input).
+   * Returns the staged name ("subfolder/file") for graph inputs. */
+  async uploadInput(filename: string, data: Buffer, subfolder = "aurea"): Promise<string> {
+    const form = new FormData();
+    form.append("image", new Blob([new Uint8Array(data)]), filename);
+    form.append("type", "input");
+    form.append("subfolder", subfolder);
+    form.append("overwrite", "true");
+    const res = await fetch(`${this.baseUrl}/upload/image`, { method: "POST", body: form });
+    if (!res.ok) throw new Error(`ComfyUI /upload/image failed (HTTP ${res.status})`);
+    const body = (await res.json()) as { name?: string; subfolder?: string };
+    const name = body.name ?? filename;
+    return body.subfolder ? `${body.subfolder}/${name}` : name;
   }
 
   /** best-effort: stop the running graph and drop it from the queue */

@@ -446,6 +446,8 @@ function EnginesSection() {
     setTtsMode,
     musicMode,
     setMusicMode,
+    videoMode,
+    setVideoMode,
   } = useSettings();
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
   return (
@@ -535,6 +537,31 @@ function EnginesSection() {
                 className={cx(
                   "px-3 py-1.5 capitalize transition",
                   musicMode === m ? "bg-gold text-ink" : "text-fog hover:text-cream",
+                )}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="rounded-2xl border hairline bg-surface/50 p-4">
+        <div className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-cream">Video engine</div>
+            <div className="mt-0.5 text-[10px] text-fog">
+              LTX 2.3 renders. Managed uses the runtime above with the LTX 2.3 22B weight set
+              (Settings → Models, ~42 GB); external queues on your ComfyUI URL.
+            </div>
+          </div>
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+            {(["managed", "external"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setVideoMode(m)}
+                className={cx(
+                  "px-3 py-1.5 capitalize transition",
+                  videoMode === m ? "bg-gold text-ink" : "text-fog hover:text-cream",
                 )}
               >
                 {m}

@@ -7,6 +7,7 @@ import type { Labs } from "./labs.js";
 import type { DirectorService } from "./director.js";
 import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
+import type { TimelineStore } from "./timeline.js";
 
 export interface Context {
   /** did the request present the boot token (HTTP bearer / WS connectionParams)? */
@@ -19,6 +20,7 @@ export interface Context {
   director: DirectorService;
   models: ModelManager;
   runtime: EngineRuntime;
+  timelines: TimelineStore;
 }
 
 const t = initTRPC.context<Context>().create();

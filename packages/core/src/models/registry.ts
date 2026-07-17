@@ -47,26 +47,46 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: true,
   }),
   withSize({
-    id: "ltxv-2b-distilled-fp8",
-    name: "LTX Video 2B distilled",
+    id: "ltx-23-22b-fp8",
+    name: "LTX 2.3 22B (fp8)",
     use: "video",
     engine: "ComfyUI · Video Lab (ltx2)",
     description:
-      "Fast image-to-video generation, distilled fp8 build — the Video Lab's entry engine on a single consumer GPU.",
+      "Lightricks' audio-video foundation model — image-to-video with generated sound, and phoneme " +
+      "lip-sync when you hand it a voice take (ia2v). Dev fp8 checkpoint + distilled LoRA + Gemma " +
+      "prompt encoder + spatial upscaler; ~42 GB, fits a 24 GB GPU with offloading.",
     files: [
       {
-        name: "diffusion_models/ltxv-2b-0.9.8-distilled-fp8.safetensors",
-        url: "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-2b-0.9.8-distilled-fp8.safetensors",
-        sizeBytes: 4461695684,
-        sha256: "d6d8fa8ed3a98346787c2503ac80fb5d7cebcf80e356b79a2ba361fbadf97e15",
+        name: "checkpoints/ltx-2.3-22b-dev-fp8.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-dev-fp8.safetensors",
+        sizeBytes: 29145431166,
+        sha256: "28606c5b5a06ce56f896d4dfcb20f212739e07a68fbe48e53638188449d26450",
+      },
+      {
+        name: "loras/ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors",
+        url: "https://huggingface.co/Comfy-Org/ltx-2.3/resolve/main/split_files/loras/ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors",
+        sizeBytes: 2741024390,
+        sha256: "31e0c0195fb841bf31af78e8b60858f489e87ddcea4a5239abc80943da65e3ac",
+      },
+      {
+        name: "text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+        url: "https://huggingface.co/eraRelentless/Gemma_3_12B_it_fp4/resolve/main/gemma_3_12B_it_fp4_mixed.safetensors",
+        sizeBytes: 9447702218,
+        sha256: "aaca463d11e6d8d2a4bdb0d6299214c15ef78a3f73e0ef8113d5a9d0219b3f6d",
+      },
+      {
+        name: "latent_upscale_models/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+        sizeBytes: 995743560,
+        sha256: "5f416311fa8172b65af67530758964708d29a317b830d689a51143b7f91913ed",
       },
     ],
     license: {
-      name: "LTX-Video Open Weights License",
-      url: "https://huggingface.co/Lightricks/LTX-Video/blob/main/License.txt",
+      name: "LTX-2.3 Community License",
+      url: "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE",
       gated: true,
     },
-    essential: true,
+    essential: false,
   }),
   withSize({
     id: "z-image-turbo",

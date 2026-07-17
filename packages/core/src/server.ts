@@ -18,6 +18,7 @@ import { SettingsStore } from "./settings.js";
 import { ProjectStore } from "./projects.js";
 import { Labs } from "./labs.js";
 import { DirectorService } from "./director.js";
+import { TimelineStore } from "./timeline.js";
 import { ModelManager } from "./models/manager.js";
 import { EngineRuntime } from "./runtime/runtime.js";
 import { ComfyService } from "./comfy/service.js";
@@ -25,7 +26,7 @@ import { VideofastAdapter } from "./adapters/videofast.js";
 import { ComfyImageAdapter } from "./adapters/comfy-image.js";
 import { TtsAdapter } from "./adapters/tts.js";
 import { MusicAdapter } from "./adapters/music.js";
-import { LtxVideoAdapter } from "./adapters/ltx.js";
+import { ComfyVideoAdapter } from "./adapters/comfy-video.js";
 import { serveMedia } from "./media.js";
 import { appRouter } from "./router.js";
 import type { Context } from "./trpc.js";
@@ -75,7 +76,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new ComfyImageAdapter(settings, comfy, runtime, models),
       new TtsAdapter(settings, runtime, models),
       new MusicAdapter(settings, runtime, models),
-      new LtxVideoAdapter(settings),
+      new ComfyVideoAdapter(settings, comfy, models),
     ],
     storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),
     importOutput: (job) => projects.importJobOutput(job),
@@ -88,7 +89,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     if (!selfCoords) throw new Error("studiod is not listening yet");
     return selfCoords;
   });
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime };
+  const timelines = new TimelineStore(settings);
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime, timelines };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,

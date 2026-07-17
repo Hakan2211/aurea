@@ -191,16 +191,22 @@ export class Labs {
   }
 
   videoCatalog() {
-    const vf = this.vf();
-    const runner = (name: string) => !!vf && fs.existsSync(path.join(vf, "workflows", name));
+    const { engines } = this.settings.get();
+    const managed = engines.videoMode === "managed";
+    // external mode queues on comfyUrl, whose install carries the LTX weights;
+    // managed needs the runtime's ComfyUI plus the model-manager weight set
+    const available = managed
+      ? this.runtime.componentReady("comfy") &&
+        this.models.list().find((m) => m.id === "ltx-23-22b-fp8")?.status.state === "installed"
+      : true;
     return {
       engines: [
         {
           id: "ltx2",
-          label: "LTX-2",
-          sub: "local · free",
+          label: "LTX-2.3",
+          sub: managed ? "local · managed" : "local · free",
           note: "Best for local runs",
-          available: runner("run_ltx_i2v.py"),
+          available,
         },
       ],
       engineNotes: { ltx2: "Renders on your GPU — $0.00" } as Record<string, string>,

@@ -223,6 +223,11 @@ export const settingsSchema = z.object({
        * source checkout + model-manager checkpoints); "external" = spawn the
        * acestepDir checkout's own venv against the videofast CLI */
       musicMode: z.enum(["managed", "external"]).default("managed"),
+      /** "managed" = LTX-2.3 renders on the managed ComfyUI with model-manager
+       * weights (a ~42 GB gated download, so this is the only mode defaulting
+       * to external); "external" = queue on comfyUrl, whose install already
+       * has the LTX weights under their conventional names */
+      videoMode: z.enum(["managed", "external"]).default("external"),
       /** python.exe of the Chatterbox TTS venv (character voices) */
       chatterboxPython: z.string().nullable().default(null),
       /** python.exe of the Qwen3-TTS venv (narrator voices) */
@@ -236,6 +241,8 @@ export const settingsSchema = z.object({
     /** Claude Code model alias the Director runs on (resolved by the local CLI) */
     claudeModel: z.enum(["sonnet", "opus", "haiku"]).default("sonnet"),
     openrouterApiKey: z.string().default(""),
+    /** fal.ai key — unlocks the Seedance cloud video engine (paid per clip) */
+    falApiKey: z.string().default(""),
     ollamaBaseUrl: z.string().default("http://localhost:11434"),
     ollamaModel: z.string().default("llama3.1:8b-instruct-q4_K_M"),
   }),
@@ -295,6 +302,52 @@ export const projectRenameSchema = z.object({
 
 export const libraryKindSchema = z.enum(["image", "video", "audio", "music", "model3d"]);
 export type LibraryKind = z.infer<typeof libraryKindSchema>;
+
+/* ---------- timeline (OTIO-shaped, exporter later) ---------- */
+
+/** One clip on a track. All times are seconds; `asset` is a library relPath. */
+export const timelineClipSchema = z.object({
+  id: z.string(),
+  asset: z.string(),
+  /** display label (defaults to the asset file name) */
+  label: z.string().default(""),
+  /** where on the timeline the clip starts */
+  start: z.number().min(0),
+  /** trim into the source media */
+  in: z.number().min(0).default(0),
+  /** clip length on the timeline */
+  duration: z.number().positive(),
+  /** crossfade INTO this clip from the previous clip on the same track */
+  transitionSec: z.number().min(0).default(0),
+});
+export type TimelineClip = z.infer<typeof timelineClipSchema>;
+
+export const timelineTrackKindSchema = z.enum(["video", "voice", "music", "sfx"]);
+export type TimelineTrackKind = z.infer<typeof timelineTrackKindSchema>;
+
+export const timelineTrackSchema = z.object({
+  id: z.string(),
+  kind: timelineTrackKindSchema,
+  name: z.string(),
+  muted: z.boolean().default(false),
+  clips: z.array(timelineClipSchema).default([]),
+});
+export type TimelineTrack = z.infer<typeof timelineTrackSchema>;
+
+/** The whole sequence for one project — <dataRoot>/projects/<id>/timeline.json */
+export const timelineSchema = z.object({
+  version: z.literal(1).default(1),
+  fps: z.number().default(24),
+  width: z.number().default(1280),
+  height: z.number().default(720),
+  tracks: z.array(timelineTrackSchema).default([]),
+});
+export type Timeline = z.infer<typeof timelineSchema>;
+
+export const timelineUpdateSchema = z.object({
+  project: z.string().min(1),
+  timeline: timelineSchema,
+});
 
 /** One real file inside a project's assets/ tree, as scanned by studiod. */
 export const libraryAssetSchema = z.object({
