@@ -117,7 +117,8 @@ export const appRouter = router({
       catalog: procedure.query(({ ctx }) => ctx.labs.voiceCatalog()),
       generate: procedure.input(ttsGenerateSchema).mutation(({ ctx, input }) => {
         const { project, ...payload } = input;
-        return generate(ctx, { type: "tts", ...payload }, project);
+        const engine = ctx.labs.routeTtsEngine(payload.voice, payload.engine);
+        return generate(ctx, { type: "tts", ...payload, engine }, project);
       }),
       /** freeze an uploaded/recorded sample as a named cloned voice */
       add: procedure.input(voiceAddSchema).mutation(({ ctx, input }) => {

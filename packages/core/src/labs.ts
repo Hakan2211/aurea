@@ -127,6 +127,16 @@ export class Labs {
     };
   }
 
+  /** The engine that actually owns a voice. Callers (and the Director) often
+   * leave the engine on its chatterbox default while naming a Qwen narrator
+   * preset — that used to die minutes later inside the adapter with "no
+   * reference clip". Route by roster instead of trusting the pairing. */
+  routeTtsEngine(voice: string, requested: string): string {
+    const entry = this.voiceCatalog().voices.find((v) => v.id === voice.toLowerCase());
+    if (!entry) return requested; // unknown voice — the adapter reports it cleanly
+    return entry.kind === "preset" ? "qwen" : "chatterbox";
+  }
+
   /** clone a voice: freeze the (already wav-encoded) sample as
    * <dataRoot>/voices/<id>.wav — from then on it's on every roster */
   addVoice(name: string, wav: Buffer): LabVoice {
