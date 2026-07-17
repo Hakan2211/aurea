@@ -317,6 +317,17 @@ export type LibraryAsset = z.infer<typeof libraryAssetSchema>;
 
 /* ---------- director chat ---------- */
 
+/** A library asset the user pinned to a message. relPath is the id the studio
+ * tools understand (generate_video startFrame/audio take it directly); images
+ * are additionally shown to the Director as real image content. */
+export const directorAttachmentSchema = z.object({
+  kind: libraryKindSchema,
+  name: z.string(),
+  /** posix-style path relative to storage.dataRoot — the library asset id */
+  relPath: z.string(),
+});
+export type DirectorAttachment = z.infer<typeof directorAttachmentSchema>;
+
 /** One tool call the Director made mid-conversation, rendered as a card. */
 export const directorToolCallSchema = z.object({
   /** tool name without the mcp__aurea__ prefix (e.g. "generate_image") */
@@ -335,6 +346,8 @@ export const directorMessageSchema = z.object({
   /** ISO timestamp */
   at: z.string(),
   text: z.string().optional(),
+  /** assets the user pinned to this message (user role only) */
+  attachments: z.array(directorAttachmentSchema).optional(),
   tool: directorToolCallSchema.optional(),
   /** transient — this text is still arriving token by token; never true on disk */
   streaming: z.boolean().optional(),
@@ -353,6 +366,7 @@ export type DirectorState = z.infer<typeof directorStateSchema>;
 export const directorSendSchema = z.object({
   project: z.string().min(1),
   text: z.string().trim().min(1),
+  attachments: z.array(directorAttachmentSchema).max(8).default([]),
 });
 
 /** On-disk shape — <dataRoot>/projects/<id>/director.json */

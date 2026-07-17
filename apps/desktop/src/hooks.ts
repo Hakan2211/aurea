@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type {
+  DirectorAttachment,
   DirectorToolCall,
   ImageGenerate,
   Job,
@@ -108,6 +109,8 @@ export interface UiToolCall extends Omit<DirectorToolCall, "jobId"> {
 
 export interface UiChatMessage extends ChatMessage {
   toolCall?: UiToolCall;
+  /** assets the user pinned to this message */
+  attachments?: DirectorAttachment[];
   /** this director reply is still arriving token by token */
   streaming?: boolean;
 }
@@ -147,7 +150,7 @@ export function useChat() {
         messages: chat as UiChatMessage[],
         busy: false,
         live: false,
-        send: (_: string) => {},
+        send: (_text: string, _attachments?: DirectorAttachment[]) => {},
         stop: () => {},
       };
     }
@@ -156,6 +159,7 @@ export function useChat() {
       role: m.role,
       time: fmtTime(m.at),
       text: m.text,
+      attachments: m.attachments,
       streaming: m.streaming,
       toolCall: m.tool
         ? {
@@ -170,8 +174,8 @@ export function useChat() {
       messages,
       busy: state.status === "thinking" || mutation.isPending,
       live: true,
-      send: (text: string) => {
-        if (text.trim()) mutate({ project, text });
+      send: (text: string, attachments: DirectorAttachment[] = []) => {
+        if (text.trim()) mutate({ project, text, attachments });
       },
       stop: () => stopMutate({ project }),
     };

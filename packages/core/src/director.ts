@@ -20,10 +20,12 @@ import {
   tool,
   type Options,
   type SDKMessage,
+  type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   directorChatFileSchema,
   jobStatusSchema,
+  type DirectorAttachment,
   type DirectorChatFile,
   type DirectorMessage,
   type DirectorState,
@@ -57,7 +59,27 @@ const systemPrompt = (project: string) =>
     "  and do not block on it — never poll the same job twice.",
     "- Be a director: concrete suggestions, short production-minded replies. At most one",
     "  clarifying question, and only when the request is truly ambiguous.",
+    "- Messages may end with an [Attached assets] block — library files the user pinned to that",
+    "  message. Each relPath plugs directly into tool inputs (generate_video startFrame / audio,",
+    "  etc.); attached images are also shown to you, so react to what you actually see.",
   ].join("\n");
+
+/* ---------- attachments → SDK prompt ---------- */
+
+const IMAGE_MEDIA: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+/** per-image cap — the API rejects oversized images and one huge base64 blob
+ * would blow the whole turn; bigger attachments ride along as text references */
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+type PromptBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
 
 /** compact one-line rendering of a tool input for the chat card */
 function summarize(input: unknown): string {
@@ -113,15 +135,21 @@ export class DirectorService extends EventEmitter {
   }
 
   /** append the user message and kick off a Claude run (async, streams updates) */
-  send(project: string, text: string): DirectorState {
+  send(project: string, text: string, attachments: DirectorAttachment[] = []): DirectorState {
     if (this.runs.has(project)) throw new Error("the Director is still working on the last message");
     const chat = this.chat(project);
-    chat.messages.push({ id: randomUUID(), role: "user", at: new Date().toISOString(), text });
+    chat.messages.push({
+      id: randomUUID(),
+      role: "user",
+      at: new Date().toISOString(),
+      text,
+      ...(attachments.length ? { attachments } : {}),
+    });
     this.persist(project);
     const run: ActiveRun = { abort: new AbortController(), stopped: false };
     this.runs.set(project, run);
     this.emitState(project);
-    void this.run(project, text, run).finally(() => {
+    void this.run(project, this.buildPrompt(text, attachments), run).finally(() => {
       this.runs.delete(project);
       this.persist(project);
       this.emitState(project);
@@ -141,7 +169,51 @@ export class DirectorService extends EventEmitter {
 
   /* ---------- the run ---------- */
 
-  private async run(project: string, prompt: string, run: ActiveRun): Promise<void> {
+  /** the user's text, plus an [Attached assets] block when the message carries
+   * pinned library files; attached images become real image content blocks
+   * (streaming-input mode) so the Director sees them, not just their paths */
+  private buildPrompt(
+    text: string,
+    attachments: DirectorAttachment[],
+  ): string | AsyncIterable<SDKUserMessage> {
+    if (!attachments.length) return text;
+    const dataRoot = path.resolve(this.settings.get().storage.dataRoot);
+    const lines = attachments.map((a) => `- ${a.kind} "${a.name}" — relPath: ${a.relPath}`);
+    const blocks: PromptBlock[] = [
+      { type: "text", text: `${text}\n\n[Attached assets]\n${lines.join("\n")}` },
+    ];
+    for (const a of attachments) {
+      const media = IMAGE_MEDIA[a.relPath.split(".").pop()?.toLowerCase() ?? ""];
+      if (!media) continue;
+      const abs = path.resolve(dataRoot, a.relPath);
+      if (!abs.startsWith(dataRoot)) continue; // attachment paths never escape the data root
+      try {
+        const buf = fs.readFileSync(abs);
+        if (buf.byteLength <= MAX_IMAGE_BYTES) {
+          blocks.push({
+            type: "image",
+            source: { type: "base64", media_type: media, data: buf.toString("base64") },
+          });
+        }
+      } catch {
+        /* file gone — the text reference still stands */
+      }
+    }
+    async function* stream(): AsyncGenerator<SDKUserMessage> {
+      yield {
+        type: "user",
+        message: { role: "user", content: blocks } as SDKUserMessage["message"],
+        parent_tool_use_id: null,
+      };
+    }
+    return stream();
+  }
+
+  private async run(
+    project: string,
+    prompt: string | AsyncIterable<SDKUserMessage>,
+    run: ActiveRun,
+  ): Promise<void> {
     const chat = this.chat(project);
     let timedOut = false;
     const timer = setTimeout(() => {

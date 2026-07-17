@@ -41,9 +41,12 @@ const kindIcon = {
   music: FileMusic,
 } as const;
 
+const attachmentIcon = (kind: string) =>
+  kindIcon[kind as keyof typeof kindIcon] ?? Paperclip;
+
 /* ---------- left rail: project + assets ---------- */
 
-function AssetRail() {
+function AssetRail({ onAttach }: { onAttach: (asset: Asset) => void }) {
   const { projects } = useProjects();
   const { assets } = useAssets();
   const active = projects[0];
@@ -67,18 +70,19 @@ function AssetRail() {
 
       <div className="grid flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto px-3 pb-3">
         {assets.map((a) => (
-          <AssetThumb key={a.id} asset={a} />
+          <AssetThumb key={a.id} asset={a} onAttach={onAttach} />
         ))}
       </div>
     </aside>
   );
 }
 
-function AssetThumb({ asset }: { asset: Asset }) {
+function AssetThumb({ asset, onAttach }: { asset: Asset; onAttach: (asset: Asset) => void }) {
   const Icon = kindIcon[asset.kind];
   return (
     <button
-      title={asset.name}
+      title={`Attach ${asset.name} to your next message`}
+      onClick={() => onAttach(asset)}
       className="group relative aspect-square overflow-hidden rounded-lg border border-cream/5 transition hover:border-gold/40"
     >
       <div className={cx("absolute inset-0", asset.swatch)} />
@@ -97,13 +101,23 @@ function AssetThumb({ asset }: { asset: Asset }) {
           {asset.duration}
         </span>
       )}
+      <span className="absolute inset-0 hidden items-center justify-center bg-ink/55 group-hover:flex">
+        <Paperclip size={14} className="text-gold" />
+      </span>
     </button>
   );
 }
 
 /* ---------- center: chat thread ---------- */
 
-function Thread() {
+interface AttachApi {
+  pending: Asset[];
+  onAttach: (asset: Asset) => void;
+  onDetach: (id: string) => void;
+  onClear: () => void;
+}
+
+function Thread({ attach }: { attach: AttachApi }) {
   const { messages, busy, send, stop } = useChat();
   const endRef = useRef<HTMLDivElement>(null);
   const last = messages[messages.length - 1];
@@ -147,7 +161,18 @@ function Thread() {
         <div ref={endRef} />
       </div>
 
-      <Composer busy={busy} onSend={send} onStop={stop} />
+      <Composer
+        busy={busy}
+        attach={attach}
+        onSend={(text) => {
+          send(
+            text,
+            attach.pending.map((a) => ({ kind: a.kind, name: a.name, relPath: a.id })),
+          );
+          attach.onClear();
+        }}
+        onStop={stop}
+      />
     </section>
   );
 }
@@ -162,6 +187,23 @@ function Message({ message }: { message: UiChatMessage }) {
         </span>
         <span>{message.time}</span>
       </div>
+      {message.attachments && message.attachments.length > 0 && (
+        <div className={cx("flex flex-wrap gap-1.5", isUser && "justify-end")}>
+          {message.attachments.map((a, i) => {
+            const Icon = attachmentIcon(a.kind);
+            return (
+              <span
+                key={`${a.relPath}:${i}`}
+                title={a.relPath}
+                className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/8 px-2 py-1 text-[11px] text-cream/85"
+              >
+                <Icon size={11} className="text-gold/70" />
+                <span className="max-w-[180px] truncate">{a.name}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
       {message.text &&
         (isUser ? (
           <p className="whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-gold/12 px-4 py-2.5 text-[13px] leading-relaxed text-cream">
@@ -362,12 +404,61 @@ function ModelPicker() {
   );
 }
 
+/** the paperclip popover — the same library the left rail shows, as a compact list */
+function AttachPicker({ attach }: { attach: AttachApi }) {
+  const { assets } = useAssets();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      {open && <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Attach an asset"
+        className={cx(
+          "flex h-8 w-8 items-center justify-center rounded-lg transition",
+          open ? "bg-cream/5 text-cream" : "text-fog hover:bg-cream/5 hover:text-cream",
+        )}
+      >
+        <Paperclip size={15} />
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 z-20 mb-2 max-h-[280px] w-[260px] overflow-y-auto rounded-xl border hairline bg-raised p-1 shadow-xl shadow-ink/60">
+          {assets.length === 0 && (
+            <p className="px-2.5 py-2 text-[11px] text-fog">The library is empty — generate something first.</p>
+          )}
+          {assets.map((a) => {
+            const Icon = kindIcon[a.kind];
+            const attached = attach.pending.some((p) => p.id === a.id);
+            return (
+              <button
+                key={a.id}
+                onClick={() => {
+                  attach.onAttach(a);
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-cream/5"
+              >
+                <Icon size={13} className="shrink-0 text-gold/70" />
+                <span className="min-w-0 flex-1 truncate text-[12px] text-cream/90">{a.name}</span>
+                {attached && <Check size={12} className="shrink-0 text-gold" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Composer({
   busy,
+  attach,
   onSend,
   onStop,
 }: {
   busy: boolean;
+  attach: AttachApi;
   onSend: (text: string) => void;
   onStop: () => void;
 }) {
@@ -382,6 +473,30 @@ function Composer({
   return (
     <footer className="border-t hairline px-6 py-4">
       <div className="rounded-2xl border border-cream/10 bg-surface px-4 py-3 transition focus-within:border-gold/40">
+        {attach.pending.length > 0 && (
+          <div className="mb-2.5 flex flex-wrap gap-1.5">
+            {attach.pending.map((a) => {
+              const Icon = kindIcon[a.kind];
+              return (
+                <span
+                  key={a.id}
+                  title={a.id}
+                  className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/8 px-2 py-1 text-[11px] text-cream/85"
+                >
+                  <Icon size={11} className="text-gold/70" />
+                  <span className="max-w-[160px] truncate">{a.name}</span>
+                  <button
+                    onClick={() => attach.onDetach(a.id)}
+                    title="Remove attachment"
+                    className="text-fog transition hover:text-ember"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
         <textarea
           rows={1}
           value={text}
@@ -392,16 +507,20 @@ function Composer({
               submit();
             }
           }}
-          placeholder={busy ? "The Director is working…" : "Message the Director…"}
+          placeholder={
+            busy
+              ? "The Director is working…"
+              : attach.pending.length
+                ? "What should the Director do with these?"
+                : "Message the Director…"
+          }
           className="w-full resize-none bg-transparent text-[13px] text-cream placeholder:text-fog focus:outline-none"
         />
         <div className="mt-2.5 flex items-center gap-2">
           <ModelPicker />
           {busy && <Chip tone="muted">thinking…</Chip>}
           <div className="ml-auto flex items-center gap-1.5">
-            <button className="flex h-8 w-8 items-center justify-center rounded-lg text-fog transition hover:bg-cream/5 hover:text-cream">
-              <Paperclip size={15} />
-            </button>
+            <AttachPicker attach={attach} />
             {busy ? (
               <button
                 onClick={onStop}
@@ -522,10 +641,20 @@ function JobRow({ job }: { job: Job }) {
 /* ---------- screen ---------- */
 
 export function DirectorChat() {
+  const [pending, setPending] = useState<Asset[]>([]);
+  const attach: AttachApi = {
+    pending,
+    onAttach: (asset) =>
+      setPending((prev) =>
+        prev.some((p) => p.id === asset.id) || prev.length >= 8 ? prev : [...prev, asset],
+      ),
+    onDetach: (id) => setPending((prev) => prev.filter((p) => p.id !== id)),
+    onClear: () => setPending([]),
+  };
   return (
     <div className="flex h-full">
-      <AssetRail />
-      <Thread />
+      <AssetRail onAttach={attach.onAttach} />
+      <Thread attach={attach} />
       <JobRail />
     </div>
   );

@@ -152,7 +152,7 @@ export const appRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `unknown project "${input.project}"` });
       }
       try {
-        return ctx.director.send(input.project, input.text);
+        return ctx.director.send(input.project, input.text, input.attachments);
       } catch (err) {
         throw new TRPCError({ code: "CONFLICT", message: String((err as Error).message) });
       }
