@@ -287,6 +287,8 @@ export interface MusicTrack {
   generating?: { progress: number; stage: string };
   /** playable media URL once the track is a real asset */
   url?: string;
+  /** library relPath once the track is a real asset — enables Send to timeline */
+  relPath?: string;
 }
 
 export const musicLab = {
@@ -394,6 +396,8 @@ export interface LibraryAsset {
   swatch: string;
   /** absolute studiod /media URL — real thumbnail/preview when present */
   url?: string;
+  /** library relPath once the asset is a real file — enables Send to timeline */
+  relPath?: string;
   waveSeed?: number;
   favorite?: boolean;
   /** part of the current multi-selection */

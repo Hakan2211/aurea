@@ -4,7 +4,6 @@ import {
   Bookmark,
   Check,
   ChevronDown,
-  Clapperboard,
   Drum,
   Guitar,
   HelpCircle,
@@ -22,6 +21,7 @@ import {
 import { useMusicLab } from "@/hooks";
 import type { MusicStem, MusicTrack } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Waveform, cx } from "@/components/ui";
+import { SendToTimeline } from "@/components/SendToTimeline";
 import { useAudioPlayer, type AudioPlayer } from "@/components/useAudioPlayer";
 
 /* Music lab — UI-Design/Music lab.jpg. Create panel (description → style →
@@ -521,9 +521,11 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
         <GoldButton className="w-full justify-center py-2.5">
           <Bookmark size={13} /> Save to assets
         </GoldButton>
-        <GhostButton className="w-full justify-center py-2.5">
-          <Clapperboard size={13} /> Send to timeline
-        </GhostButton>
+        <SendToTimeline
+          relPath={track.generating ? undefined : track.relPath}
+          tone="ghost"
+          className="w-full justify-center py-2.5"
+        />
       </div>
     </aside>
   );

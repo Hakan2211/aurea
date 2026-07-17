@@ -277,6 +277,24 @@ export function useTimeline() {
   };
 }
 
+/** LIVE — place a library asset on the active project's sequence from any
+ * screen (Music lab, Asset library). Uses the server-side addClip so the
+ * real duration is ffprobe'd and the kind picks the track; keeps the
+ * timeline.get cache in lockstep so a later Timeline mount sees the clip. */
+export function useSendToTimeline() {
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const mutation = trpc.timeline.addClip.useMutation({
+    onSuccess: (res) => utils.timeline.get.setData({ project }, res.timeline),
+  });
+  const { mutateAsync } = mutation;
+  return {
+    live: !!project,
+    sending: mutation.isPending,
+    send: (relPath: string) => mutateAsync({ project, asset: relPath }),
+  };
+}
+
 /* ---------- model manager (LIVE) ---------- */
 
 /** LIVE — the downloadable-weights registry with per-model install status.
@@ -543,6 +561,7 @@ export function useMusicLab() {
         swatch: labSwatch(a.id),
         arrangement: "instrumental" as const,
         url: media ? media(a.url) : undefined,
+        relPath: a.relPath,
         selected: i === 0,
       })),
     ].slice(0, 12);
@@ -606,6 +625,7 @@ function toScreenAsset(a: CoreAsset, media: ((route: string) => string) | null):
     meta: fmtBytes(a.sizeBytes),
     swatch: KIND_SWATCH[a.kind],
     url: media ? media(a.url) : undefined,
+    relPath: a.relPath,
     waveSeed: audio ? waveSeed(a.id) : undefined,
     info: [
       ["Type", KIND_LABEL[a.kind]],

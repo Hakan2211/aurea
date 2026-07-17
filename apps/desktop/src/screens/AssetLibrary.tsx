@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
-  Clapperboard,
   Film,
   FolderOpen,
   History,
@@ -25,7 +24,8 @@ import {
 } from "lucide-react";
 import { useAssetLibrary } from "@/hooks";
 import type { LibraryAsset, LibraryKind } from "@/data/sample";
-import { Chip, GhostButton, GoldButton, Waveform, cx } from "@/components/ui";
+import { Chip, GhostButton, Waveform, cx } from "@/components/ui";
+import { SendToTimeline } from "@/components/SendToTimeline";
 
 /* Asset library — UI-Design/asset library.jpg. Everything generated in one
  * searchable grid: collections + smart collections on the left, filterable
@@ -465,9 +465,11 @@ function Inspector({ asset }: { asset: LibraryAsset }) {
       </div>
 
       <div className="space-y-2 p-4 pt-2">
-        <GoldButton className="w-full justify-center py-2.5">
-          <Clapperboard size={13} /> Send to timeline
-        </GoldButton>
+        <SendToTimeline
+          relPath={asset.kind === "model3d" ? undefined : asset.relPath}
+          tone="gold"
+          className="w-full justify-center py-2.5"
+        />
         <GhostButton className="w-full justify-center py-2.5">
           <ImagePlus size={13} /> Use as reference
         </GhostButton>
