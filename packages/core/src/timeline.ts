@@ -81,10 +81,24 @@ export class TimelineStore {
     const duration = input.duration ?? (await defaultClipDuration(file));
 
     const tl = this.get(project);
-    let track = tl.tracks.find((t) => t.kind === kind);
+    // trackIndex picks the nth track of the kind; one past the end (or a first
+    // track that doesn't exist yet) creates it. Later video tracks sit on top.
+    const kindTracks = tl.tracks.filter((t) => t.kind === kind);
+    const wanted = Math.min(input.trackIndex ?? 0, kindTracks.length);
+    let track = kindTracks[wanted];
     if (!track) {
-      track = { id: randomUUID(), kind, name: kind.charAt(0).toUpperCase() + kind.slice(1), muted: false, clips: [] };
-      tl.tracks.push(track);
+      const base = kind.charAt(0).toUpperCase() + kind.slice(1);
+      track = {
+        id: randomUUID(),
+        kind,
+        name: kindTracks.length === 0 ? base : `${base} ${kindTracks.length + 1}`,
+        muted: false,
+        clips: [],
+      };
+      // insert after the last track of the kind (lanes stay grouped; array
+      // order still means "later composites on top") — append if none exist
+      const last = tl.tracks.reduce((m, t, i) => (t.kind === kind ? i : m), -1);
+      tl.tracks.splice(last === -1 ? tl.tracks.length : last + 1, 0, track);
     }
     const trackEnd = track.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
     const clip: TimelineClip = {

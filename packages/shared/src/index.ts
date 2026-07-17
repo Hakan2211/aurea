@@ -366,6 +366,9 @@ export const timelineAddClipSchema = z.object({
   asset: z.string().min(1),
   /** target track kind; defaults from the asset kind (video/image → video, audio → voice, music → music) */
   track: timelineTrackKindSchema.optional(),
+  /** nth track of that kind (0 = base layer; later video tracks composite on top).
+   * One past the end creates the track ("Video 2"). Default 0. */
+  trackIndex: z.number().int().min(0).optional(),
   /** timeline start in seconds; defaults to the end of the target track */
   start: z.number().min(0).optional(),
   in: z.number().min(0).default(0),

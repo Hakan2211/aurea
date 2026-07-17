@@ -14,6 +14,7 @@ import {
   Loader2,
   Pause,
   Play,
+  Plus,
   Scissors,
   SkipBack,
   Trash2,
@@ -117,11 +118,14 @@ export function TimelineScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing]);
 
-  /* ---- preview: the video-track clip under the playhead ---- */
-  const videoTrack = tl?.tracks.find((t) => t.kind === "video");
-  const activeClip = videoTrack?.clips.find(
-    (c) => playhead >= c.start && playhead < c.start + c.duration,
-  );
+  /* ---- preview: the TOPMOST video clip under the playhead — later video
+   * tracks composite on top (Video 2 = inserts over the base), so search
+   * tracks last-to-first, matching the export's overlay order ---- */
+  const activeClip = tl?.tracks
+    .filter((t) => t.kind === "video")
+    .reverse()
+    .map((t) => t.clips.find((c) => playhead >= c.start && playhead < c.start + c.duration))
+    .find(Boolean);
   const activeAsset = activeClip ? resolve(activeClip.asset) : undefined;
   useEffect(() => {
     const el = videoRef.current;
@@ -174,6 +178,44 @@ export function TimelineScreen() {
           : { ...t, clips: t.clips.map((c) => (c.id === clipId ? { ...c, ...patch } : c)) },
       ),
     });
+  };
+
+  /** drop a clip onto an adjacent lane — only within the same track kind */
+  const moveClip = (trackId: string, clipId: string, laneOffset: number) => {
+    const idx = tl.tracks.findIndex((t) => t.id === trackId);
+    const source = tl.tracks[idx];
+    const target = tl.tracks[idx + laneOffset];
+    if (!source || !target || target.id === source.id || target.kind !== source.kind) return;
+    const clip = source.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    apply({
+      ...tl,
+      tracks: tl.tracks.map((t) =>
+        t.id === source.id
+          ? { ...t, clips: t.clips.filter((c) => c.id !== clipId) }
+          : t.id === target.id
+            ? { ...t, clips: [...t.clips, clip] }
+            : t,
+      ),
+    });
+    setSelected({ track: target.id, clip: clipId });
+  };
+
+  const addVideoTrack = () => {
+    const count = tl.tracks.filter((t) => t.kind === "video").length;
+    // insert right after the last video track so the lanes stay grouped —
+    // array order still means "later composites on top"
+    const at = tl.tracks.reduce((m, t, i) => (t.kind === "video" ? i : m), -1) + 1;
+    const tracks = [...tl.tracks];
+    tracks.splice(at, 0, { id: uid(), kind: "video", name: `Video ${count + 1}`, muted: false, clips: [] });
+    apply({ ...tl, tracks });
+  };
+
+  const removeTrack = (trackId: string) => {
+    const track = tl.tracks.find((t) => t.id === trackId);
+    if (!track || track.clips.length > 0) return;
+    apply({ ...tl, tracks: tl.tracks.filter((t) => t.id !== trackId) });
+    if (selected?.track === trackId) setSelected(null);
   };
 
   const removeSelected = () => {
@@ -385,33 +427,62 @@ export function TimelineScreen() {
       </div>
 
       {/* ---- bottom: tracks ---- */}
-      <div className="h-[236px] shrink-0 border-t hairline bg-[#0e0e10]">
+      <div
+        style={{ height: Math.min(348, RULER_H + tl.tracks.length * TRACK_H + 30) }}
+        className="shrink-0 border-t hairline bg-[#0e0e10]"
+      >
         <div className="flex h-full">
           <div className="w-[120px] shrink-0 border-r hairline">
             <div style={{ height: RULER_H }} />
-            {tl.tracks.map((track) => (
-              <div
-                key={track.id}
-                style={{ height: TRACK_H }}
-                className="flex items-center justify-between border-b border-cream/5 px-3"
-              >
-                <span className="text-[11px] font-medium capitalize text-cream/85">{track.name}</span>
-                <button
-                  onClick={() =>
-                    apply({
-                      ...tl,
-                      tracks: tl.tracks.map((t) =>
-                        t.id === track.id ? { ...t, muted: !t.muted } : t,
-                      ),
-                    })
-                  }
-                  title={track.muted ? "Unmute" : "Mute"}
-                  className={cx("transition", track.muted ? "text-ember" : "text-fog hover:text-cream")}
+            {tl.tracks.map((track, ti) => {
+              const extra = tl.tracks.findIndex((t) => t.kind === track.kind) !== ti;
+              return (
+                <div
+                  key={track.id}
+                  style={{ height: TRACK_H }}
+                  className="group flex items-center justify-between border-b border-cream/5 px-3"
                 >
-                  {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                </button>
-              </div>
-            ))}
+                  <span
+                    title={extra && track.kind === "video" ? "Clips here appear over the tracks above" : undefined}
+                    className="min-w-0 truncate text-[11px] font-medium capitalize text-cream/85"
+                  >
+                    {track.name}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {extra && track.clips.length === 0 && (
+                      <button
+                        onClick={() => removeTrack(track.id)}
+                        title="Remove empty track"
+                        className="text-fog/0 transition group-hover:text-fog hover:text-ember!"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() =>
+                        apply({
+                          ...tl,
+                          tracks: tl.tracks.map((t) =>
+                            t.id === track.id ? { ...t, muted: !t.muted } : t,
+                          ),
+                        })
+                      }
+                      title={track.muted ? "Unmute" : "Mute"}
+                      className={cx("transition", track.muted ? "text-ember" : "text-fog hover:text-cream")}
+                    >
+                      {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+            <button
+              onClick={addVideoTrack}
+              title="Add a video track — its clips composite over the tracks above (inserts, cutaways)"
+              className="flex h-[26px] w-full items-center gap-1.5 px-3 text-[10px] font-medium text-fog transition hover:text-gold"
+            >
+              <Plus size={11} /> Video track
+            </button>
           </div>
 
           <div className="relative flex-1 overflow-x-auto overflow-y-hidden">
@@ -445,6 +516,7 @@ export function TimelineScreen() {
                   selected={selected?.track === track.id ? selected.clip : null}
                   onSelect={(clipId) => setSelected({ track: track.id, clip: clipId })}
                   onPatch={(clipId, patch) => patchClip(track.id, clipId, patch)}
+                  onMoveVertical={(clipId, laneOffset) => moveClip(track.id, clipId, laneOffset)}
                 />
               ))}
 
@@ -469,12 +541,14 @@ function TrackLane({
   selected,
   onSelect,
   onPatch,
+  onMoveVertical,
 }: {
   track: TimelineTrack;
   pxPerSec: number;
   selected: string | null;
   onSelect: (clipId: string) => void;
   onPatch: (clipId: string, patch: Partial<TimelineClip>) => void;
+  onMoveVertical: (clipId: string, laneOffset: number) => void;
 }) {
   return (
     <div style={{ height: TRACK_H }} className="relative border-b border-cream/5">
@@ -488,6 +562,7 @@ function TrackLane({
           muted={track.muted}
           onSelect={() => onSelect(clip.id)}
           onPatch={(patch) => onPatch(clip.id, patch)}
+          onMoveVertical={(laneOffset) => onMoveVertical(clip.id, laneOffset)}
         />
       ))}
     </div>
@@ -504,6 +579,7 @@ function Clip({
   muted,
   onSelect,
   onPatch,
+  onMoveVertical,
 }: {
   clip: TimelineClip;
   pxPerSec: number;
@@ -512,13 +588,14 @@ function Clip({
   muted: boolean;
   onSelect: () => void;
   onPatch: (patch: Partial<TimelineClip>) => void;
+  onMoveVertical: (laneOffset: number) => void;
 }) {
-  const drag = useRef<{ mode: DragMode; x: number; start: number; in: number; duration: number } | null>(null);
+  const drag = useRef<{ mode: DragMode; x: number; y: number; start: number; in: number; duration: number } | null>(null);
 
   const onPointerDown = (mode: DragMode) => (e: React.PointerEvent) => {
     e.stopPropagation();
     onSelect();
-    drag.current = { mode, x: e.clientX, start: clip.start, in: clip.in, duration: clip.duration };
+    drag.current = { mode, x: e.clientX, y: e.clientY, start: clip.start, in: clip.in, duration: clip.duration };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent) => {
@@ -538,8 +615,14 @@ function Clip({
       });
     }
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    const d = drag.current;
     drag.current = null;
+    // releasing a moved clip over an adjacent lane re-tracks it (same kind only)
+    if (d?.mode === "move") {
+      const laneOffset = Math.round((e.clientY - d.y) / TRACK_H);
+      if (laneOffset !== 0) onMoveVertical(laneOffset);
+    }
   };
 
   const tone =

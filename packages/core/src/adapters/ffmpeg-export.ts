@@ -1,9 +1,11 @@
 /* Timeline export — the ffmpeg cuts-first fast path (PRD F8 / P3). One ffmpeg
- * pass renders the sequence exactly as the Timeline screen previews it: the
- * first video track supplies the picture (clips composited by absolute start
- * onto a black base, `transitionSec` = alpha crossfade into the clip, image
- * clips are held stills), every unmuted track's audio — including audio
- * embedded in video takes — is placed at its timeline position and mixed.
+ * pass renders the sequence exactly as the Timeline screen previews it: video
+ * tracks composite in array order — later tracks sit on top (Video 2 =
+ * inserts/cutaways over the base) — clips overlaid by absolute start onto a
+ * black base, `transitionSec` = alpha crossfade into the clip, image clips are
+ * held stills. Every unmuted track's audio — including audio embedded in video
+ * takes on any track — is placed at its timeline position and mixed; muting a
+ * video track silences it without hiding its picture.
  *
  * The filter graph goes through -filter_complex_script (Windows command lines
  * cap at 8k chars), progress rides -progress pipe:1, and the finished mp4
@@ -150,9 +152,11 @@ export class FfmpegExportAdapter implements EngineAdapter {
         return idx;
       };
 
-      // picture — the first video track, mirroring the preview player
-      const videoTrack = tl.tracks.find((t) => t.kind === "video");
-      const videoClips = [...(videoTrack?.clips ?? [])].sort((a, b) => a.start - b.start);
+      // picture — every video track in array order; a later track's overlays
+      // are applied after (= on top of) an earlier track's, so Video 2 wins
+      // wherever clips overlap, mirroring the preview player
+      const videoTracks = tl.tracks.filter((t) => t.kind === "video");
+      const videoClips = videoTracks.flatMap((t) => [...t.clips].sort((a, b) => a.start - b.start));
       let vi = 0;
       for (const clip of videoClips) {
         const still = isImageFile(resolve(clip.asset));
@@ -183,7 +187,6 @@ export class FfmpegExportAdapter implements EngineAdapter {
       for (const track of tl.tracks) {
         if (track.muted) continue;
         for (const clip of track.clips) {
-          if (track.kind === "video" && videoTrack && track.id !== videoTrack.id) continue;
           if (!probes.get(clip.asset)?.hasAudio) continue;
           const idx = indexFor(clip, false);
           const fade = Math.min(clip.transitionSec, clip.duration);

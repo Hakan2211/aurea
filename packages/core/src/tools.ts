@@ -362,7 +362,9 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       description:
         "Place a library asset (relPath from list_assets) on the project's sequence. Omit start to " +
         "append at the end of the track, omit duration to use the media's real length (images hold 4s). " +
-        "transitionSec crossfades into the clip from whatever plays before it. Returns the new clip.",
+        "transitionSec crossfades into the clip from whatever plays before it. trackIndex targets the " +
+        "nth track of the kind (0 = base; later video tracks composite ON TOP — use trackIndex 1 for " +
+        "inserts/cutaways over the base cut; one past the end creates the track). Returns the new clip.",
       schema: withProjectDefault(timelineAddClipSchema.omit({ project: true })),
       handler: async ({ project, ...input }) => {
         await requireProject(project);

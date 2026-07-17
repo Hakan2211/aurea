@@ -13,6 +13,9 @@
  *      the auto-import into the project's video assets
  *   5. the timeline_* tool registry (what the Director calls) is exercised
  *      directly: get / add / update / remove / export handlers
+ *   6. multi-video-track semantics: trackIndex 1 creates "Video 2", a yellow
+ *      insert composites OVER the base cut in its window (pixel-sampled),
+ *      and the base picture returns outside it
  *
  * Run: npx tsx scripts/test-export.mts */
 
@@ -172,6 +175,49 @@ try {
   const exported = await call("timeline_export", { project });
   check("timeline_export enqueues a job via the tool", typeof exported.id === "string" && exported.engine === "ffmpeg");
   await api.jobs.cancel.mutate({ id: exported.id as string }); // no need to render twice
+
+  /* ---- 6. multi-video-track: an insert composites over the base cut ---- */
+  const insertSrc = path.join(assets("video"), "insert.mp4");
+  ff(["-f", "lavfi", "-i", "color=c=yellow:s=320x180:r=24:d=2", "-f", "lavfi", "-i", "sine=frequency=880:duration=2",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", insertSrc]);
+
+  const ins = await api.timeline.addClip.mutate({
+    project, asset: rel(insertSrc), trackIndex: 1, start: 0.5, duration: 1,
+  });
+  const withInsert = await api.timeline.get.query({ project });
+  const videoTracks = withInsert.tracks.filter((t) => t.kind === "video");
+  check("trackIndex 1 created a second video track named Video 2",
+    videoTracks.length === 2 && videoTracks[1].name === "Video 2",
+    videoTracks.map((t) => t.name).join(" | "));
+  check("insert lives on the overlay track",
+    videoTracks[1].clips.some((c) => c.id === ins.clip.id));
+
+  const job2 = await api.timeline.export.mutate({ project });
+  let final2 = job2;
+  for (let i = 0; i < 120; i++) {
+    await sleep(500);
+    final2 = (await api.jobs.list.query()).find((j) => j.id === job2.id)!;
+    if (final2.status === "completed" || final2.status === "failed") break;
+  }
+  check("overlay export completed", final2.status === "completed", final2.error ?? "");
+
+  const out2 = final2.output!;
+  const pixelAt2 = (t: number): [number, number, number] => {
+    const raw = execFileSync("ffmpeg",
+      ["-v", "error", "-ss", String(t), "-i", out2, "-frames:v", "1", "-vf", "scale=1:1",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+      { windowsHide: true });
+    return [raw[0], raw[1], raw[2]];
+  };
+  const pre = pixelAt2(0.25);
+  check("t=0.25 shows the base (red) before the insert window", pre[0] > 180 && pre[1] < 100,
+    `rgb=${pre.join(",")}`);
+  const over = pixelAt2(1.0);
+  check("t=1.0 the insert (yellow) composites over the base", over[0] > 180 && over[1] > 180 && over[2] < 100,
+    `rgb=${over.join(",")}`);
+  const post = pixelAt2(3.0);
+  check("t=3.0 the base cut (blue) returns after the insert", post[2] > 180,
+    `rgb=${post.join(",")}`);
 } finally {
   await handle.close();
   // scratch project + its assets vanish; job history entries are harmless
