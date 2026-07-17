@@ -13,9 +13,12 @@ import {
   libraryKindSchema,
   musicGenerateSchema,
   settingsUpdateSchema,
+  timelineAddClipSchema,
+  timelineClipPatchSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
   type Job,
+  type Timeline,
 } from "@aurea/shared";
 import type { AppRouter } from "./router.js";
 
@@ -75,6 +78,9 @@ const json = (value: unknown): ToolResult => ({
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const timelineEnd = (tl: Timeline): number =>
+  tl.tracks.reduce((m, t) => t.clips.reduce((mm, c) => Math.max(mm, c.start + c.duration), m), 0);
 
 /** lab generate inputs, with the project defaulting to the built-in Playground */
 const withProjectDefault = <S extends z.ZodRawShape>(schema: z.ZodObject<S>) => ({
@@ -333,6 +339,78 @@ export function buildTools(api: StudiodApi): AureaTool[] {
           payload: { type: "videofast", account, topic, titleHint, seed },
         });
         return json(job);
+      },
+    }),
+
+    defineTool({
+      name: "timeline_get",
+      title: "Get timeline",
+      description:
+        "The project's sequence: tracks (video/voice/music) with clips (id, asset relPath, start, in, " +
+        "duration, transitionSec — all seconds). durationSec is the cut's total length.",
+      schema: { project: z.string().default("playground") },
+      handler: async ({ project }) => {
+        await requireProject(project);
+        const timeline = await api.timeline.get.query({ project });
+        return json({ durationSec: timelineEnd(timeline), ...timeline });
+      },
+    }),
+
+    defineTool({
+      name: "timeline_add_clip",
+      title: "Add clip to timeline",
+      description:
+        "Place a library asset (relPath from list_assets) on the project's sequence. Omit start to " +
+        "append at the end of the track, omit duration to use the media's real length (images hold 4s). " +
+        "transitionSec crossfades into the clip from whatever plays before it. Returns the new clip.",
+      schema: withProjectDefault(timelineAddClipSchema.omit({ project: true })),
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        const { clip, timeline } = await api.timeline.addClip.mutate({ project, ...input });
+        return json({ clip, durationSec: timelineEnd(timeline) });
+      },
+    }),
+
+    defineTool({
+      name: "timeline_update_clip",
+      title: "Update timeline clip",
+      description:
+        "Retime or trim one clip by id (see timeline_get): start (move), in/duration (trim), " +
+        "transitionSec (crossfade), label.",
+      schema: {
+        project: z.string().default("playground"),
+        clip: z.string().describe("clip id from timeline_get"),
+        ...timelineClipPatchSchema.shape,
+      },
+      handler: async ({ project, clip, ...patch }) => {
+        await requireProject(project);
+        const timeline = await api.timeline.updateClip.mutate({ project, clip, patch });
+        return json({ ok: true, durationSec: timelineEnd(timeline) });
+      },
+    }),
+
+    defineTool({
+      name: "timeline_remove_clip",
+      title: "Remove timeline clip",
+      description: "Delete one clip from the project's sequence by id.",
+      schema: { project: z.string().default("playground"), clip: z.string() },
+      handler: async ({ project, clip }) => {
+        await requireProject(project);
+        const timeline = await api.timeline.removeClip.mutate({ project, clip });
+        return json({ ok: true, durationSec: timelineEnd(timeline) });
+      },
+    }),
+
+    defineTool({
+      name: "timeline_export",
+      title: "Export timeline",
+      description:
+        "Render the project's sequence to a finished mp4 (ffmpeg, runs beside GPU jobs). Returns the " +
+        "job — wait_for_job for the file; it also lands in the project's video assets.",
+      schema: { project: z.string().default("playground") },
+      handler: async ({ project }) => {
+        await requireProject(project);
+        return json(await api.timeline.export.mutate({ project }));
       },
     }),
 

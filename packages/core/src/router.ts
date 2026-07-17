@@ -13,6 +13,10 @@ import {
   directorSendSchema,
   modelDownloadSchema,
   settingsUpdateSchema,
+  timelineAddClipSchema,
+  timelineExportSchema,
+  timelineRemoveClipSchema,
+  timelineUpdateClipSchema,
   timelineUpdateSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
@@ -25,17 +29,22 @@ import {
   type RuntimeStatus,
   type Vram,
 } from "@aurea/shared";
+import { describeExport, sequenceEnd } from "./adapters/ffmpeg-export.js";
 import { labEnqueue } from "./labs.js";
 import { scanLibrary } from "./library.js";
 import { procedure, router, type Context } from "./trpc.js";
 
 const jobId = z.object({ id: z.string() });
 
-/** enqueue a lab job into the target project (which must actually exist) */
-function generate(ctx: Context, payload: JobPayload, project: string): Job {
+function requireProject(ctx: Context, project: string): void {
   if (!ctx.projects.list().some((p) => p.id === project)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `unknown project "${project}"` });
   }
+}
+
+/** enqueue a lab job into the target project (which must actually exist) */
+function generate(ctx: Context, payload: JobPayload, project: string): Job {
+  requireProject(ctx, project);
   return ctx.engine.enqueue(labEnqueue(payload, project));
 }
 
@@ -186,6 +195,55 @@ export const appRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `unknown project "${input.project}"` });
       }
       return ctx.timelines.update(input.project, input.timeline);
+    }),
+
+    /* granular clip ops — the Director's edit surface over the same file */
+
+    addClip: procedure.input(timelineAddClipSchema).mutation(async ({ ctx, input }) => {
+      requireProject(ctx, input.project);
+      try {
+        const { project, ...rest } = input;
+        return await ctx.timelines.addClip(project, rest);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
+    }),
+
+    updateClip: procedure.input(timelineUpdateClipSchema).mutation(({ ctx, input }) => {
+      requireProject(ctx, input.project);
+      try {
+        return ctx.timelines.updateClip(input.project, input.clip, input.patch);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
+    }),
+
+    removeClip: procedure.input(timelineRemoveClipSchema).mutation(({ ctx, input }) => {
+      requireProject(ctx, input.project);
+      try {
+        return ctx.timelines.removeClip(input.project, input.clip);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
+    }),
+
+    /** render the saved sequence to an mp4 — enqueues an ffmpeg job on the cpu lane */
+    export: procedure.input(timelineExportSchema).mutation(({ ctx, input }) => {
+      requireProject(ctx, input.project);
+      const timeline = ctx.timelines.get(input.project);
+      if (sequenceEnd(timeline) <= 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "the timeline is empty — add clips before exporting" });
+      }
+      const name = ctx.projects.list().find((p) => p.id === input.project)?.name ?? input.project;
+      return ctx.engine.enqueue({
+        title: `Export — ${name}`,
+        kind: "video",
+        engine: "ffmpeg",
+        priority: "interactive",
+        detail: describeExport(timeline),
+        project: `/${input.project}`,
+        payload: { type: "export", project: input.project, timeline },
+      });
     }),
   }),
 

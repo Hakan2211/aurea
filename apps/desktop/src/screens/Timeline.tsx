@@ -5,11 +5,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Clapperboard,
   FileAudio,
   FileImage,
   FileMusic,
   FileVideo,
   Film,
+  Loader2,
   Pause,
   Play,
   Scissors,
@@ -73,7 +75,7 @@ function probeDuration(url: string | undefined, kind: string): Promise<number> {
 }
 
 export function TimelineScreen() {
-  const { initial, live, pool, resolve, save } = useTimeline();
+  const { initial, live, pool, resolve, save, exportCut, exportJob, exporting } = useTimeline();
   const [tl, setTl] = useState<Timeline | null>(null);
   const [selected, setSelected] = useState<{ track: string; clip: string } | null>(null);
   const [playhead, setPlayhead] = useState(0);
@@ -332,6 +334,37 @@ export function TimelineScreen() {
               </label>
             )}
             <div className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => {
+                  clearTimeout(saveTimer.current);
+                  void exportCut(tl);
+                }}
+                disabled={exporting || end <= 0}
+                title={
+                  exportJob?.status === "failed"
+                    ? `Last export failed: ${exportJob.error ?? "unknown error"} — click to retry`
+                    : "Render the cut to an mp4 (lands in the project's video assets)"
+                }
+                className={cx(
+                  "mr-2 flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[11px] font-semibold transition",
+                  exporting
+                    ? "border-gold/25 text-gold/80"
+                    : "border-gold/40 text-gold hover:bg-gold/10",
+                  end <= 0 && "opacity-30",
+                )}
+              >
+                {exporting ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    Exporting…{exportJob?.status === "running" ? ` ${Math.round(exportJob.progress)}%` : ""}
+                  </>
+                ) : (
+                  <>
+                    <Clapperboard size={12} />
+                    {exportJob?.status === "completed" ? "Export again" : "Export"}
+                  </>
+                )}
+              </button>
               <button
                 onClick={() => setPxPerSec((z) => Math.max(16, z / 1.5))}
                 title="Zoom out"

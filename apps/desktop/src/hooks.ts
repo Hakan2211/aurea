@@ -223,9 +223,18 @@ export function useTimeline() {
   const utils = trpc.useUtils();
   // keep the cache in lockstep with saves — a remounted screen must re-init
   // from the latest cut, never from the first fetch of the session
-  const { mutate } = trpc.timeline.update.useMutation({
+  const { mutate, mutateAsync: saveAsync } = trpc.timeline.update.useMutation({
     onSuccess: (tl) => utils.timeline.get.setData({ project }, tl),
   });
+  const exportMutation = trpc.timeline.export.useMutation({
+    onSuccess: () => void utils.jobs.invalidate(),
+  });
+  const { mutateAsync: exportAsync } = exportMutation;
+  // the latest export job for this project, straight off the live jobs stream
+  const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
+  const exportJob = jobsData?.find(
+    (j) => j.payload?.type === "export" && j.payload.project === project,
+  );
 
   const assetByRel = useMemo(() => {
     const map = new Map<string, { url?: string; kind: LibraryKind; name: string }>();
@@ -254,6 +263,17 @@ export function useTimeline() {
     ),
     resolve: (relPath: string) => assetByRel.get(relPath),
     save: (timeline: NonNullable<typeof query.data>) => mutate({ project, timeline }),
+    /** flush the current cut, then hand it to the ffmpeg export job */
+    exportCut: async (timeline: NonNullable<typeof query.data>) => {
+      await saveAsync({ project, timeline });
+      await exportAsync({ project });
+    },
+    /** the project's latest export job (live progress / done / failed) */
+    exportJob,
+    exporting:
+      exportMutation.isPending ||
+      exportJob?.status === "running" ||
+      exportJob?.status === "queued",
   };
 }
 

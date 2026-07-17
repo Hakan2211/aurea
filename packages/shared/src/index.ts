@@ -88,6 +88,13 @@ export const jobPayloadSchema = z.discriminatedUnion("type", [
   ttsPayloadSchema,
   musicPayloadSchema,
   videoPayloadSchema,
+  // declared below (timeline section) — z.lazy keeps the forward reference legal
+  z.object({
+    type: z.literal("export"),
+    project: z.string().min(1),
+    /** the sequence snapshot taken when the export was enqueued */
+    timeline: z.lazy(() => timelineSchema),
+  }),
 ]);
 export type JobPayload = z.infer<typeof jobPayloadSchema>;
 
@@ -348,6 +355,47 @@ export const timelineUpdateSchema = z.object({
   project: z.string().min(1),
   timeline: timelineSchema,
 });
+
+/* Granular clip operations — the server-side edit surface used by the
+ * Director's timeline_* tools (the desktop editor keeps whole-document saves).
+ * addClip probes the media's real duration with ffprobe when none is given. */
+
+export const timelineAddClipSchema = z.object({
+  project: z.string().min(1),
+  /** library relPath of the media to place */
+  asset: z.string().min(1),
+  /** target track kind; defaults from the asset kind (video/image → video, audio → voice, music → music) */
+  track: timelineTrackKindSchema.optional(),
+  /** timeline start in seconds; defaults to the end of the target track */
+  start: z.number().min(0).optional(),
+  in: z.number().min(0).default(0),
+  /** seconds; defaults to the probed media duration (images: 4s) */
+  duration: z.number().positive().optional(),
+  transitionSec: z.number().min(0).default(0),
+  label: z.string().optional(),
+});
+export type TimelineAddClip = z.input<typeof timelineAddClipSchema>;
+
+export const timelineClipPatchSchema = z.object({
+  start: z.number().min(0).optional(),
+  in: z.number().min(0).optional(),
+  duration: z.number().positive().optional(),
+  transitionSec: z.number().min(0).optional(),
+  label: z.string().optional(),
+});
+
+export const timelineUpdateClipSchema = z.object({
+  project: z.string().min(1),
+  clip: z.string().min(1),
+  patch: timelineClipPatchSchema,
+});
+
+export const timelineRemoveClipSchema = z.object({
+  project: z.string().min(1),
+  clip: z.string().min(1),
+});
+
+export const timelineExportSchema = z.object({ project: z.string().min(1) });
 
 /** One real file inside a project's assets/ tree, as scanned by studiod. */
 export const libraryAssetSchema = z.object({
