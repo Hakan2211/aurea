@@ -27,6 +27,7 @@ import { ComfyImageAdapter } from "./adapters/comfy-image.js";
 import { TtsAdapter } from "./adapters/tts.js";
 import { MusicAdapter } from "./adapters/music.js";
 import { ComfyVideoAdapter } from "./adapters/comfy-video.js";
+import { SeedanceAdapter } from "./adapters/seedance.js";
 import { serveMedia } from "./media.js";
 import { appRouter } from "./router.js";
 import type { Context } from "./trpc.js";
@@ -77,6 +78,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new TtsAdapter(settings, runtime, models),
       new MusicAdapter(settings, runtime, models),
       new ComfyVideoAdapter(settings, comfy, models),
+      new SeedanceAdapter(settings),
     ],
     storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),
     importOutput: (job) => projects.importJobOutput(job),

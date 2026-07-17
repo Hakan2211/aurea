@@ -10,6 +10,7 @@ import type { EnqueueJobResolved, JobPayload } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
+import { seedanceEstimate } from "./adapters/seedance.js";
 
 export interface LabEngine {
   id: string;
@@ -191,7 +192,7 @@ export class Labs {
   }
 
   videoCatalog() {
-    const { engines } = this.settings.get();
+    const { engines, providers } = this.settings.get();
     const managed = engines.videoMode === "managed";
     // external mode queues on comfyUrl, whose install carries the LTX weights;
     // managed needs the runtime's ComfyUI plus the model-manager weight set
@@ -208,8 +209,20 @@ export class Labs {
           note: "Best for local runs",
           available,
         },
+        {
+          id: "seedance",
+          label: "Seedance 1.0",
+          sub: "cloud · paid",
+          note: "Quality fallback via fal.ai",
+          available: !!providers.falApiKey,
+        },
       ],
-      engineNotes: { ltx2: "Renders on your GPU — $0.00" } as Record<string, string>,
+      engineNotes: {
+        ltx2: "Renders on your GPU — $0.00",
+        seedance: providers.falApiKey
+          ? "Cloud render on your fal.ai account — ≈ $0.05/s at 720p, $0.15/s at 1080p"
+          : "Add your fal.ai API key in Settings → AI Providers to enable",
+      } as Record<string, string>,
       durations: ["3 seconds", "4 seconds", "5 seconds", "6 seconds", "8 seconds"],
       resolutions: ["704 × 896 (portrait)", "896 × 704 (landscape)", "1280 × 720 (16:9)"],
       promptMax: 1000,
@@ -252,14 +265,18 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
         engine: "ACE-Step",
         detail: `${payload.durationSec}s · ${payload.arrangement}${payload.styles.length ? ` · ${payload.styles.join(", ")}` : ""}`,
       };
-    case "video":
+    case "video": {
+      const seedance = payload.engine === "seedance";
       return {
         ...base,
         title: title(payload.prompt),
         kind: "video",
-        engine: "LTX-2",
-        detail: `${payload.resolution} · ${payload.durationSec}s${payload.audio ? " · lip-sync" : ""}`,
+        engine: seedance ? "Seedance" : "LTX-2.3",
+        detail: `${payload.resolution} · ${payload.durationSec}s${payload.audio ? " · lip-sync" : ""}${
+          seedance ? ` · ${seedanceEstimate(payload.durationSec, payload.resolution)}` : ""
+        }`,
       };
+    }
     default:
       throw new Error("not a lab payload");
   }

@@ -228,6 +228,7 @@ function ParamsPanel() {
           onClick={() =>
             lab.generate({
               prompt,
+              engine: engineId,
               durationSec: parseInt(duration) || 5,
               resolution,
               motionStrength: motion,

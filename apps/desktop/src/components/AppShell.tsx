@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router";
 import {
   Clapperboard,
+  Film,
   FolderOpen,
   Gauge,
   Image,
@@ -18,6 +19,7 @@ const nav = [
   { to: "/voice", label: "Voice lab", icon: Mic },
   { to: "/music", label: "Music lab", icon: Music },
   { to: "/video", label: "Video gen", icon: Clapperboard },
+  { to: "/timeline", label: "Timeline", icon: Film },
   { to: "/formats", label: "Formats", icon: LayoutGrid },
   { to: "/assets", label: "Assets", icon: FolderOpen },
   { to: "/jobs", label: "Jobs", icon: Gauge },

@@ -220,7 +220,12 @@ export function useTimeline() {
   const media = useMediaBase();
   const query = trpc.timeline.get.useQuery({ project }, { enabled: !!project, staleTime: Infinity });
   const library = trpc.library.list.useQuery().data?.assets;
-  const { mutate } = trpc.timeline.update.useMutation();
+  const utils = trpc.useUtils();
+  // keep the cache in lockstep with saves — a remounted screen must re-init
+  // from the latest cut, never from the first fetch of the session
+  const { mutate } = trpc.timeline.update.useMutation({
+    onSuccess: (tl) => utils.timeline.get.setData({ project }, tl),
+  });
 
   const assetByRel = useMemo(() => {
     const map = new Map<string, { url?: string; kind: LibraryKind; name: string }>();
@@ -822,6 +827,10 @@ export function useSettings() {
       },
       setDefaultProvider(id: Settings["providers"]["default"]) {
         update({ providers: { default: id } });
+      },
+      falApiKey: live?.providers.falApiKey ?? "",
+      setFalApiKey(key: string) {
+        update({ providers: { falApiKey: key.trim() } });
       },
     };
   }, [live, disk, update]);

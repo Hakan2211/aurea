@@ -199,7 +199,8 @@ function ProviderAuth({ provider }: { provider: Provider }) {
 }
 
 function ProvidersSection() {
-  const { providers, defaultProvider, setDefaultProvider } = useSettings();
+  const { providers, defaultProvider, setDefaultProvider, falApiKey, setFalApiKey } = useSettings();
+  const [falDraft, setFalDraft] = useState<string | null>(null);
   const active = defaultProvider;
   const setActive = (id: string) =>
     setDefaultProvider(id as Parameters<typeof setDefaultProvider>[0]);
@@ -248,6 +249,26 @@ function ProvidersSection() {
             </div>
           );
         })}
+      </div>
+      <div className="rounded-2xl border hairline bg-surface/50 p-4">
+        <div className="text-[13px] font-medium text-cream">fal.ai API key</div>
+        <div className="mt-0.5 text-[10px] text-fog">
+          Unlocks the Seedance cloud video engine in the Video Lab. Clips bill to your fal account —
+          the estimated cost shows before every render.
+        </div>
+        <input
+          type="password"
+          value={falDraft ?? falApiKey}
+          onChange={(e) => setFalDraft(e.target.value)}
+          onBlur={() => {
+            if (falDraft !== null && falDraft !== falApiKey) setFalApiKey(falDraft);
+            setFalDraft(null);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          spellCheck={false}
+          placeholder="key id:key secret"
+          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+        />
       </div>
     </div>
   );

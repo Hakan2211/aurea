@@ -9,6 +9,7 @@ import { JobCenter } from "@/screens/JobCenter";
 import { MusicLab } from "@/screens/MusicLab";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 import { VideoLab } from "@/screens/VideoLab";
+import { TimelineScreen } from "@/screens/Timeline";
 import { VoiceLab } from "@/screens/VoiceLab";
 
 /* HashRouter: works identically under file:// when the Electron wrapper lands. */
@@ -24,6 +25,7 @@ export function App() {
           <Route path="voice" element={<VoiceLab />} />
           <Route path="music" element={<MusicLab />} />
           <Route path="video" element={<VideoLab />} />
+          <Route path="timeline" element={<TimelineScreen />} />
           <Route path="formats" element={<Formats />} />
           <Route path="assets" element={<AssetLibrary />} />
           <Route path="jobs" element={<JobCenter />} />
