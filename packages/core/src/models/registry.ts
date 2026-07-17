@@ -99,6 +99,40 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: true,
   }),
   withSize({
+    id: "krea2-turbo-gguf",
+    name: "Krea 2 Turbo (GGUF)",
+    use: "image",
+    engine: "ComfyUI · Image Lab (krea2)",
+    description:
+      "Krea's flagship photoreal text-to-image, Q8 GGUF quantization — fits a 24 GB GPU through the managed GGUF loader nodes.",
+    files: [
+      {
+        name: "diffusion_models/krea2_turbo-Q8_0.gguf",
+        url: "https://huggingface.co/vantagewithai/Krea-2-Turbo-GGUF/resolve/main/krea2_turbo-Q8_0.gguf",
+        sizeBytes: 13705958688,
+        sha256: "1fa2da08a7a708827c2100d0af41c8371d79efd9f7c5490c23ebc65408536490",
+      },
+      {
+        name: "text_encoders/qwen3vl_4b_bf16.safetensors",
+        url: "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_bf16.safetensors",
+        sizeBytes: 8875719384,
+        sha256: "36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34",
+      },
+      {
+        name: "vae/qwen_image_vae.safetensors",
+        url: "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+        sizeBytes: 253806246,
+        sha256: "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+      },
+    ],
+    license: {
+      name: "Krea 2 Community License",
+      url: "https://huggingface.co/krea/Krea-2-Turbo/blob/main/LICENSE.pdf",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
     id: "chatterbox-tts",
     name: "Chatterbox TTS",
     use: "voice",

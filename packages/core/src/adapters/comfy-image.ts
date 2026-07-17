@@ -8,10 +8,13 @@ import path from "node:path";
 import type { ImageAspect, Job } from "@aurea/shared";
 import type { SettingsStore } from "../settings.js";
 import type { ComfyService } from "../comfy/service.js";
+import type { EngineRuntime } from "../runtime/runtime.js";
+import type { ModelManager } from "../models/manager.js";
 import { ComfyClient } from "../comfy/client.js";
 import {
   krea2Graph,
   KREA2_EXTERNAL,
+  KREA2_MANAGED,
   zImageGraph,
   ZIMAGE_EXTERNAL,
   ZIMAGE_MANAGED,
@@ -45,6 +48,8 @@ export class ComfyImageAdapter implements EngineAdapter {
   constructor(
     private settings: SettingsStore,
     private comfy: ComfyService,
+    private runtime: EngineRuntime,
+    private models: ModelManager,
   ) {}
 
   canRun(job: Job): boolean {
@@ -54,12 +59,14 @@ export class ComfyImageAdapter implements EngineAdapter {
     );
   }
 
-  resources(): JobResources {
-    // managed sidecar: ~14 GB once z-image is loaded; when it's already warm
-    // the engineId lets the scheduler skip preflight. External ComfyUI owns
-    // its own memory — no estimate.
+  resources(job: Job): JobResources {
+    // managed sidecar: ~14 GB with z-image loaded, ~18 GB for krea2's Q8 GGUF
+    // (text encoder offloads after conditioning); when it's already warm the
+    // engineId lets the scheduler skip preflight. External ComfyUI owns its
+    // own memory — no estimate.
     const managed = this.settings.get().engines.comfyMode === "managed";
-    return { klass: "gpu", engineId: "comfy", vramGb: managed ? 14 : undefined };
+    const krea2 = job.payload?.type === "image" && job.payload.model === "krea2";
+    return { klass: "gpu", engineId: "comfy", vramGb: managed ? (krea2 ? 18 : 14) : undefined };
   }
 
   start(job: Job, report: (p: AdapterProgress) => void): AdapterRun {
@@ -70,9 +77,17 @@ export class ComfyImageAdapter implements EngineAdapter {
       const payload = job.payload;
       if (payload?.type !== "image") throw new Error("not an image job");
       if (payload.model === "krea2" && managed) {
-        throw new Error(
-          "Krea 2 runs on an external ComfyUI with the GGUF pack for now — Settings → Engines → External, or use z-image",
-        );
+        if (!this.runtime.componentReady("gguf")) {
+          throw new Error(
+            "Krea 2 needs the GGUF loader nodes — Settings → Engines → Install engine runtime",
+          );
+        }
+        const weights = this.models.list().find((m) => m.id === "krea2-turbo-gguf");
+        if (weights?.status.state !== "installed") {
+          throw new Error(
+            "Krea 2 Turbo weights are not installed — Settings → Models → Krea 2 Turbo (GGUF)",
+          );
+        }
       }
       report({ progress: 1, stage: managed ? "Starting engine" : "Queuing on ComfyUI" });
       return this.comfy.run(async (url) => {
@@ -91,7 +106,7 @@ export class ComfyImageAdapter implements EngineAdapter {
           const spec: ImageGraphSpec = { prompt, width, height, seed: baseSeed + i };
           const graph =
             payload.model === "krea2"
-              ? krea2Graph(spec, KREA2_EXTERNAL)
+              ? krea2Graph(spec, managed ? KREA2_MANAGED : KREA2_EXTERNAL)
               : zImageGraph(spec, managed ? ZIMAGE_MANAGED : ZIMAGE_EXTERNAL);
 
           // each image owns an equal slice of 5..95

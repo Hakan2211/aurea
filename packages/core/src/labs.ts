@@ -47,8 +47,8 @@ export class Labs {
 
   imageCatalog() {
     const managed = this.settings.get().engines.comfyMode === "managed";
-    const zInstalled =
-      this.models.list().find((m) => m.id === "z-image-turbo")?.status.state === "installed";
+    const installed = (id: string) =>
+      this.models.list().find((m) => m.id === id)?.status.state === "installed";
     return {
       models: [
         {
@@ -56,13 +56,20 @@ export class Labs {
           label: "z-image-turbo · local",
           note: managed ? "fast drafts · managed engine" : "fast drafts",
           // managed: needs the runtime + weights; external: the user's ComfyUI has its own
-          available: managed ? this.runtime.componentReady("comfy") && zInstalled : true,
+          available: managed
+            ? this.runtime.componentReady("comfy") && installed("z-image-turbo")
+            : true,
         },
         {
           id: "krea2",
           label: "Krea 2 · local",
-          note: managed ? "needs external ComfyUI (GGUF)" : "photoreal · free",
-          available: !managed,
+          note: managed ? "photoreal · managed engine" : "photoreal · free",
+          // managed additionally needs the GGUF loader nodes + the Q8 weights
+          available: managed
+            ? this.runtime.componentReady("comfy") &&
+              this.runtime.componentReady("gguf") &&
+              installed("krea2-turbo-gguf")
+            : true,
         },
       ] satisfies LabEngine[],
       aspects: ["1:1", "3:2", "16:9", "4:3", "9:16"],

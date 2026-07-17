@@ -8,8 +8,8 @@
  *   external — the user's own ComfyUI with its conventional flat names
  *
  * z-image uses core nodes only, so it's the managed default. krea2 needs the
- * GGUF loader custom node — external-only until managed custom-node installs
- * land (P2). */
+ * GGUF loader custom node — the managed runtime installs it as the "gguf"
+ * component (CUSTOM_NODES in runtime.ts). */
 
 import path from "node:path";
 import type { ComfyGraph } from "./client.js";
@@ -49,6 +49,14 @@ export const KREA2_EXTERNAL: ModelNames = {
   unet: "krea2_turbo-Q8_0.gguf",
   clip: "qwen3vl_4b_bf16.safetensors",
   vae: "qwen_image_vae.safetensors",
+};
+
+/** registry-relative names (see models/registry.ts krea2-turbo-gguf); the
+ * GGUF loader lists "unet_gguf" from the diffusion_models search paths */
+export const KREA2_MANAGED: ModelNames = {
+  unet: rel("krea2-turbo-gguf", "diffusion_models", "krea2_turbo-Q8_0.gguf"),
+  clip: rel("krea2-turbo-gguf", "text_encoders", "qwen3vl_4b_bf16.safetensors"),
+  vae: rel("krea2-turbo-gguf", "vae", "qwen_image_vae.safetensors"),
 };
 
 /** mirrors videofast images/workflows/z-image-turbo.json (core nodes only) */

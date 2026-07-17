@@ -6,13 +6,16 @@
  *
  * Pass --external to prove the escape hatch instead (comfyMode external must
  * be set and a ComfyUI must run at engines.comfyUrl; model krea2).
+ * Pass --krea2 to run krea2 on the managed engine (GGUF loader nodes +
+ * krea2-turbo-gguf weights must be installed).
  *
- * Run: npx tsx scripts/test-comfy-image.mts [--external] */
+ * Run: npx tsx scripts/test-comfy-image.mts [--external | --krea2] */
 
 import fs from "node:fs";
 import path from "node:path";
 
 const external = process.argv.includes("--external");
+const krea2 = process.argv.includes("--krea2");
 
 const { startStudiod } = await import("../packages/core/src/server.js");
 const { createStudiodApi } = await import("../packages/core/src/tools.js");
@@ -35,7 +38,7 @@ try {
   );
 
   const catalog = await api.labs.image.catalog.query();
-  const modelId = external ? "krea2" : "z-image";
+  const modelId = external || krea2 ? "krea2" : "z-image";
   const model = catalog.models.find((m) => m.id === modelId);
   check(`${modelId} available in catalog`, !!model?.available, JSON.stringify(model));
 

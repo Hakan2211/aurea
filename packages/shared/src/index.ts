@@ -36,8 +36,8 @@ export const videofastPayloadSchema = z.object({
 export const imagePayloadSchema = z.object({
   type: z.literal("image"),
   prompt: z.string().min(1),
-  /** engine id from the image-lab catalog; z-image runs on the managed
-   * engine, krea2 needs an external ComfyUI (GGUF custom node) */
+  /** engine id from the image-lab catalog; both run on the managed engine
+   * (krea2 through the GGUF loader nodes) or an external ComfyUI */
   model: z.string().default("z-image"),
   aspect: imageAspectSchema.default("3:2"),
   /** style preset name folded into the prompt by the adapter */
@@ -446,9 +446,10 @@ export const modelDownloadSchema = z.object({
 /* ---------- engine runtime ---------- */
 
 /** The managed pieces under <dataRoot>/runtime/: a portable CPython, a
- * headless ComfyUI checkout with its own venv, and one venv per Python
- * engine ("chatterbox" and "acestep" are the venv engines so far). */
-export const runtimeComponentIdSchema = z.enum(["python", "comfy", "chatterbox", "acestep"]);
+ * headless ComfyUI checkout with its own venv, one venv per Python engine
+ * ("chatterbox" and "acestep" so far), and pinned ComfyUI custom-node packs
+ * ("gguf" = ComfyUI-GGUF quantized loaders). */
+export const runtimeComponentIdSchema = z.enum(["python", "comfy", "gguf", "chatterbox", "acestep"]);
 export type RuntimeComponentId = z.infer<typeof runtimeComponentIdSchema>;
 
 export const runtimeComponentStateSchema = z.enum(["absent", "installing", "ready", "error"]);

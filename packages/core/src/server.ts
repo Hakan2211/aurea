@@ -72,7 +72,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
   const engine = new JobEngine({
     adapters: [
       new VideofastAdapter(settings),
-      new ComfyImageAdapter(settings, comfy),
+      new ComfyImageAdapter(settings, comfy, runtime, models),
       new TtsAdapter(settings, runtime, models),
       new MusicAdapter(settings, runtime, models),
       new LtxVideoAdapter(settings),

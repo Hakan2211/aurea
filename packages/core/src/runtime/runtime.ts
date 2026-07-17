@@ -133,6 +133,47 @@ export const ACESTEP_PIN: VenvEngineSpec = {
 
 export const VENV_ENGINES: VenvEngineSpec[] = [CHATTERBOX_PIN, ACESTEP_PIN];
 
+/** A pinned ComfyUI custom-node pack, installed to runtime/nodes/<dir> and
+ * mounted into the managed ComfyUI via extra_model_paths.yaml (custom_nodes
+ * search paths are loaded before node init) — the checkout survives a ComfyUI
+ * reinstall. Python deps go into the ComfyUI venv, so ComfyUI must be ready
+ * first. Bumping `version` (or the pin) makes the component reinstall. */
+export interface CustomNodeSpec {
+  id: RuntimeComponentId;
+  name: string;
+  /** recorded in runtime.json — "<upstream>-<shortsha>" */
+  version: string;
+  /** commit archive zip (GitHub generates these — no published sha,
+   * verified structurally via marker instead) */
+  url: string;
+  /** directory name under runtime/nodes — becomes the python module name */
+  dir: string;
+  /** posix-relative file that must exist after extraction */
+  marker: string;
+  /** pip requirements installed into the ComfyUI venv */
+  pipArgs: string[];
+  /** import check inside the ComfyUI venv */
+  check: { code: string; expect: RegExp };
+}
+
+export const GGUF_NODE_PIN: CustomNodeSpec = {
+  id: "gguf",
+  name: "GGUF loader nodes",
+  // upstream pyproject 2.0.0 @ pinned commit (metadata-on-new-comfy fix)
+  version: "2.0.0-6ea2651",
+  url: "https://github.com/city96/ComfyUI-GGUF/archive/6ea2651e7df66d7585f6ffee804b20e92fb38b8a.zip",
+  dir: "ComfyUI-GGUF",
+  marker: "nodes.py",
+  pipArgs: ["gguf>=0.13.0", "sentencepiece", "protobuf"],
+  check: {
+    // the gguf package exposes no __version__ — ask package metadata
+    code: "import gguf, sentencepiece; from importlib.metadata import version; print('gguf ok '+version('gguf'))",
+    expect: /gguf ok/,
+  },
+};
+
+export const CUSTOM_NODES: CustomNodeSpec[] = [GGUF_NODE_PIN];
+
 const TORCH_INDEX = "https://download.pytorch.org/whl/cu128";
 /** rough site-packages + wheel cache footprint of the torch + requirements
  * installs, for progress estimation only */
@@ -156,6 +197,8 @@ const COMFY_CATEGORIES = [
 interface RuntimeRecord {
   python?: string;
   comfy?: string;
+  /** custom-node pack id -> installed spec version */
+  nodes?: Record<string, string>;
   /** venv engine id -> installed spec version */
   venvs?: Record<string, string>;
   /** venv engine id -> spec version its source checkout came from (recorded
@@ -222,6 +265,16 @@ export class EngineRuntime extends EventEmitter {
     return path.join(this.root(), "engines", id);
   }
 
+  /** custom-node packs live here, mounted via extra_model_paths.yaml —
+   * outside the ComfyUI checkout so a ComfyUI reinstall can't wipe them */
+  nodesDir(): string {
+    return path.join(this.root(), "nodes");
+  }
+
+  nodeDir(spec: CustomNodeSpec): string {
+    return path.join(this.nodesDir(), spec.dir);
+  }
+
   /* ---------- status ---------- */
 
   status(): RuntimeStatus {
@@ -262,6 +315,15 @@ export class EngineRuntime extends EventEmitter {
         this.comfyReady(record),
         record.comfy ?? null,
       ),
+      ...CUSTOM_NODES.map((spec) =>
+        component(
+          spec.id,
+          spec.name,
+          spec.version,
+          this.nodeReady(spec, record),
+          record.nodes?.[spec.id] ?? null,
+        ),
+      ),
       ...VENV_ENGINES.map((spec) =>
         component(
           spec.id,
@@ -285,6 +347,8 @@ export class EngineRuntime extends EventEmitter {
     const record = this.record();
     if (id === "python") return this.pythonReady(record);
     if (id === "comfy") return this.comfyReady(record);
+    const node = CUSTOM_NODES.find((s) => s.id === id);
+    if (node) return this.nodeReady(node, record);
     const spec = VENV_ENGINES.find((s) => s.id === id);
     return spec ? this.venvEngineReady(spec, record) : false;
   }
@@ -298,6 +362,13 @@ export class EngineRuntime extends EventEmitter {
       record.comfy === COMFY_PIN.tag &&
       fs.existsSync(path.join(this.comfyDir(), "main.py")) &&
       fs.existsSync(this.venvPython())
+    );
+  }
+
+  private nodeReady(spec: CustomNodeSpec, record: RuntimeRecord): boolean {
+    return (
+      record.nodes?.[spec.id] === spec.version &&
+      fs.existsSync(path.join(this.nodeDir(spec), ...spec.marker.split("/")))
     );
   }
 
@@ -325,6 +396,12 @@ export class EngineRuntime extends EventEmitter {
       const record = this.record();
       if (!this.pythonReady(record)) await this.installPython(ctrl.signal);
       if (!this.comfyReady(this.record())) await this.installComfy(ctrl.signal);
+      for (const spec of CUSTOM_NODES) {
+        // after ComfyUI: pip deps land in the ComfyUI venv
+        if (!this.nodeReady(spec, this.record())) {
+          await this.installCustomNode(spec, ctrl.signal);
+        }
+      }
       for (const spec of VENV_ENGINES) {
         if (!this.venvEngineReady(spec, this.record())) {
           await this.installVenvEngine(spec, ctrl.signal);
@@ -526,6 +603,88 @@ export class EngineRuntime extends EventEmitter {
     this.publish();
   }
 
+  /* ---------- custom nodes ---------- */
+
+  private async installCustomNode(spec: CustomNodeSpec, signal: AbortSignal): Promise<void> {
+    const live = this.begin(spec.id);
+    const nodeDir = this.nodeDir(spec);
+    const cacheDir = path.join(this.root(), "pip-cache");
+
+    // a pin change re-fetches the checkout so code and version can't drift
+    if (
+      !fs.existsSync(path.join(nodeDir, ...spec.marker.split("/"))) ||
+      this.record().nodes?.[spec.id] !== spec.version
+    ) {
+      live.stage = `Downloading ${spec.name}`;
+      this.publish();
+      const archive = path.join(this.root(), "downloads", `${spec.id}-${spec.version}.zip`);
+      // GitHub generates commit archives on the fly — size unknown, no resume
+      await downloadFile(
+        { url: spec.url, label: `${spec.name} source`, sizeBytes: null, sha256: null },
+        archive,
+        signal,
+        {
+          onBytes: (n) => {
+            live.progress = Math.min(20, n / (200 * 1024));
+            live.detail = fmtBytes(n);
+            this.publish();
+          },
+        },
+      );
+
+      live.stage = "Unpacking";
+      live.progress = 20;
+      live.detail = null;
+      this.publish();
+      const staging = path.join(this.root(), `.staging-${spec.id}`);
+      fs.rmSync(staging, { recursive: true, force: true });
+      fs.rmSync(nodeDir, { recursive: true, force: true });
+      fs.mkdirSync(staging, { recursive: true });
+      await this.extract(archive, staging, signal);
+      // archive root is <repo>-<sha>; take the single entry
+      const entries = fs.readdirSync(staging);
+      if (
+        entries.length !== 1 ||
+        !fs.existsSync(path.join(staging, entries[0], ...spec.marker.split("/")))
+      ) {
+        throw new Error(`unexpected ${spec.name} archive layout: ${entries.join(", ")}`);
+      }
+      fs.mkdirSync(this.nodesDir(), { recursive: true });
+      fs.renameSync(path.join(staging, entries[0]), nodeDir);
+      fs.rmSync(staging, { recursive: true, force: true });
+      fs.rmSync(archive, { force: true });
+    }
+
+    // deps go into the ComfyUI venv — the node runs inside that process
+    live.stage = `Installing ${spec.name} dependencies`;
+    live.progress = 40;
+    this.publish();
+    await this.run(
+      this.venvPython(),
+      [
+        "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
+        "--cache-dir", cacheDir, ...spec.pipArgs,
+      ],
+      signal,
+      live,
+    );
+
+    live.stage = "Checking";
+    live.progress = 90;
+    live.detail = null;
+    this.publish();
+    const out = await this.capture(this.venvPython(), ["-c", spec.check.code], signal);
+    if (!spec.check.expect.test(out)) {
+      throw new Error(`${spec.name} check failed: ${out || "(no output)"}`);
+    }
+    live.detail = out;
+
+    this.writeExtraModelPaths(); // the nodes mount only appears once one exists
+    this.saveRecord({ nodes: { ...this.record().nodes, [spec.id]: spec.version } });
+    this.live.delete(spec.id);
+    this.publish();
+  }
+
   /* ---------- venv engines ---------- */
 
   private async installVenvEngine(spec: VenvEngineSpec, signal: AbortSignal): Promise<void> {
@@ -630,12 +789,18 @@ export class EngineRuntime extends EventEmitter {
   /** Regenerated on every write so a moved dataRoot stays correct. */
   writeExtraModelPaths(): void {
     const models = path.join(this.settings.get().storage.dataRoot, "models").replaceAll("\\", "/");
+    const nodes = this.nodesDir().replaceAll("\\", "/");
     const lines = [
       "# generated by Aurea — every category resolves inside the model manager's root;",
       "# graphs reference weights as <model-id>/<category>/<file>, so no collisions.",
       "aurea:",
       `  base_path: ${models}`,
       ...COMFY_CATEGORIES.map((c) => `  ${c}: "."`),
+      // custom-node packs are checkouts under runtime/nodes — ComfyUI loads
+      // extra custom_nodes search paths before node init (main.py order)
+      ...(fs.existsSync(nodes)
+        ? ["aurea_nodes:", `  custom_nodes: ${nodes}`]
+        : []),
       "",
     ];
     fs.mkdirSync(this.root(), { recursive: true });
