@@ -1,10 +1,13 @@
 import { NavLink, Outlet } from "react-router";
 import {
+  BookOpen,
   Clapperboard,
+  Feather,
   Film,
   FolderOpen,
   Gauge,
   Image,
+  Layers,
   LayoutGrid,
   MessagesSquare,
   Mic,
@@ -15,6 +18,9 @@ import { cx } from "@/components/ui";
 
 const nav = [
   { to: "/", label: "Director", icon: MessagesSquare, end: true },
+  { to: "/studio", label: "Studio", icon: Layers },
+  { to: "/script", label: "Writers room", icon: Feather },
+  { to: "/bible", label: "Bible", icon: BookOpen },
   { to: "/images", label: "Image lab", icon: Image },
   { to: "/voice", label: "Voice lab", icon: Mic },
   { to: "/music", label: "Music lab", icon: Music },

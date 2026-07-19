@@ -1,7 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  Bible,
+  BibleCharacter,
+  BibleLocation,
+  BibleStyle,
   DirectorAttachment,
   DirectorToolCall,
+  Episode,
   ImageGenerate,
   Job,
   JobPayload,
@@ -9,8 +14,14 @@ import type {
   LibraryKind,
   ModelEntry,
   MusicGenerate,
+  Production,
+  ProductionAddEpisode,
+  ProductionAddScene,
+  ProductionAddShot,
   RuntimeStatus,
+  Scene,
   Settings,
+  Shot,
   TtsGenerate,
   VideoGenerate,
 } from "@aurea/shared";
@@ -774,6 +785,163 @@ export function useVideoLab() {
       busy: mutation.isPending || active.length > 0,
     };
   }, [catalog, kindAssets, images, jobsData, media, project, mutate, mutation.isPending]);
+}
+
+/* ---------- studio: bible + production (LIVE) ---------- */
+
+/** Debounced entity editing: local draft + whole-entity save after the user
+ * stops typing (timeline precedent). External updates (seed, Director edits)
+ * replace the draft unless keystrokes are still unsaved. */
+export function useDraft<T>(source: T, save: (next: T) => void, delayMs = 700) {
+  const [draft, setDraft] = useState<T>(source);
+  const timer = useRef<number | undefined>(undefined);
+  const dirty = useRef(false);
+
+  useEffect(() => {
+    if (!dirty.current) setDraft(source);
+  }, [source]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const patch = (p: Partial<T>) => {
+    setDraft((d) => {
+      const next = { ...d, ...p };
+      dirty.current = true;
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => {
+        dirty.current = false;
+        save(next);
+      }, delayMs);
+      return next;
+    });
+  };
+  return { draft, patch };
+}
+
+/** /media route for a bare relPath (library assets carry theirs precomputed) */
+const mediaRoute = (relPath: string) =>
+  "/media/" + relPath.split("/").map(encodeURIComponent).join("/");
+
+const EMPTY_BIBLE: Bible = { version: 1, characters: [], locations: [], style: { artDirection: "", negativePrompt: "", cinematographyNotes: "", notes: "" }, updatedAt: "" };
+
+/** LIVE — the production bible (characters / locations / style) for the active
+ * project, plus the cloned-voice roster the character voice picker feeds from.
+ * No sample fallback: without a core the Bible screen shows its empty state. */
+export function useBible() {
+  const project = useActiveProjectId();
+  const media = useMediaBase();
+  const utils = trpc.useUtils();
+  const query = trpc.studio.bible.get.useQuery({ project }, { enabled: !!project });
+  const voices = trpc.labs.voice.catalog.useQuery().data?.voices;
+
+  const sync = { onSuccess: (b: Bible) => utils.studio.bible.get.setData({ project }, b) };
+  const upsertCharMutation = trpc.studio.bible.upsertCharacter.useMutation(sync);
+  const removeCharMutation = trpc.studio.bible.removeCharacter.useMutation(sync);
+  const upsertLocMutation = trpc.studio.bible.upsertLocation.useMutation(sync);
+  const removeLocMutation = trpc.studio.bible.removeLocation.useMutation(sync);
+  const styleMutation = trpc.studio.bible.updateStyle.useMutation(sync);
+  const seedMutation = trpc.studio.seedAnimalSitcom.useMutation({
+    // the seed touches the bible, production.json, project assets AND the voice roster
+    onSuccess: () => {
+      void utils.studio.invalidate();
+      void utils.library.invalidate();
+      void utils.labs.invalidate();
+    },
+  });
+
+  const { mutate: upsertChar } = upsertCharMutation;
+  const { mutate: removeChar } = removeCharMutation;
+  const { mutate: upsertLoc } = upsertLocMutation;
+  const { mutate: removeLoc } = removeLocMutation;
+  const { mutate: saveStyle } = styleMutation;
+  const { mutateAsync: seedAsync } = seedMutation;
+
+  return useMemo(
+    () => ({
+      project,
+      live: !!query.data,
+      bible: query.data ?? EMPTY_BIBLE,
+      /** preview URL for a bible ref relPath (null without a live core) */
+      refUrl: (relPath: string | null | undefined) =>
+        relPath && media ? media(mediaRoute(relPath)) : undefined,
+      /** cloned-voice roster for the voice picker */
+      voices: voices ?? [],
+      /** playable ref-clip URL for a roster voice (studio-owned clips only) */
+      voiceUrl: (voiceId: string | null) => {
+        const v = voices?.find((x) => x.id === voiceId);
+        return v?.kind === "cloned" && v.source === "studio" && media
+          ? media(mediaRoute(`voices/${v.id}.wav`))
+          : undefined;
+      },
+      upsertCharacter: (character: BibleCharacter) => upsertChar({ project, character }),
+      removeCharacter: (id: string) => removeChar({ project, id }),
+      upsertLocation: (location: BibleLocation) => upsertLoc({ project, location }),
+      removeLocation: (id: string) => removeLoc({ project, id }),
+      updateStyle: (style: BibleStyle) => saveStyle({ project, style }),
+      seed: (overwrite = false) => seedAsync({ project, overwrite }),
+      seeding: seedMutation.isPending,
+      seedResult: seedMutation.data,
+      seedError: seedMutation.error?.message,
+    }),
+    [project, query.data, voices, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
+  );
+}
+
+/** LIVE — the show structure (seasons → episodes → scenes → shots) for the
+ * active project. Granular mutations keep the cache in lockstep so the board,
+ * the inspector, and a Director edit all converge on production.json. */
+export function useProduction() {
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const query = trpc.studio.production.get.useQuery({ project }, { enabled: !!project });
+
+  const syncProd = (p: Production) => utils.studio.production.get.setData({ project }, p);
+  const prodSync = { onSuccess: syncProd };
+  const nodeSync = { onSuccess: (r: { production: Production }) => syncProd(r.production) };
+
+  const saveMutation = trpc.studio.production.update.useMutation(prodSync);
+  const addEpisodeMutation = trpc.studio.production.addEpisode.useMutation(nodeSync);
+  const addSceneMutation = trpc.studio.production.addScene.useMutation(nodeSync);
+  const addShotMutation = trpc.studio.production.addShot.useMutation(nodeSync);
+  const updateEpisodeMutation = trpc.studio.production.updateEpisode.useMutation(prodSync);
+  const updateSceneMutation = trpc.studio.production.updateScene.useMutation(prodSync);
+  const updateShotMutation = trpc.studio.production.updateShot.useMutation(nodeSync);
+  const removeEpisodeMutation = trpc.studio.production.removeEpisode.useMutation(prodSync);
+  const removeSceneMutation = trpc.studio.production.removeScene.useMutation(prodSync);
+  const removeShotMutation = trpc.studio.production.removeShot.useMutation(prodSync);
+
+  const { mutate: save } = saveMutation;
+  const { mutate: addEpisode } = addEpisodeMutation;
+  const { mutate: addScene } = addSceneMutation;
+  const { mutate: addShot } = addShotMutation;
+  const { mutate: updateEpisode } = updateEpisodeMutation;
+  const { mutate: updateScene } = updateSceneMutation;
+  const { mutate: updateShot } = updateShotMutation;
+  const { mutate: removeEpisode } = removeEpisodeMutation;
+  const { mutate: removeScene } = removeSceneMutation;
+  const { mutate: removeShot } = removeShotMutation;
+
+  return useMemo(
+    () => ({
+      project,
+      live: !!query.data,
+      production: query.data ?? null,
+      save: (production: Production) => save({ project, production }),
+      addEpisode: (input: Omit<ProductionAddEpisode, "project">) =>
+        addEpisode({ project, ...input }),
+      addScene: (input: Omit<ProductionAddScene, "project">) => addScene({ project, ...input }),
+      addShot: (input: Omit<ProductionAddShot, "project">) => addShot({ project, ...input }),
+      updateEpisode: (episodeId: string, patch: Partial<Omit<Episode, "id" | "number" | "scenes">>) =>
+        updateEpisode({ project, episodeId, patch }),
+      updateScene: (sceneId: string, patch: Partial<Omit<Scene, "id" | "shots">>) =>
+        updateScene({ project, sceneId, patch }),
+      updateShot: (shotId: string, patch: Partial<Omit<Shot, "id">>) =>
+        updateShot({ project, shotId, patch }),
+      removeEpisode: (id: string) => removeEpisode({ project, id }),
+      removeScene: (id: string) => removeScene({ project, id }),
+      removeShot: (id: string) => removeShot({ project, id }),
+    }),
+    [project, query.data, save, addEpisode, addScene, addShot, updateEpisode, updateScene, updateShot, removeEpisode, removeScene, removeShot],
+  );
 }
 
 /* sample toggle ids ↔ persisted settings fields */

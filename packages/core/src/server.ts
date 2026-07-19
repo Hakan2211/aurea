@@ -19,6 +19,7 @@ import { ProjectStore } from "./projects.js";
 import { Labs } from "./labs.js";
 import { DirectorService } from "./director.js";
 import { TimelineStore } from "./timeline.js";
+import { StudioStore } from "./studio.js";
 import { ModelManager } from "./models/manager.js";
 import { EngineRuntime } from "./runtime/runtime.js";
 import { ComfyService } from "./comfy/service.js";
@@ -94,7 +95,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     return selfCoords;
   });
   const timelines = new TimelineStore(settings);
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime, timelines };
+  const studio = new StudioStore(settings, projects);
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime, timelines, studio };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,

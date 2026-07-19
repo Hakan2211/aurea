@@ -8,6 +8,9 @@ import { ImageLab } from "@/screens/ImageLab";
 import { JobCenter } from "@/screens/JobCenter";
 import { MusicLab } from "@/screens/MusicLab";
 import { SettingsScreen } from "@/screens/SettingsScreen";
+import { StudioScreen } from "@/screens/Studio";
+import { WritersRoomScreen } from "@/screens/WritersRoom";
+import { BibleScreen } from "@/screens/Bible";
 import { VideoLab } from "@/screens/VideoLab";
 import { TimelineScreen } from "@/screens/Timeline";
 import { VoiceLab } from "@/screens/VoiceLab";
@@ -21,6 +24,9 @@ export function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<DirectorChat />} />
+          <Route path="studio" element={<StudioScreen />} />
+          <Route path="script" element={<WritersRoomScreen />} />
+          <Route path="bible" element={<BibleScreen />} />
           <Route path="images" element={<ImageLab />} />
           <Route path="voice" element={<VoiceLab />} />
           <Route path="music" element={<MusicLab />} />

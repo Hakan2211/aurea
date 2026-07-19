@@ -419,6 +419,340 @@ export const libraryAssetSchema = z.object({
 });
 export type LibraryAsset = z.infer<typeof libraryAssetSchema>;
 
+/* ---------- production (Studio data spine) ---------- */
+/* The V2 Studio hierarchy — Production → Season → Episode → Scene → Shot —
+ * persisted whole as <dataRoot>/projects/<id>/production.json (project =
+ * production; the folder-is-the-database rule applies unchanged). A Shot is
+ * the atomic production unit and already carries the slots later S-P1/S-P2
+ * steps fill in: script lines (writers room), camera spec + keyframes
+ * (storyboard), video/VO takes + lipsync (shot generation). */
+
+export const shotStatusSchema = z.enum([
+  "draft",
+  "boarded",
+  "generated",
+  "synced",
+  "approved",
+]);
+export type ShotStatus = z.infer<typeof shotStatusSchema>;
+
+/** Free-text this step; storyboard later swaps these to structured refs into
+ * the cinematography bible's banks ("MS", "low angle", "sitcom lighting"). */
+export const cameraSpecSchema = z.object({
+  shotSize: z.string().default(""),
+  angle: z.string().default(""),
+  move: z.string().default(""),
+  lens: z.string().default(""),
+  lighting: z.string().default(""),
+  notes: z.string().default(""),
+});
+export type CameraSpec = z.infer<typeof cameraSpecSchema>;
+
+export const scriptLineSchema = z.object({
+  id: z.string(),
+  /** bible character id; null = action/stage direction line */
+  character: z.string().nullable().default(null),
+  text: z.string().default(""),
+  /** per-line VO direction ("more sarcastic") */
+  deliveryNotes: z.string().default(""),
+});
+export type ScriptLine = z.infer<typeof scriptLineSchema>;
+
+export const shotKeyframeSchema = z.object({
+  id: z.string(),
+  /** library relPath of the still */
+  asset: z.string(),
+  approved: z.boolean().default(false),
+});
+export type ShotKeyframe = z.infer<typeof shotKeyframeSchema>;
+
+export const shotTakeSchema = z.object({
+  id: z.string(),
+  /** library relPath of the rendered clip */
+  asset: z.string(),
+  /** engine that produced it ("ltx2", "seedance", "chatterbox") */
+  engine: z.string().default(""),
+  label: z.string().default(""),
+});
+export type ShotTake = z.infer<typeof shotTakeSchema>;
+
+export const shotSchema = z.object({
+  id: z.string(),
+  title: z.string().default(""),
+  scriptLines: z.array(scriptLineSchema).default([]),
+  /** bible character ids present in the shot */
+  characters: z.array(z.string()).default([]),
+  /** bible location id */
+  location: z.string().nullable().default(null),
+  camera: cameraSpecSchema.default({}),
+  keyframes: z.array(shotKeyframeSchema).default([]),
+  selectedKeyframe: z.string().nullable().default(null),
+  videoTakes: z.array(shotTakeSchema).default([]),
+  voTakes: z.array(shotTakeSchema).default([]),
+  selectedTake: z.string().nullable().default(null),
+  /** library relPath of the lip-synced result (S-P2) */
+  lipsync: z.string().nullable().default(null),
+  status: shotStatusSchema.default("draft"),
+  notes: z.string().default(""),
+});
+export type Shot = z.infer<typeof shotSchema>;
+
+export const sceneSchema = z.object({
+  id: z.string(),
+  /** screenplay slugline ("INT. THE LOFT — NIGHT") */
+  slugline: z.string(),
+  summary: z.string().default(""),
+  /** bible location id */
+  location: z.string().nullable().default(null),
+  shots: z.array(shotSchema).default([]),
+});
+export type Scene = z.infer<typeof sceneSchema>;
+
+export const episodeSchema = z.object({
+  id: z.string(),
+  number: z.number().int().min(1),
+  title: z.string(),
+  logline: z.string().default(""),
+  synopsis: z.string().default(""),
+  scenes: z.array(sceneSchema).default([]),
+});
+export type Episode = z.infer<typeof episodeSchema>;
+
+export const seasonSchema = z.object({
+  id: z.string(),
+  number: z.number().int().min(1),
+  title: z.string().default(""),
+  episodes: z.array(episodeSchema).default([]),
+});
+export type Season = z.infer<typeof seasonSchema>;
+
+/** The whole show for one project — <dataRoot>/projects/<id>/production.json */
+export const productionSchema = z.object({
+  version: z.literal(1).default(1),
+  title: z.string(),
+  logline: z.string().default(""),
+  /** "series" | "film" | free-form — display only for now */
+  format: z.string().default("series"),
+  seasons: z.array(seasonSchema).default([]),
+  updatedAt: z.string().default(""),
+});
+export type Production = z.infer<typeof productionSchema>;
+
+export const productionGetSchema = z.object({ project: z.string().min(1) });
+
+export const productionUpdateSchema = z.object({
+  project: z.string().min(1),
+  production: productionSchema,
+});
+
+export const productionAddEpisodeSchema = z.object({
+  project: z.string().min(1),
+  /** season to add to (created if missing); defaults to 1 */
+  seasonNumber: z.number().int().min(1).default(1),
+  title: z.string().trim().min(1),
+  logline: z.string().default(""),
+});
+export type ProductionAddEpisode = z.input<typeof productionAddEpisodeSchema>;
+
+export const productionAddSceneSchema = z.object({
+  project: z.string().min(1),
+  episodeId: z.string().min(1),
+  slugline: z.string().trim().min(1),
+  summary: z.string().default(""),
+  location: z.string().nullable().default(null),
+});
+export type ProductionAddScene = z.input<typeof productionAddSceneSchema>;
+
+export const productionAddShotSchema = z.object({
+  project: z.string().min(1),
+  sceneId: z.string().min(1),
+  title: z.string().default(""),
+  scriptLines: z.array(scriptLineSchema).default([]),
+  characters: z.array(z.string()).default([]),
+  location: z.string().nullable().default(null),
+  camera: cameraSpecSchema.default({}),
+});
+export type ProductionAddShot = z.input<typeof productionAddShotSchema>;
+
+export const episodePatchSchema = episodeSchema
+  .omit({ id: true, number: true, scenes: true })
+  .partial();
+export const productionUpdateEpisodeSchema = z.object({
+  project: z.string().min(1),
+  episodeId: z.string().min(1),
+  patch: episodePatchSchema,
+});
+
+export const scenePatchSchema = sceneSchema.omit({ id: true, shots: true }).partial();
+export const productionUpdateSceneSchema = z.object({
+  project: z.string().min(1),
+  sceneId: z.string().min(1),
+  patch: scenePatchSchema,
+});
+
+export const shotPatchSchema = shotSchema.omit({ id: true }).partial();
+export const productionUpdateShotSchema = z.object({
+  project: z.string().min(1),
+  shotId: z.string().min(1),
+  patch: shotPatchSchema,
+});
+
+export const productionRemoveNodeSchema = z.object({
+  project: z.string().min(1),
+  id: z.string().min(1),
+});
+
+/** studio.onUpdate payload — which document changed for which project, so
+ * open screens can converge on Director/MCP edits without polling */
+export const studioUpdateEventSchema = z.object({
+  project: z.string(),
+  doc: z.enum(["production", "bible"]),
+});
+export type StudioUpdateEvent = z.infer<typeof studioUpdateEventSchema>;
+
+/* ---------- bible (persistent cast & world memory) ---------- */
+/* What makes episode 12 look and sound like episode 1 — persisted as
+ * <dataRoot>/projects/<id>/bible.json. Reference images are library relPaths
+ * (copied into the project's assets tree, so /media serves them and the
+ * scanner sees them); voices bind to the voice-lab roster by id. */
+
+export const bibleVoiceSchema = z.object({
+  /** voice-lab roster id (cloned ref clip); null = not cast yet */
+  voiceId: z.string().nullable().default(null),
+  engine: z.string().default("chatterbox"),
+  /** Chatterbox expressiveness knob per character (bake-off tuning) */
+  exaggeration: z.number().min(0).max(1).default(0.5),
+  cfgWeight: z.number().min(0).max(1).default(0.4),
+  deliveryNotes: z.string().default(""),
+});
+export type BibleVoice = z.infer<typeof bibleVoiceSchema>;
+
+export const bibleRefsSchema = z.object({
+  /** all library relPaths */
+  turnaround: z.string().nullable().default(null),
+  hero: z.string().nullable().default(null),
+  /** composite contact sheet from the char-sheet pipeline */
+  sheet: z.string().nullable().default(null),
+  /** single-view frames (S1 front … S9 anchor) */
+  frames: z.array(z.string()).default([]),
+  /** LoRA training set */
+  dataset: z.array(z.string()).default([]),
+  custom: z.array(z.string()).default([]),
+});
+export type BibleRefs = z.infer<typeof bibleRefsSchema>;
+
+export const bibleCharacterSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  species: z.string().default(""),
+  /** structured appearance slots (character-sheets-v2 fill values) */
+  build: z.string().default(""),
+  face: z.string().default(""),
+  wardrobe: z.string().default(""),
+  props: z.string().default(""),
+  colors: z.string().default(""),
+  signatureFeature: z.string().default(""),
+  /** identity-anchor macros — the scars/marks that lock identity across shots */
+  anchors: z
+    .object({
+      body: z.string().default(""),
+      face: z.string().default(""),
+      macro: z.string().default(""),
+    })
+    .default({}),
+  personality: z.string().default(""),
+  speechPattern: z.string().default(""),
+  /** canonical image-gen seed from the char spec */
+  seed: z.number().int().optional(),
+  voice: bibleVoiceSchema.default({}),
+  refs: bibleRefsSchema.default({}),
+  /** trained character LoRA (S-P2) — null until trained/imported */
+  lora: z
+    .object({ asset: z.string().default(""), trigger: z.string().default("") })
+    .nullable()
+    .default(null),
+});
+export type BibleCharacter = z.infer<typeof bibleCharacterSchema>;
+
+export const bibleLocationSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  /** paste-in prompt block for keyframe generation */
+  stylePrompt: z.string().default(""),
+  /** library relPaths of reference stills */
+  refs: z.array(z.string()).default([]),
+});
+export type BibleLocation = z.infer<typeof bibleLocationSchema>;
+
+export const bibleStyleSchema = z.object({
+  artDirection: z.string().default(""),
+  negativePrompt: z.string().default(""),
+  cinematographyNotes: z.string().default(""),
+  notes: z.string().default(""),
+});
+export type BibleStyle = z.infer<typeof bibleStyleSchema>;
+
+export const bibleSchema = z.object({
+  version: z.literal(1).default(1),
+  characters: z.array(bibleCharacterSchema).default([]),
+  locations: z.array(bibleLocationSchema).default([]),
+  style: bibleStyleSchema.default({}),
+  updatedAt: z.string().default(""),
+});
+export type Bible = z.infer<typeof bibleSchema>;
+
+export const bibleGetSchema = z.object({ project: z.string().min(1) });
+
+export const bibleUpdateSchema = z.object({
+  project: z.string().min(1),
+  bible: bibleSchema,
+});
+
+export const bibleUpsertCharacterSchema = z.object({
+  project: z.string().min(1),
+  character: bibleCharacterSchema,
+});
+export type BibleUpsertCharacter = z.input<typeof bibleUpsertCharacterSchema>;
+
+export const bibleRemoveCharacterSchema = z.object({
+  project: z.string().min(1),
+  id: z.string().min(1),
+});
+
+export const bibleUpsertLocationSchema = z.object({
+  project: z.string().min(1),
+  location: bibleLocationSchema,
+});
+export type BibleUpsertLocation = z.input<typeof bibleUpsertLocationSchema>;
+
+export const bibleRemoveLocationSchema = z.object({
+  project: z.string().min(1),
+  id: z.string().min(1),
+});
+
+export const bibleUpdateStyleSchema = z.object({
+  project: z.string().min(1),
+  style: bibleStyleSchema,
+});
+
+/** Seed the Animal Sitcom bible from the videofast repo (paths.videofastDir):
+ * six structured characters, reference images + voice ref clips copied in. */
+export const studioSeedSchema = z.object({
+  project: z.string().min(1),
+  /** replace existing characters/locations with the seed versions */
+  overwrite: z.boolean().default(false),
+});
+export type StudioSeed = z.input<typeof studioSeedSchema>;
+
+export const studioSeedResultSchema = z.object({
+  bible: bibleSchema,
+  production: productionSchema,
+  copiedFiles: z.number(),
+  warnings: z.array(z.string()),
+});
+export type StudioSeedResult = z.infer<typeof studioSeedResultSchema>;
+
 /* ---------- director chat ---------- */
 
 /** A library asset the user pinned to a message. relPath is the id the studio

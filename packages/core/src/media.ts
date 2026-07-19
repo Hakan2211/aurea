@@ -55,6 +55,13 @@ export function serveMedia(
     "cache-control": "private, max-age=3600",
   };
 
+  // empty file: nothing to stream, and createReadStream({end: -1}) throws
+  if (stat.size === 0) {
+    headers["content-length"] = 0;
+    res.writeHead(200, headers).end();
+    return;
+  }
+
   const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
   let start = 0;
   let end = stat.size - 1;

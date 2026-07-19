@@ -97,11 +97,32 @@ function LiveSync() {
     onData: (models) => utils.models.list.setData(undefined, models),
   });
 
+  // production.json/bible.json saves from ANY writer (Director tools, external
+  // MCP session, another window) — refetch so open studio screens converge
+  trpc.studio.onUpdate.useSubscription(undefined, {
+    onData: (event) => {
+      if (event.doc === "production") {
+        void utils.studio.production.get.invalidate({ project: event.project });
+      } else {
+        void utils.studio.bible.get.invalidate({ project: event.project });
+      }
+    },
+  });
+
   trpc.runtime.onUpdate.useSubscription(undefined, {
     onData: (status) => utils.runtime.status.setData(undefined, status),
   });
 
   return null;
+}
+
+/** dev only: a plain browser tab can pin live studiod coords with
+ * #/screen?studiod=<port>:<token> (values from ~/.aurea/studiod.json) — the
+ * full live renderer without Electron, for headless dev and UI verification */
+function devCoords(): Coords | null {
+  if (!import.meta.env.DEV) return null;
+  const m = /[?&]studiod=(\d+):([\w-]+)/.exec(window.location.hash);
+  return m ? { port: Number(m[1]), token: m[2] } : null;
 }
 
 export function StudiodProvider({ children }: { children: ReactNode }) {
@@ -110,7 +131,8 @@ export function StudiodProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let disposed = false;
     void (async () => {
-      const coords = (await window.aurea?.studiod().catch(() => null)) ?? DEAD;
+      const coords =
+        devCoords() ?? (await window.aurea?.studiod().catch(() => null)) ?? DEAD;
       if (disposed) return;
       setClients(buildClients(coords));
     })();

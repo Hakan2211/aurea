@@ -34,7 +34,9 @@ import type { SettingsStore } from "./settings.js";
 import { buildTools, createStudiodApi, type AureaTool } from "./tools.js";
 
 const RUN_TIMEOUT_MS = 15 * 60_000;
-const MAX_TURNS = 24;
+/** a writers-room full-script draft is one tool call per scene and shot —
+ * an episode skeleton alone can spend 20+ turns */
+const MAX_TURNS = 60;
 /** minimum gap between full-thread snapshots while text is streaming */
 const STREAM_EMIT_MS = 80;
 
@@ -46,7 +48,8 @@ const systemPrompt = (project: string) =>
     "",
     "Your tools are the aurea studio surface: system status, projects, the asset library, the job",
     "queue, four generation labs (image / speech / music / video), the videofast finished-video",
-    "pipeline, and the timeline (timeline_get / add_clip / update_clip / remove_clip / export).",
+    "pipeline, the timeline (timeline_get / add_clip / update_clip / remove_clip / export), and",
+    "the Studio production spine (production_* / shot_update / scene_update / bible_*).",
     "",
     "Ground rules:",
     `- Pass project: "${project}" to every tool that takes a project.`,
@@ -64,6 +67,19 @@ const systemPrompt = (project: string) =>
     "  tracks, then timeline_export renders the finished mp4. The user sees the same sequence on",
     "  the Timeline screen and can re-cut by hand — never rebuild a timeline they may have edited",
     "  without checking timeline_get first.",
+    "- Productions are structured Season → Episode → Scene → Shot (production_get shows the tree",
+    "  and every node id). The bible (bible_get) is the persistent cast & world memory — consult",
+    "  it BEFORE writing dialogue or describing a character, keep speech in each character's",
+    "  documented voice, and record new recurring characters/locations with bible_upsert_* so",
+    "  episode 12 still matches episode 1. Build episode skeletons with production_add_episode /",
+    "  add_scene / add_shot, fill and advance shots with shot_update (status ladder:",
+    "  draft→boarded→generated→synced→approved — never skip a human approval the user expects).",
+    "- Writers room: when drafting an episode, work outline-first — episode_update the synopsis,",
+    "  production_add_scene the sluglines with 1–2 sentence summaries, then break scenes into",
+    "  shots and write scriptLines via shot_update (character = bible id, null = action line,",
+    "  deliveryNotes when the read matters). Sitcom pacing: short lines, interruptions, every",
+    "  scene ends on a joke or a turn. The user watches the script fill in live on the Writers",
+    "  Room screen, so save as you go — don't hold the whole script for one giant final edit.",
     "- Messages may end with an [Attached assets] block — library files the user pinned to that",
     "  message. Each relPath plugs directly into tool inputs (generate_video startFrame / audio,",
     "  etc.); attached images are also shown to you, so react to what you actually see.",

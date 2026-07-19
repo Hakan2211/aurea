@@ -8,11 +8,19 @@
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { z } from "zod";
 import {
+  bibleCharacterSchema,
+  bibleLocationSchema,
+  episodePatchSchema,
   imageGenerateSchema,
   jobStatusSchema,
   libraryKindSchema,
   musicGenerateSchema,
+  productionAddEpisodeSchema,
+  productionAddSceneSchema,
+  productionAddShotSchema,
+  scenePatchSchema,
   settingsUpdateSchema,
+  shotPatchSchema,
   timelineAddClipSchema,
   timelineClipPatchSchema,
   ttsGenerateSchema,
@@ -413,6 +421,189 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       handler: async ({ project }) => {
         await requireProject(project);
         return json(await api.timeline.export.mutate({ project }));
+      },
+    }),
+
+    defineTool({
+      name: "production_get",
+      title: "Get production",
+      description:
+        "The project's show structure: seasons → episodes → scenes → shots, with every node's id. " +
+        "A shot carries script lines, characters (bible ids), a location, a camera spec, keyframe/take " +
+        "slots and a status (draft→boarded→generated→synced→approved). Read this before editing the show.",
+      schema: { project: z.string().default("playground") },
+      handler: async ({ project }) => {
+        await requireProject(project);
+        return json(await api.studio.production.get.query({ project }));
+      },
+    }),
+
+    defineTool({
+      name: "production_add_episode",
+      title: "Add episode",
+      description:
+        "Append an episode to a season (season 1 by default; the season is created if missing). " +
+        "Episode numbers auto-increment. Returns the new episode with its id.",
+      schema: withProjectDefault(productionAddEpisodeSchema.omit({ project: true })),
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.production.addEpisode.mutate({ project, ...input }));
+      },
+    }),
+
+    defineTool({
+      name: "production_add_scene",
+      title: "Add scene",
+      description:
+        "Append a scene to an episode (episodeId from production_get). slugline is the screenplay " +
+        "heading (\"INT. THE LOFT — NIGHT\"); location is a bible location id (bible_get lists them).",
+      schema: withProjectDefault(productionAddSceneSchema.omit({ project: true })),
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.production.addScene.mutate({ project, ...input }));
+      },
+    }),
+
+    defineTool({
+      name: "production_add_shot",
+      title: "Add shot",
+      description:
+        "Append a shot to a scene (sceneId from production_get). Shots are the atomic production " +
+        "unit: give each one its script lines (character = bible character id, null for action " +
+        "lines), the characters present, and a camera spec drawn from the style bible's " +
+        "cinematography language. New shots start at status \"draft\"; location defaults to the scene's.",
+      schema: withProjectDefault(productionAddShotSchema.omit({ project: true })),
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.production.addShot.mutate({ project, ...input }));
+      },
+    }),
+
+    defineTool({
+      name: "episode_update",
+      title: "Update episode",
+      description:
+        "Patch an episode's title, logline, or synopsis by id (production_get lists episode ids). " +
+        "The writers room reads the synopsis as the episode's outline paragraph.",
+      schema: {
+        project: z.string().default("playground"),
+        episodeId: z.string().describe("episode id from production_get"),
+        ...episodePatchSchema.shape,
+      },
+      handler: async ({ project, episodeId, ...patch }) => {
+        await requireProject(project);
+        await api.studio.production.updateEpisode.mutate({ project, episodeId, patch });
+        return json({ ok: true });
+      },
+    }),
+
+    defineTool({
+      name: "scene_update",
+      title: "Update scene",
+      description: "Patch a scene's slugline, summary, or location by id (production_get lists scene ids).",
+      schema: {
+        project: z.string().default("playground"),
+        sceneId: z.string().describe("scene id from production_get"),
+        ...scenePatchSchema.shape,
+      },
+      handler: async ({ project, sceneId, ...patch }) => {
+        await requireProject(project);
+        await api.studio.production.updateScene.mutate({ project, sceneId, patch });
+        return json({ ok: true });
+      },
+    }),
+
+    defineTool({
+      name: "shot_update",
+      title: "Update shot",
+      description:
+        "Patch any shot fields by id (production_get lists shot ids): title, scriptLines, characters, " +
+        "location, camera, notes, and status along the ladder draft→boarded→generated→synced→approved. " +
+        "Arrays replace wholesale — send the complete new scriptLines list, not a delta.",
+      schema: {
+        project: z.string().default("playground"),
+        shotId: z.string().describe("shot id from production_get"),
+        ...shotPatchSchema.shape,
+      },
+      handler: async ({ project, shotId, ...patch }) => {
+        await requireProject(project);
+        const { shot } = await api.studio.production.updateShot.mutate({ project, shotId, patch });
+        return json(shot);
+      },
+    }),
+
+    defineTool({
+      name: "bible_get",
+      title: "Get bible",
+      description:
+        "The production bible — the persistent cast & world memory: characters (appearance slots, " +
+        "identity anchors, personality, speech pattern, locked voice, reference images), locations, " +
+        "and the style bible (art direction, negative prompt). Consult it before writing dialogue or " +
+        "describing a character, and keep it authoritative: new recurring characters/locations belong " +
+        "in the bible, not just in a script.",
+      schema: { project: z.string().default("playground") },
+      handler: async ({ project }) => {
+        await requireProject(project);
+        return json(await api.studio.bible.get.query({ project }));
+      },
+    }),
+
+    defineTool({
+      name: "bible_upsert_character",
+      title: "Upsert bible character",
+      description:
+        "Create or replace one bible character (matched by character.id). Send the COMPLETE character " +
+        "object — read the current one from bible_get first when editing. voice.voiceId is a cloned " +
+        "voice id from list_voices; refs are library relPaths.",
+      schema: {
+        project: z.string().default("playground"),
+        character: bibleCharacterSchema,
+      },
+      handler: async ({ project, character }) => {
+        await requireProject(project);
+        const bible = await api.studio.bible.upsertCharacter.mutate({ project, character });
+        return json({ ok: true, characters: bible.characters.map((c) => c.id) });
+      },
+    }),
+
+    defineTool({
+      name: "bible_upsert_location",
+      title: "Upsert bible location",
+      description:
+        "Create or replace one bible location (matched by location.id): name, description, stylePrompt " +
+        "(paste-in block for keyframe generation), refs (library relPaths).",
+      schema: {
+        project: z.string().default("playground"),
+        location: bibleLocationSchema,
+      },
+      handler: async ({ project, location }) => {
+        await requireProject(project);
+        const bible = await api.studio.bible.upsertLocation.mutate({ project, location });
+        return json({ ok: true, locations: bible.locations.map((l) => l.id) });
+      },
+    }),
+
+    defineTool({
+      name: "seed_animal_sitcom",
+      title: "Seed Animal Sitcom bible",
+      description:
+        "Populate the project's bible with the six locked Animal Sitcom characters (Sterling, Grant, " +
+        "Milo, Bruno, Jax, Barney), their reference art and cloned voices, plus starter locations and " +
+        "the style bible — copied from the videofast repo. Idempotent; re-run to pick up newly " +
+        "generated character-sheet frames. overwrite=true resets seed characters to their locked values.",
+      schema: {
+        project: z.string().default("playground"),
+        overwrite: z.boolean().default(false),
+      },
+      handler: async ({ project, overwrite }) => {
+        await requireProject(project);
+        const result = await api.studio.seedAnimalSitcom.mutate({ project, overwrite });
+        return json({
+          copiedFiles: result.copiedFiles,
+          warnings: result.warnings,
+          characters: result.bible.characters.map((c) => c.id),
+          locations: result.bible.locations.map((l) => l.id),
+        });
       },
     }),
 

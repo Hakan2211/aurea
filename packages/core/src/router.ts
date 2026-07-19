@@ -18,6 +18,23 @@ import {
   timelineRemoveClipSchema,
   timelineUpdateClipSchema,
   timelineUpdateSchema,
+  bibleGetSchema,
+  bibleRemoveCharacterSchema,
+  bibleRemoveLocationSchema,
+  bibleUpdateSchema,
+  bibleUpdateStyleSchema,
+  bibleUpsertCharacterSchema,
+  bibleUpsertLocationSchema,
+  productionAddEpisodeSchema,
+  productionAddSceneSchema,
+  productionAddShotSchema,
+  productionGetSchema,
+  productionRemoveNodeSchema,
+  productionUpdateEpisodeSchema,
+  productionUpdateSceneSchema,
+  productionUpdateSchema,
+  productionUpdateShotSchema,
+  studioSeedSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
   voiceAddSchema,
@@ -27,6 +44,7 @@ import {
   type JobPayload,
   type ModelEntry,
   type RuntimeStatus,
+  type StudioUpdateEvent,
   type Vram,
 } from "@aurea/shared";
 import { describeExport, sequenceEnd } from "./adapters/ffmpeg-export.js";
@@ -245,6 +263,159 @@ export const appRouter = router({
         project: `/${input.project}`,
         payload: { type: "export", project: input.project, timeline },
       });
+    }),
+  }),
+
+  studio: router({
+    /* the V2 Studio data spine: production.json + bible.json per project.
+     * Whole-document saves for the renderer, granular ops for the Director —
+     * same file, both surfaces interchangeable (timeline precedent). */
+
+    production: router({
+      get: procedure.input(productionGetSchema).query(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.getProduction(input.project);
+      }),
+
+      update: procedure.input(productionUpdateSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.updateProduction(input.project, input.production);
+      }),
+
+      addEpisode: procedure.input(productionAddEpisodeSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        const { project, ...rest } = input;
+        return ctx.studio.addEpisode(project, rest);
+      }),
+
+      addScene: procedure.input(productionAddSceneSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          const { project, ...rest } = input;
+          return ctx.studio.addScene(project, rest);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      addShot: procedure.input(productionAddShotSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          const { project, ...rest } = input;
+          return ctx.studio.addShot(project, rest);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      updateEpisode: procedure.input(productionUpdateEpisodeSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          return ctx.studio.updateEpisode(input.project, input.episodeId, input.patch);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      updateScene: procedure.input(productionUpdateSceneSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          return ctx.studio.updateScene(input.project, input.sceneId, input.patch);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      updateShot: procedure.input(productionUpdateShotSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          return ctx.studio.updateShot(input.project, input.shotId, input.patch);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      removeEpisode: procedure.input(productionRemoveNodeSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          return ctx.studio.removeEpisode(input.project, input.id);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      removeScene: procedure.input(productionRemoveNodeSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          return ctx.studio.removeScene(input.project, input.id);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      removeShot: procedure.input(productionRemoveNodeSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          return ctx.studio.removeShot(input.project, input.id);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+    }),
+
+    bible: router({
+      get: procedure.input(bibleGetSchema).query(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.getBible(input.project);
+      }),
+
+      update: procedure.input(bibleUpdateSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.updateBible(input.project, input.bible);
+      }),
+
+      upsertCharacter: procedure.input(bibleUpsertCharacterSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.upsertCharacter(input.project, input.character);
+      }),
+
+      removeCharacter: procedure.input(bibleRemoveCharacterSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.removeCharacter(input.project, input.id);
+      }),
+
+      upsertLocation: procedure.input(bibleUpsertLocationSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.upsertLocation(input.project, input.location);
+      }),
+
+      removeLocation: procedure.input(bibleRemoveLocationSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.removeLocation(input.project, input.id);
+      }),
+
+      updateStyle: procedure.input(bibleUpdateStyleSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        return ctx.studio.updateStyle(input.project, input.style);
+      }),
+    }),
+
+    /** one event per production.json/bible.json save, whoever wrote it —
+     * how an open Writers Room watches the Director draft in real time */
+    onUpdate: procedure.subscription(async function* ({ ctx, signal }) {
+      for await (const [event] of on(ctx.studio, "update", { signal })) {
+        yield event as StudioUpdateEvent;
+      }
+    }),
+
+    /** populate the Animal Sitcom bible from the videofast repo (idempotent) */
+    seedAnimalSitcom: procedure.input(studioSeedSchema).mutation(({ ctx, input }) => {
+      requireProject(ctx, input.project);
+      try {
+        return ctx.studio.seedAnimalSitcom(input.project, input.overwrite);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
     }),
   }),
 
