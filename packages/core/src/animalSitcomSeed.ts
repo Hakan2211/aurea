@@ -6,6 +6,7 @@
  * gen_char_vo.py delivery tuning) — only FILES are read from videofast at
  * seed time, so the import never depends on parsing Markdown. */
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -222,11 +223,28 @@ export const ANIMAL_SITCOM_STYLE: BibleStyle = bibleStyleSchema.parse({
 export interface SeedFilesResult {
   /** refs per character id, as dataRoot-relative posix paths */
   refs: Map<string, BibleRefs>;
+  /** character ids whose VoiceDesign custom voice landed as "<id>-custom" */
+  customVoices: Set<string>;
   copiedFiles: number;
   warnings: string[];
 }
 
 const IMG_EXT = /\.(png|jpg|jpeg|webp)$/i;
+
+/** Normalize the hand-named GPT sheet files ("Version1.jpg",
+ * "self-contained.jpg", grant's "slef-contained prompt.jpg") to stable
+ * per-character names the bible can match on. */
+const gptSheetName = (charId: string, name: string): string => {
+  const ext = path.extname(name).toLowerCase();
+  const base = name
+    .slice(0, name.length - path.extname(name).length)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  if (base.includes("version1")) return `${charId}-gpt-v1${ext}`;
+  if (base.includes("version2")) return `${charId}-gpt-v2${ext}`;
+  if (base.includes("contained")) return `${charId}-gpt-self${ext}`;
+  return `${charId}-gpt-${base}${ext}`;
+};
 
 /** Copy the videofast character art + voice ref clips into the project.
  * Never throws on a missing source — records a warning instead. Existing
@@ -277,6 +295,8 @@ export function importAnimalSitcomFiles(opts: {
       copyDir(path.join(src, "sheet", "frames"), dest);
       // GPT re-shoot frames share names with the Qwen frames — keep both
       copyDir(path.join(src, "sheet", "gpt"), dest, (n) => n.replace(`${c.id}-`, `${c.id}-gpt-`));
+      // GPT character sheets (Version1 / Version2 / self-contained boards)
+      copyDir(path.join(src, "gpt"), dest, (n) => gptSheetName(c.id, n));
       copyDir(path.join(src, "dataset"), dest);
     }
     refs.set(c.id, scanRefs(dataRoot, projectId, c.id));
@@ -296,7 +316,36 @@ export function importAnimalSitcomFiles(opts: {
     copy(srcWav.replace(/\.wav$/, ".txt"), path.join(voicesDir, `${c.id}.txt`));
   }
 
-  return { refs, copiedFiles, warnings };
+  // VoiceDesign custom voices (bakeoff mp3s) → "<id>-custom" roster entries;
+  // the roster is wav-only, so decode through ffmpeg (PATH)
+  const customVoices = new Set<string>();
+  for (const c of ANIMAL_SITCOM_CHARACTERS) {
+    const srcMp3 = path.join(
+      videofastDir, "audio", "bakeoff", "out", "custom_voices", `${c.name}_voice.mp3`,
+    );
+    const destWav = path.join(voicesDir, `${c.id}-custom.wav`);
+    if (fs.existsSync(destWav)) {
+      customVoices.add(c.id);
+      continue;
+    }
+    if (!fs.existsSync(srcMp3)) {
+      warnings.push(`no custom voice for "${c.id}" (${srcMp3})`);
+      continue;
+    }
+    fs.mkdirSync(voicesDir, { recursive: true });
+    const res = spawnSync("ffmpeg", ["-y", "-loglevel", "error", "-i", srcMp3, destWav], {
+      stdio: "ignore",
+      timeout: 30_000,
+    });
+    if (res.status === 0 && fs.existsSync(destWav)) {
+      customVoices.add(c.id);
+      copiedFiles += 1;
+    } else {
+      warnings.push(`ffmpeg could not convert the custom voice for "${c.id}" — is ffmpeg on PATH?`);
+    }
+  }
+
+  return { refs, customVoices, copiedFiles, warnings };
 }
 
 /** Build a character's refs from what's on disk in the project tree. */
@@ -304,8 +353,17 @@ function scanRefs(dataRoot: string, projectId: string, charId: string): BibleRef
   const dir = path.join(dataRoot, "projects", projectId, "assets", "image", "characters", charId);
   const rel = (name: string) =>
     ["projects", projectId, "assets", "image", "characters", charId, name].join("/");
-  const refs: BibleRefs = { turnaround: null, hero: null, sheet: null, frames: [], dataset: [], custom: [] };
+  const refs: BibleRefs = {
+    keyframeRef: null,
+    turnaround: null,
+    hero: null,
+    sheet: null,
+    frames: [],
+    dataset: [],
+    custom: [],
+  };
   if (!fs.existsSync(dir)) return refs;
+  const gpt: Record<string, string> = {};
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isFile() || !IMG_EXT.test(entry.name)) continue;
     const base = entry.name.replace(/\.[^.]+$/, "");
@@ -313,9 +371,20 @@ function scanRefs(dataRoot: string, projectId: string, charId: string): BibleRef
     else if (base === `${charId}-hero`) refs.hero = rel(entry.name);
     else if (base === `${charId}-sheet`) refs.sheet = rel(entry.name);
     else if (new RegExp(`^${charId}_\\d+$`).test(base)) refs.dataset.push(rel(entry.name));
-    else refs.frames.push(rel(entry.name));
+    else {
+      const gptSuffix = base.toLowerCase().startsWith(`${charId}-gpt-`)
+        ? base.toLowerCase().slice(`${charId}-gpt-`.length)
+        : null;
+      if (gptSuffix) gpt[gptSuffix] = rel(entry.name);
+      refs.frames.push(rel(entry.name));
+    }
   }
   refs.frames.sort();
   refs.dataset.sort();
+  // the storyboard subject reference, best-first: the locked GPT single hero
+  // frame (S1), then the GPT boards the user picked (self-contained / v1),
+  // then the older hero/turnaround art
+  refs.keyframeRef =
+    gpt["s1"] ?? gpt["self"] ?? gpt["v1"] ?? refs.hero ?? refs.turnaround ?? refs.sheet ?? null;
   return refs;
 }

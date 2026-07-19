@@ -73,6 +73,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       { id: "comfy", warm: () => comfy.warm(), canEvict: () => comfy.canEvict(), evict: () => comfy.stop() },
     ],
   });
+  const studio = new StudioStore(settings, projects);
   const engine = new JobEngine({
     adapters: [
       new VideofastAdapter(settings),
@@ -84,7 +85,22 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new FfmpegExportAdapter(settings),
     ],
     storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),
-    importOutput: (job) => projects.importJobOutput(job),
+    importOutput: (job) => {
+      const imported = projects.importJobOutputDetailed(job);
+      // storyboard delivery: finished stills become keyframes on their shot
+      const board = job.payload?.type === "image" ? job.payload.board : undefined;
+      if (board && job.project && imported.files.length) {
+        const projectId = job.project.replace(/^\//, "").split("/")[0];
+        const dataRoot = settings.get().storage.dataRoot;
+        const rels = imported.files.map((f) => path.relative(dataRoot, f).split(path.sep).join("/"));
+        try {
+          studio.attachKeyframes(projectId, board.shotId, rels);
+        } catch {
+          // the shot was deleted while the render ran — the stills stay in the library
+        }
+      }
+      return imported.primary;
+    },
     scheduler,
   });
   const labs = new Labs(settings, models, runtime);
@@ -95,7 +111,6 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     return selfCoords;
   });
   const timelines = new TimelineStore(settings);
-  const studio = new StudioStore(settings, projects);
   const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime, timelines, studio };
 
   const trpcHandler = createHTTPHandler({

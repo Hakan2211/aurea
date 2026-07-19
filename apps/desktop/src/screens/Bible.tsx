@@ -99,7 +99,7 @@ function Rail({
         signatureFeature: "", anchors: { body: "", face: "", macro: "" }, personality: "",
         speechPattern: "",
         voice: { voiceId: null, engine: "chatterbox", exaggeration: 0.5, cfgWeight: 0.4, deliveryNotes: "" },
-        refs: { turnaround: null, hero: null, sheet: null, frames: [], dataset: [], custom: [] },
+        refs: { keyframeRef: null, turnaround: null, hero: null, sheet: null, frames: [], dataset: [], custom: [] },
         lora: null,
       });
       selectCharacter(id);

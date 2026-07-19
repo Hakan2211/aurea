@@ -21,6 +21,7 @@ import {
   scenePatchSchema,
   settingsUpdateSchema,
   shotPatchSchema,
+  storyboardGenerateSchema,
   timelineAddClipSchema,
   timelineClipPatchSchema,
   ttsGenerateSchema,
@@ -529,6 +530,22 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         await requireProject(project);
         const { shot } = await api.studio.production.updateShot.mutate({ project, shotId, patch });
         return json(shot);
+      },
+    }),
+
+    defineTool({
+      name: "generate_keyframe",
+      title: "Generate storyboard keyframe",
+      description:
+        "Board a shot: generate its keyframe still with qwen-edit reference consistency — character " +
+        "bible refs keep the cast on-model, and the prompt is composed from the shot's script lines, " +
+        "camera spec, location, and the style bible (pass prompt to override). Finished stills attach " +
+        "to the shot's keyframes automatically and move a draft shot to boarded. Returns the job — " +
+        "wait_for_job to see it land. Needs the shot to have characters with bible refs.",
+      schema: withProjectDefault(storyboardGenerateSchema.omit({ project: true })),
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.board.generate.mutate({ ...input, project }));
       },
     }),
 

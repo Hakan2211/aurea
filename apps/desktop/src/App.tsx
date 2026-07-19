@@ -9,6 +9,7 @@ import { JobCenter } from "@/screens/JobCenter";
 import { MusicLab } from "@/screens/MusicLab";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 import { StudioScreen } from "@/screens/Studio";
+import { StoryboardScreen } from "@/screens/Storyboard";
 import { WritersRoomScreen } from "@/screens/WritersRoom";
 import { BibleScreen } from "@/screens/Bible";
 import { VideoLab } from "@/screens/VideoLab";
@@ -26,6 +27,7 @@ export function App() {
           <Route index element={<DirectorChat />} />
           <Route path="studio" element={<StudioScreen />} />
           <Route path="script" element={<WritersRoomScreen />} />
+          <Route path="storyboard" element={<StoryboardScreen />} />
           <Route path="bible" element={<BibleScreen />} />
           <Route path="images" element={<ImageLab />} />
           <Route path="voice" element={<VoiceLab />} />

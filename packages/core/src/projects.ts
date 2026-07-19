@@ -121,18 +121,27 @@ export class ProjectStore {
    * imported primary path, or undefined when the job isn't tied to a real
    * project (demo jobs carry display-only project strings). */
   importJobOutput(job: Job): string | undefined {
-    if (!job.project || !job.output) return undefined;
+    return this.importJobOutputDetailed(job).primary;
+  }
+
+  /** Like importJobOutput, but also reports every file that landed matching
+   * the job's own kind — the storyboard hook attaches all of a batch's
+   * stills, not just the primary. */
+  importJobOutputDetailed(job: Job): { primary?: string; files: string[] } {
+    if (!job.project || !job.output) return { files: [] };
     const id = job.project.replace(/^\//, "").split("/")[0];
-    if (!this.read(id) || !fs.existsSync(job.output)) return undefined;
+    if (!this.read(id) || !fs.existsSync(job.output)) return { files: [] };
 
     const base = slugify(job.title || path.basename(job.output, path.extname(job.output)));
     if (fs.statSync(job.output).isFile()) {
       // the job kind decides the shelf (a music wav is music, not voice);
       // the extension only speaks for files the kind can't explain
-      return this.importFile(id, JOB_KIND_DIR[job.kind], job.output, base);
+      const dest = this.importFile(id, JOB_KIND_DIR[job.kind], job.output, base);
+      return { primary: dest, files: [dest] };
     }
 
     let primary: string | undefined;
+    const files: string[] = [];
     for (const entry of fs.readdirSync(job.output, { withFileTypes: true })) {
       if (!entry.isFile()) continue;
       const ext = path.extname(entry.name).slice(1).toLowerCase();
@@ -143,9 +152,12 @@ export class ProjectStore {
         ? base
         : `${base}-${slugify(path.basename(entry.name, path.extname(entry.name)))}`;
       const dest = this.importFile(id, kind, path.join(job.output, entry.name), name);
-      if (kind === JOB_KIND_DIR[job.kind] && !primary) primary = dest;
+      if (kind === JOB_KIND_DIR[job.kind]) {
+        files.push(dest);
+        if (!primary) primary = dest;
+      }
     }
-    return primary;
+    return { primary, files };
   }
 
   private importFile(projectId: string, kind: LibraryKind, source: string, base: string): string {

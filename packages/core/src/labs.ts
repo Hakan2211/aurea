@@ -256,7 +256,12 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
         ...base,
         title: title(payload.prompt),
         kind: "image",
-        engine: payload.model === "z-image" ? "z-image-turbo" : "Krea 2",
+        engine:
+          payload.model === "z-image"
+            ? "z-image-turbo"
+            : payload.model === "qwen-edit"
+              ? "Qwen Edit 2509"
+              : "Krea 2",
         detail: `${payload.aspect} · ${payload.count} image${payload.count === 1 ? "" : "s"}${payload.preset ? ` · ${payload.preset}` : ""}`,
       };
     case "tts":

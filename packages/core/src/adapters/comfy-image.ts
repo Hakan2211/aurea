@@ -15,6 +15,9 @@ import {
   krea2Graph,
   KREA2_EXTERNAL,
   KREA2_MANAGED,
+  qwenEditGraph,
+  QWENEDIT_EXTERNAL,
+  QWENEDIT_MANAGED,
   zImageGraph,
   ZIMAGE_EXTERNAL,
   ZIMAGE_MANAGED,
@@ -38,8 +41,15 @@ const NODE_STAGE: Record<string, string> = {
   UnetLoaderGGUF: "Loading models",
   CLIPLoader: "Loading models",
   VAELoader: "Loading models",
+  TextEncodeQwenImageEditPlus: "Encoding references",
   KSampler: "Sampling",
   VAEDecode: "Decoding",
+};
+
+/** managed-mode weight sets that ride on the GGUF loader custom node */
+const GGUF_WEIGHTS: Record<string, { id: string; label: string }> = {
+  krea2: { id: "krea2-turbo-gguf", label: "Krea 2 Turbo (GGUF)" },
+  "qwen-edit": { id: "qwen-image-edit-2509-gguf", label: "Qwen Image Edit 2509 (GGUF)" },
 };
 
 export class ComfyImageAdapter implements EngineAdapter {
@@ -55,18 +65,21 @@ export class ComfyImageAdapter implements EngineAdapter {
   canRun(job: Job): boolean {
     return (
       job.payload?.type === "image" &&
-      (job.payload.model === "z-image" || job.payload.model === "krea2")
+      (job.payload.model === "z-image" ||
+        job.payload.model === "krea2" ||
+        job.payload.model === "qwen-edit")
     );
   }
 
   resources(job: Job): JobResources {
-    // managed sidecar: ~14 GB with z-image loaded, ~18 GB for krea2's Q8 GGUF
-    // (text encoder offloads after conditioning); when it's already warm the
-    // engineId lets the scheduler skip preflight. External ComfyUI owns its
-    // own memory — no estimate.
+    // managed sidecar: ~14 GB with z-image loaded, ~18 GB for krea2's Q8 GGUF,
+    // ~20 GB for qwen-edit's Q5 (text encoder offloads after conditioning);
+    // when it's already warm the engineId lets the scheduler skip preflight.
+    // External ComfyUI owns its own memory — no estimate.
     const managed = this.settings.get().engines.comfyMode === "managed";
-    const krea2 = job.payload?.type === "image" && job.payload.model === "krea2";
-    return { klass: "gpu", engineId: "comfy", vramGb: managed ? (krea2 ? 18 : 14) : undefined };
+    const model = job.payload?.type === "image" ? job.payload.model : "z-image";
+    const vram = model === "qwen-edit" ? 20 : model === "krea2" ? 18 : 14;
+    return { klass: "gpu", engineId: "comfy", vramGb: managed ? vram : undefined };
   }
 
   start(job: Job, report: (p: AdapterProgress) => void): AdapterRun {
@@ -76,16 +89,17 @@ export class ComfyImageAdapter implements EngineAdapter {
     const done = (async () => {
       const payload = job.payload;
       if (payload?.type !== "image") throw new Error("not an image job");
-      if (payload.model === "krea2" && managed) {
+      const gguf = GGUF_WEIGHTS[payload.model];
+      if (gguf && managed) {
         if (!this.runtime.componentReady("gguf")) {
           throw new Error(
-            "Krea 2 needs the GGUF loader nodes — Settings → Engines → Install engine runtime",
+            `${gguf.label} needs the GGUF loader nodes — Settings → Engines → Install engine runtime`,
           );
         }
-        const weights = this.models.list().find((m) => m.id === "krea2-turbo-gguf");
+        const weights = this.models.list().find((m) => m.id === gguf.id);
         if (weights?.status.state !== "installed") {
           throw new Error(
-            "Krea 2 Turbo weights are not installed — Settings → Models → Krea 2 Turbo (GGUF)",
+            `${gguf.label} weights are not installed — Settings → Models → ${gguf.label}`,
           );
         }
       }
@@ -100,14 +114,33 @@ export class ComfyImageAdapter implements EngineAdapter {
         const baseSeed = payload.seed ?? Math.floor(Math.random() * 1_000_000_000);
         const client = new ComfyClient(url);
 
-        report({ progress: 2, stage: "Queuing on ComfyUI" });
+        // qwen-edit: stage the reference images once, reused across the batch
+        const refNames: string[] = [];
+        if (payload.model === "qwen-edit") {
+          if (payload.refs.length === 0) {
+            throw new Error("qwen-edit needs at least one reference image (character bible refs)");
+          }
+          report({ progress: 2, stage: "Uploading references" });
+          const dataRoot = this.settings.get().storage.dataRoot;
+          for (const [i, ref] of payload.refs.entries()) {
+            const abs = path.join(dataRoot, ref);
+            if (!fs.existsSync(abs)) throw new Error(`reference image not found: ${ref}`);
+            refNames.push(
+              await client.uploadInput(`aurea-ref${i + 1}-${path.basename(abs)}`, fs.readFileSync(abs)),
+            );
+          }
+        }
+
+        report({ progress: 3, stage: "Queuing on ComfyUI" });
         for (let i = 0; i < payload.count; i++) {
           if (ctrl.signal.aborted) throw new Error("Canceled by user");
           const spec: ImageGraphSpec = { prompt, width, height, seed: baseSeed + i };
           const graph =
-            payload.model === "krea2"
-              ? krea2Graph(spec, managed ? KREA2_MANAGED : KREA2_EXTERNAL)
-              : zImageGraph(spec, managed ? ZIMAGE_MANAGED : ZIMAGE_EXTERNAL);
+            payload.model === "qwen-edit"
+              ? qwenEditGraph(spec, managed ? QWENEDIT_MANAGED : QWENEDIT_EXTERNAL, refNames)
+              : payload.model === "krea2"
+                ? krea2Graph(spec, managed ? KREA2_MANAGED : KREA2_EXTERNAL)
+                : zImageGraph(spec, managed ? ZIMAGE_MANAGED : ZIMAGE_EXTERNAL);
 
           // each image owns an equal slice of 5..95
           const lo = 5 + (i / payload.count) * 90;

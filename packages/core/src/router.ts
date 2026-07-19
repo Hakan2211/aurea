@@ -34,6 +34,9 @@ import {
   productionUpdateSceneSchema,
   productionUpdateSchema,
   productionUpdateShotSchema,
+  composeKeyframePrompt,
+  resolveKeyframeRefs,
+  storyboardGenerateSchema,
   studioSeedSchema,
   ttsGenerateSchema,
   videoGenerateSchema,
@@ -357,6 +360,46 @@ export const appRouter = router({
         requireProject(ctx, input.project);
         try {
           return ctx.studio.removeShot(input.project, input.id);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+    }),
+
+    board: router({
+      /** Storyboard: compose the shot's keyframe prompt + reference stack and
+       * enqueue qwen-edit generation. Finished stills auto-attach to the shot
+       * (JobEngine import hook) and broadcast over studio.onUpdate. */
+      generate: procedure.input(storyboardGenerateSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          const { shot, scene } = ctx.studio.getShotContext(input.project, input.shotId);
+          const bible = ctx.studio.getBible(input.project);
+          const refs = resolveKeyframeRefs(shot, scene, bible);
+          if (refs.length === 0) {
+            throw new Error(
+              "no reference images for this shot — give it characters with bible refs (seed the Animal Sitcom bible, or add refs in /bible) first",
+            );
+          }
+          const prompt = input.prompt?.trim() || composeKeyframePrompt(shot, scene, bible);
+          return ctx.engine.enqueue({
+            title: `Keyframe — ${shot.title || shot.id}`,
+            kind: "image",
+            engine: "Qwen Edit 2509",
+            priority: "interactive",
+            detail: `${input.aspect} · ${input.count} take${input.count === 1 ? "" : "s"} · ${refs.length} ref${refs.length === 1 ? "" : "s"}`,
+            project: `/${input.project}`,
+            payload: {
+              type: "image",
+              prompt,
+              model: "qwen-edit",
+              aspect: input.aspect,
+              seed: input.seed,
+              count: input.count,
+              refs,
+              board: { shotId: shot.id },
+            },
+          });
         } catch (err) {
           throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
         }

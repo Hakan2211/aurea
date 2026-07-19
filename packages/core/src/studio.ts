@@ -171,6 +171,34 @@ export class StudioStore extends EventEmitter {
     return { shot, production: this.updateProduction(project, prod) };
   }
 
+  /** a shot plus its enclosing scene — what prompt composition needs */
+  getShotContext(project: string, shotId: string): { shot: Shot; scene: Scene } {
+    const prod = this.getProduction(project);
+    for (const scene of this.allScenes(prod)) {
+      const shot = scene.shots.find((s) => s.id === shotId);
+      if (shot) return { shot, scene };
+    }
+    throw new Error(`unknown shot "${shotId}" — production_get lists shot ids`);
+  }
+
+  /** Storyboard delivery: append finished stills as keyframes. Called from
+   * the job-completion import hook, so it tolerates a shot that was deleted
+   * while the render ran (throws; the caller swallows). */
+  attachKeyframes(project: string, shotId: string, assets: string[]): { shot: Shot; production: Production } {
+    const prod = this.getProduction(project);
+    const shot = this.allShots(prod).find((s) => s.id === shotId);
+    if (!shot) throw new Error(`unknown shot "${shotId}"`);
+    const fresh = assets.map((asset) => ({
+      id: randomUUID().slice(0, 8),
+      asset,
+      approved: false,
+    }));
+    shot.keyframes.push(...fresh);
+    if (!shot.selectedKeyframe && fresh.length) shot.selectedKeyframe = fresh[0].id;
+    if (shot.status === "draft") shot.status = "boarded";
+    return { shot, production: this.updateProduction(project, prod) };
+  }
+
   removeEpisode(project: string, id: string): Production {
     const prod = this.getProduction(project);
     for (const season of prod.seasons) {
@@ -292,7 +320,7 @@ export class StudioStore extends EventEmitter {
       throw new Error("videofast folder not found — set it in Settings → Storage first");
     }
 
-    const { refs, copiedFiles, warnings } = importAnimalSitcomFiles({
+    const { refs, customVoices, copiedFiles, warnings } = importAnimalSitcomFiles({
       videofastDir,
       dataRoot: settings.storage.dataRoot,
       projectId: project,
@@ -302,13 +330,20 @@ export class StudioStore extends EventEmitter {
     for (const seed of ANIMAL_SITCOM_CHARACTERS) {
       const existing = bible.characters.find((c) => c.id === seed.id);
       const freshRefs = refs.get(seed.id)!;
+      // the VoiceDesign custom voice outranks the bake-off ref clip when it landed
+      const voiceId = customVoices.has(seed.id) ? `${seed.id}-custom` : seed.voice.voiceId;
+      const voice = { ...seed.voice, voiceId };
       if (!existing) {
-        bible.characters.push({ ...seed, refs: freshRefs, lora: null });
+        bible.characters.push({ ...seed, voice, refs: freshRefs, lora: null });
       } else if (overwrite) {
-        Object.assign(existing, seed, { refs: { ...freshRefs, custom: existing.refs.custom } });
+        Object.assign(existing, seed, { voice, refs: { ...freshRefs, custom: existing.refs.custom } });
       } else {
         // keep the user's edits; refresh what's on disk so new sheet frames land
         existing.refs = { ...freshRefs, custom: existing.refs.custom };
+        // upgrade the default casting to the custom voice, but never a recast
+        if (existing.voice.voiceId === seed.id && customVoices.has(seed.id)) {
+          existing.voice.voiceId = `${seed.id}-custom`;
+        }
       }
     }
     for (const seed of ANIMAL_SITCOM_LOCATIONS) {

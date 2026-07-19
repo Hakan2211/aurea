@@ -385,18 +385,31 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: false,
   }),
   withSize({
-    id: "qwen-image-edit-2509-fp8",
-    name: "Qwen Image Edit 2509",
+    id: "qwen-image-edit-2509-gguf",
+    name: "Qwen Image Edit 2509 (GGUF)",
     use: "image",
-    engine: "ComfyUI · reference consistency",
+    engine: "ComfyUI · Storyboard keyframes",
     description:
-      "Reference-driven image editing — keeps characters on-model across keyframes without LoRA training.",
+      "Reference-driven image generation — keeps characters on-model across storyboard keyframes " +
+      "without LoRA training (the videofast-proven Q5_K_M stack; needs the GGUF loader nodes).",
     files: [
       {
-        name: "diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
-        url: "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
-        sizeBytes: 20430698424,
-        sha256: "318568f61951ab9da21100c7b896e3c1da67f0d2efad6421545e022cfaa2b2b4",
+        name: "diffusion_models/Qwen-Image-Edit-2509-Q5_K_M.gguf",
+        url: "https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q5_K_M.gguf",
+        sizeBytes: 14934899232,
+        sha256: "9e3f23a2c662fd4ccc84ca259fa93a6e5a6beec81a51662f4437a6a399b84d87",
+      },
+      {
+        name: "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        url: "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        sizeBytes: 9384670680,
+        sha256: "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4",
+      },
+      {
+        name: "vae/qwen_image_vae.safetensors",
+        url: "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+        sizeBytes: 253806246,
+        sha256: "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
       },
     ],
     license: APACHE,

@@ -60,17 +60,21 @@ export function GoldButton({
   children,
   className,
   onClick,
+  disabled,
 }: {
   children: ReactNode;
   className?: string;
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cx(
         "inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-gold to-gold-deep px-3 py-1.5",
         "text-[12px] font-semibold text-ink transition hover:brightness-110 active:brightness-95",
+        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100",
         className,
       )}
     >

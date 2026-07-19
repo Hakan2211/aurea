@@ -36,8 +36,8 @@ export const videofastPayloadSchema = z.object({
 export const imagePayloadSchema = z.object({
   type: z.literal("image"),
   prompt: z.string().min(1),
-  /** engine id from the image-lab catalog; both run on the managed engine
-   * (krea2 through the GGUF loader nodes) or an external ComfyUI */
+  /** engine id from the image-lab catalog; all run on the managed engine
+   * (krea2/qwen-edit through the GGUF loader nodes) or an external ComfyUI */
   model: z.string().default("z-image"),
   aspect: imageAspectSchema.default("3:2"),
   /** style preset name folded into the prompt by the adapter */
@@ -45,6 +45,11 @@ export const imagePayloadSchema = z.object({
   seed: z.number().int().optional(),
   /** images per run — each lands as its own asset */
   count: z.number().int().min(1).max(4).default(1),
+  /** dataRoot-relative reference images (qwen-edit): subject first, then
+   * scene/prop/style — the QIE multi-ref consistency stack */
+  refs: z.array(z.string()).max(3).default([]),
+  /** storyboard delivery: attach finished stills to this shot's keyframes */
+  board: z.object({ shotId: z.string().min(1) }).optional(),
 });
 
 export const ttsPayloadSchema = z.object({
@@ -602,6 +607,19 @@ export const productionRemoveNodeSchema = z.object({
   id: z.string().min(1),
 });
 
+/** storyboard: enqueue keyframe generation for one shot. Prompt defaults to
+ * the composed shot prompt (composeKeyframePrompt) — pass one to override. */
+export const storyboardGenerateSchema = z.object({
+  project: z.string().min(1),
+  shotId: z.string().min(1),
+  prompt: z.string().optional(),
+  aspect: imageAspectSchema.default("16:9"),
+  seed: z.number().int().optional(),
+  /** takes per run — each lands as its own keyframe on the shot */
+  count: z.number().int().min(1).max(4).default(1),
+});
+export type StoryboardGenerate = z.input<typeof storyboardGenerateSchema>;
+
 /** studio.onUpdate payload — which document changed for which project, so
  * open screens can converge on Director/MCP edits without polling */
 export const studioUpdateEventSchema = z.object({
@@ -629,6 +647,9 @@ export type BibleVoice = z.infer<typeof bibleVoiceSchema>;
 
 export const bibleRefsSchema = z.object({
   /** all library relPaths */
+  /** the designated storyboard reference — what qwen-edit gets as the subject
+   * image when boarding a shot with this character (GPT hero frame ideally) */
+  keyframeRef: z.string().nullable().default(null),
   turnaround: z.string().nullable().default(null),
   hero: z.string().nullable().default(null),
   /** composite contact sheet from the char-sheet pipeline */
@@ -940,3 +961,5 @@ export const portFileSchema = z.object({
   pid: z.number().int(),
 });
 export type PortFile = z.infer<typeof portFileSchema>;
+
+export * from "./storyboard.js";

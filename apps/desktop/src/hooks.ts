@@ -22,6 +22,7 @@ import type {
   Scene,
   Settings,
   Shot,
+  StoryboardGenerate,
   TtsGenerate,
   VideoGenerate,
 } from "@aurea/shared";
@@ -942,6 +943,39 @@ export function useProduction() {
     }),
     [project, query.data, save, addEpisode, addScene, addShot, updateEpisode, updateScene, updateShot, removeEpisode, removeScene, removeShot],
   );
+}
+
+type BoardJob = Job & { payload: Extract<JobPayload, { type: "image" }> };
+
+/** LIVE — storyboard keyframe generation: enqueue qwen-edit board jobs for a
+ * shot and watch the ones in flight (payload.board carries the shotId).
+ * Finished stills attach server-side and arrive over studio.onUpdate. */
+export function useStoryboard() {
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
+  const mutation = trpc.studio.board.generate.useMutation({
+    onSuccess: () => void utils.jobs.invalidate(),
+  });
+  const { mutate } = mutation;
+
+  return useMemo(() => {
+    const active = (jobsData ?? []).filter(
+      (j): j is BoardJob =>
+        j.payload?.type === "image" &&
+        !!j.payload.board &&
+        (j.status === "running" || j.status === "queued"),
+    );
+    return {
+      project,
+      generate: (input: Omit<StoryboardGenerate, "project">) => mutate({ ...input, project }),
+      pending: mutation.isPending,
+      error: mutation.error?.message,
+      active,
+      /** queued/running board jobs for one shot */
+      shotJobs: (shotId: string) => active.filter((j) => j.payload.board?.shotId === shotId),
+    };
+  }, [project, jobsData, mutate, mutation.isPending, mutation.error]);
 }
 
 /* sample toggle ids ↔ persisted settings fields */

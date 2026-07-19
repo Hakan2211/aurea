@@ -59,6 +59,21 @@ export const KREA2_MANAGED: ModelNames = {
   vae: rel("krea2-turbo-gguf", "vae", "qwen_image_vae.safetensors"),
 };
 
+/** conventional names on a user-managed ComfyUI (videofast's proven
+ * qwen-edit-ref.json stack) */
+export const QWENEDIT_EXTERNAL: ModelNames = {
+  unet: "Qwen-Image-Edit-2509-Q5_K_M.gguf",
+  clip: "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+  vae: "qwen_image_vae.safetensors",
+};
+
+/** registry-relative names (see models/registry.ts qwen-image-edit-2509-gguf) */
+export const QWENEDIT_MANAGED: ModelNames = {
+  unet: rel("qwen-image-edit-2509-gguf", "diffusion_models", "Qwen-Image-Edit-2509-Q5_K_M.gguf"),
+  clip: rel("qwen-image-edit-2509-gguf", "text_encoders", "qwen_2.5_vl_7b_fp8_scaled.safetensors"),
+  vae: rel("qwen-image-edit-2509-gguf", "vae", "qwen_image_vae.safetensors"),
+};
+
 /** mirrors videofast images/workflows/z-image-turbo.json (core nodes only) */
 export function zImageGraph(spec: ImageGraphSpec, names: ModelNames): ComfyGraph {
   return {
@@ -134,4 +149,60 @@ export function krea2Graph(spec: ImageGraphSpec, names: ModelNames): ComfyGraph 
       class_type: "SaveImage",
     },
   };
+}
+
+/** Mirrors videofast images/workflows/qwen-edit-ref.json — reference-driven
+ * generation via Qwen-Image-Edit-2509 (GGUF loader node): 1–3 uploaded
+ * reference images keep the subject on-model in a brand-new scene. `refs` are
+ * ComfyUI input names as returned by ComfyClient.uploadInput. */
+export function qwenEditGraph(spec: ImageGraphSpec, names: ModelNames, refs: string[]): ComfyGraph {
+  if (refs.length < 1 || refs.length > 3) {
+    throw new Error(`qwen-edit needs 1-3 reference images, got ${refs.length}`);
+  }
+  const graph: ComfyGraph = {
+    unet: { inputs: { unet_name: names.unet }, class_type: "UnetLoaderGGUF" },
+    clip: {
+      inputs: { clip_name: names.clip, type: "qwen_image", device: "default" },
+      class_type: "CLIPLoader",
+    },
+    vae: { inputs: { vae_name: names.vae }, class_type: "VAELoader" },
+    latent: {
+      inputs: { width: spec.width, height: spec.height, batch_size: 1 },
+      class_type: "EmptySD3LatentImage",
+    },
+    sampler: {
+      inputs: {
+        seed: spec.seed,
+        steps: 20,
+        cfg: 4.0,
+        sampler_name: "euler",
+        scheduler: "simple",
+        denoise: 1.0,
+        model: ["unet", 0],
+        positive: ["positive", 0],
+        negative: ["negative", 0],
+        latent_image: ["latent", 0],
+      },
+      class_type: "KSampler",
+    },
+    decode: { inputs: { samples: ["sampler", 0], vae: ["vae", 0] }, class_type: "VAEDecode" },
+    save: {
+      inputs: { filename_prefix: "aurea", images: ["decode", 0] },
+      class_type: "SaveImage",
+    },
+  };
+  const imageInputs: Record<string, [string, number]> = {};
+  refs.forEach((name, i) => {
+    graph[`ref${i + 1}`] = { inputs: { image: name }, class_type: "LoadImage" };
+    imageInputs[`image${i + 1}`] = [`ref${i + 1}`, 0];
+  });
+  graph.positive = {
+    inputs: { prompt: spec.prompt, clip: ["clip", 0], vae: ["vae", 0], ...imageInputs },
+    class_type: "TextEncodeQwenImageEditPlus",
+  };
+  graph.negative = {
+    inputs: { prompt: "", clip: ["clip", 0], vae: ["vae", 0], ...imageInputs },
+    class_type: "TextEncodeQwenImageEditPlus",
+  };
+  return graph;
 }
