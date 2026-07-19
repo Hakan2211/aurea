@@ -682,7 +682,71 @@ function StyleDetail({ bible }: { bible: ReturnType<typeof useBible> }) {
             />
           </label>
         ))}
+
+        <CinematographyBank bible={bible} />
       </div>
     </section>
+  );
+}
+
+/* ---------- cinematography bank ---------- */
+
+function CinematographyBank({ bible }: { bible: ReturnType<typeof useBible> }) {
+  const cine = bible.bible.cinematography;
+  const installed = cine.shotSizes.length > 0 || cine.moves.length > 0;
+  const busy = bible.importingCinematography;
+  return (
+    <div className="rounded-xl border hairline p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <span className={fieldLabel}>Cinematography bank</span>
+          <p className="text-[11px] leading-relaxed text-fog">
+            {installed
+              ? "The doc-26 prompt bible as structured banks — shot specs written in its " +
+                "vocabulary (“ws”, “low”, “push-in”, “sitcom.warm-home”) expand to full clauses in " +
+                "every composed prompt."
+              : "Import the cinematography prompt bible (doc 26) as structured clause banks the " +
+                "storyboard and Director draw from when speccing shots."}
+          </p>
+        </div>
+        {installed ? (
+          <GhostButton className="shrink-0" onClick={() => bible.importCinematography()}>
+            <RefreshCw size={12} className={busy ? "animate-spin" : undefined} />
+            {busy ? "Importing…" : "Re-import"}
+          </GhostButton>
+        ) : (
+          <GoldButton className="shrink-0" onClick={() => bible.importCinematography()}>
+            <Sparkles size={13} />
+            {busy ? "Importing…" : "Import doc-26 bank"}
+          </GoldButton>
+        )}
+      </div>
+      {installed && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {(
+            [
+              [`${cine.shotSizes.length} shot sizes`, cine.shotSizes.map((c) => c.id)],
+              [`${cine.angles.length} angles`, cine.angles.map((c) => c.id)],
+              [`${cine.moves.length} moves`, cine.moves.map((c) => c.id)],
+              [`${cine.lenses.length} lenses`, cine.lenses.map((c) => c.id)],
+              [`${cine.compositions.length} compositions`, cine.compositions.map((c) => c.id)],
+              ...cine.lighting.map(
+                (b) => [`${b.id} lighting ×${b.entries.length}`, b.entries.map((e) => `${b.id}.${e.id}`)] as const,
+              ),
+              [`${cine.danceSignatures.length} dance signatures`, cine.danceSignatures.map((d) => d.character)],
+              [`${cine.formations.length} formations`, cine.formations.map((f) => f.id)],
+            ] as ReadonlyArray<readonly [string, readonly string[]]>
+          ).map(([label, ids]) => (
+            <span
+              key={label}
+              title={ids.join(" · ")}
+              className="cursor-default rounded-full border hairline px-2.5 py-1 text-[10px] text-cream/80"
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

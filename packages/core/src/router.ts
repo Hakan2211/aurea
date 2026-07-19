@@ -19,6 +19,7 @@ import {
   timelineUpdateClipSchema,
   timelineUpdateSchema,
   bibleGetSchema,
+  bibleImportCinematographySchema,
   bibleRemoveCharacterSchema,
   bibleRemoveLocationSchema,
   bibleUpdateSchema,
@@ -441,6 +442,14 @@ export const appRouter = router({
         requireProject(ctx, input.project);
         return ctx.studio.updateStyle(input.project, input.style);
       }),
+
+      /** install the doc-26 cinematography bank (or a caller-provided one) */
+      importCinematography: procedure
+        .input(bibleImportCinematographySchema)
+        .mutation(({ ctx, input }) => {
+          requireProject(ctx, input.project);
+          return ctx.studio.importCinematography(input.project, input.cinematography);
+        }),
     }),
 
     /** one event per production.json/bible.json save, whoever wrote it —

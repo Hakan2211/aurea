@@ -822,7 +822,13 @@ export function useDraft<T>(source: T, save: (next: T) => void, delayMs = 700) {
 const mediaRoute = (relPath: string) =>
   "/media/" + relPath.split("/").map(encodeURIComponent).join("/");
 
-const EMPTY_BIBLE: Bible = { version: 1, characters: [], locations: [], style: { artDirection: "", negativePrompt: "", cinematographyNotes: "", notes: "" }, updatedAt: "" };
+const EMPTY_CINEMATOGRAPHY: Bible["cinematography"] = {
+  shotSizes: [], angles: [], moves: [], lenses: [], compositions: [], lighting: [],
+  danceSignatures: [], formations: [],
+  templates: { keyframe: "", ltxCoverage: "", transitionMorph: "", seedanceHero: "" },
+  rules: "", negativePrompt: "",
+};
+const EMPTY_BIBLE: Bible = { version: 1, characters: [], locations: [], style: { artDirection: "", negativePrompt: "", cinematographyNotes: "", notes: "" }, cinematography: EMPTY_CINEMATOGRAPHY, updatedAt: "" };
 
 /** LIVE — the production bible (characters / locations / style) for the active
  * project, plus the cloned-voice roster the character voice picker feeds from.
@@ -840,6 +846,7 @@ export function useBible() {
   const upsertLocMutation = trpc.studio.bible.upsertLocation.useMutation(sync);
   const removeLocMutation = trpc.studio.bible.removeLocation.useMutation(sync);
   const styleMutation = trpc.studio.bible.updateStyle.useMutation(sync);
+  const cineMutation = trpc.studio.bible.importCinematography.useMutation(sync);
   const seedMutation = trpc.studio.seedAnimalSitcom.useMutation({
     // the seed touches the bible, production.json, project assets AND the voice roster
     onSuccess: () => {
@@ -854,6 +861,7 @@ export function useBible() {
   const { mutate: upsertLoc } = upsertLocMutation;
   const { mutate: removeLoc } = removeLocMutation;
   const { mutate: saveStyle } = styleMutation;
+  const { mutate: importCine } = cineMutation;
   const { mutateAsync: seedAsync } = seedMutation;
 
   return useMemo(
@@ -878,12 +886,15 @@ export function useBible() {
       upsertLocation: (location: BibleLocation) => upsertLoc({ project, location }),
       removeLocation: (id: string) => removeLoc({ project, id }),
       updateStyle: (style: BibleStyle) => saveStyle({ project, style }),
+      /** install the curated doc-26 cinematography bank */
+      importCinematography: () => importCine({ project }),
+      importingCinematography: cineMutation.isPending,
       seed: (overwrite = false) => seedAsync({ project, overwrite }),
       seeding: seedMutation.isPending,
       seedResult: seedMutation.data,
       seedError: seedMutation.error?.message,
     }),
-    [project, query.data, voices, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
+    [project, query.data, voices, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, importCine, cineMutation.isPending, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
   );
 }
 

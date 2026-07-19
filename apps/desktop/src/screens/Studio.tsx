@@ -684,22 +684,47 @@ function ShotInspector({
           </select>
         </label>
 
-        {/* camera & lens */}
+        {/* camera & lens — bank ids autocomplete once the cinematography bank
+            is imported (free text always allowed; ids expand in prompts) */}
         <div>
           <span className={fieldLabel}>Camera &amp; lens</span>
+          {(
+            [
+              ["shotSize", bible.bible.cinematography.shotSizes],
+              ["angle", bible.bible.cinematography.angles],
+              ["move", bible.bible.cinematography.moves],
+              ["lens", bible.bible.cinematography.lenses],
+            ] as const
+          ).map(([key, entries]) => (
+            <datalist key={key} id={`cine-${key}`}>
+              {entries.map((c) => (
+                <option key={c.id} value={c.id}>{`${c.name}${c.use ? ` — ${c.use}` : ""}`}</option>
+              ))}
+            </datalist>
+          ))}
+          <datalist id="cine-lighting">
+            {bible.bible.cinematography.lighting.flatMap((b) =>
+              b.entries.map((e) => (
+                <option key={`${b.id}.${e.id}`} value={`${b.id}.${e.id}`}>
+                  {`${b.name} — ${e.name}`}
+                </option>
+              )),
+            )}
+          </datalist>
           <div className="grid grid-cols-2 gap-1.5">
             {(
               [
-                ["Shot size", "shotSize", "MS"],
-                ["Angle", "angle", "low angle"],
-                ["Move", "move", "slow push-in"],
-                ["Lens", "lens", "35mm"],
+                ["Shot size", "shotSize", "ws"],
+                ["Angle", "angle", "low"],
+                ["Move", "move", "push-in"],
+                ["Lens", "lens", "deep"],
               ] as const
             ).map(([label, key, ph]) => (
               <input
                 key={key}
                 title={label}
                 placeholder={ph}
+                list={`cine-${key}`}
                 className={textInput}
                 value={draft.camera[key]}
                 onChange={(e) => patch({ camera: { ...draft.camera, [key]: e.target.value } })}
@@ -708,7 +733,8 @@ function ShotInspector({
           </div>
           <input
             title="Lighting"
-            placeholder="sitcom lighting bank"
+            placeholder="sitcom.warm-home"
+            list="cine-lighting"
             className={cx(textInput, "mt-1.5")}
             value={draft.camera.lighting}
             onChange={(e) => patch({ camera: { ...draft.camera, lighting: e.target.value } })}

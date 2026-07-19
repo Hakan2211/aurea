@@ -213,9 +213,10 @@ export const ANIMAL_SITCOM_STYLE: BibleStyle = bibleStyleSchema.parse({
     "design, different character, off-model, text, labels, watermark, signature, low detail, " +
     "duplicated face, flat lighting, harsh shadows, nsfw",
   cinematographyNotes:
-    "Shot sizes, camera moves, lighting banks (Dune/Avatar/sitcom/concert) and the episode beat " +
-    "sheet live in videofast/docs/cinematography.md — imported as structured banks in the " +
-    "storyboard step.",
+    "The doc-26 cinematography bible is installed as structured banks in bible.cinematography " +
+    "(shot sizes, angles, moves, lenses, Dune/Avatar/sitcom/concert lighting, compositions, " +
+    "per-dancer camera signatures). Write shot camera specs in bank vocabulary — ids like " +
+    '"ws", "low", "push-in", "sitcom.warm-home" — and prompts expand them to the full clauses.',
 });
 
 /* ---------- file import ---------- */

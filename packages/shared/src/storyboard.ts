@@ -5,7 +5,16 @@
  * the subject as "this exact <species> character", restate the identity
  * anchors, then scene + camera + art direction. */
 
-import type { Bible, BibleCharacter, BibleLocation, CameraSpec, Scene, Shot } from "./index.js";
+import type {
+  Bible,
+  BibleCharacter,
+  BibleCinematography,
+  BibleLocation,
+  CameraSpec,
+  CineClause,
+  Scene,
+  Shot,
+} from "./index.js";
 
 /** QIE takes at most 3 reference images (subject / scene / style). */
 export const MAX_KEYFRAME_REFS = 3;
@@ -50,11 +59,62 @@ export function resolveKeyframeRefs(shot: Shot, scene: Scene | undefined, bible:
   return refs;
 }
 
-const cameraPhrase = (camera: CameraSpec): string =>
-  [camera.shotSize, camera.angle, camera.lens, camera.lighting, camera.notes]
+/* ---------- cinematography-bank resolution ----------
+ * Camera-spec fields stay plain strings, but once the doc-26 bank is imported
+ * into the bible a value that names a bank entry — its id ("ws"), its name
+ * ("WS — wide / full shot"), or the abbreviation before the dash ("WS") —
+ * expands to the entry's full paste-in clause. Lighting also accepts
+ * "<bank>.<entry>" ("concert.follow-spot"). Anything unrecognized passes
+ * through untouched, so free-text specs keep working bank or no bank. */
+
+const norm = (s: string) => s.trim().toLowerCase();
+
+function findClause(list: CineClause[], value: string): CineClause | undefined {
+  const v = norm(value);
+  if (!v) return undefined;
+  return list.find(
+    (c) => norm(c.id) === v || norm(c.name) === v || norm(c.name.split("—")[0]) === v,
+  );
+}
+
+function resolveLighting(cine: BibleCinematography, value: string): string | undefined {
+  const v = norm(value);
+  if (!v) return undefined;
+  const [bankId, entryId] = v.split(".", 2);
+  if (entryId) {
+    const bank = cine.lighting.find((b) => norm(b.id) === bankId || norm(b.name) === bankId);
+    return bank ? findClause(bank.entries, entryId)?.clause : undefined;
+  }
+  for (const bank of cine.lighting) {
+    const hit = findClause(bank.entries, v);
+    if (hit) return hit.clause;
+  }
+  return undefined;
+}
+
+/** Expand a camera spec's bank references to full clauses (free text passes
+ * through). `move` resolves too — S-P2 video prompts consume it; the keyframe
+ * still never does (the still owns framing/light, motion is the video's job). */
+export function resolveCameraSpec(camera: CameraSpec, cine: BibleCinematography): CameraSpec {
+  const pick = (list: CineClause[], value: string) => findClause(list, value)?.clause ?? value;
+  return {
+    ...camera,
+    shotSize: pick(cine.shotSizes, camera.shotSize),
+    angle: pick(cine.angles, camera.angle),
+    move: pick(cine.moves, camera.move),
+    lens: pick(cine.lenses, camera.lens),
+    lighting: resolveLighting(cine, camera.lighting) ?? camera.lighting,
+    notes: findClause(cine.compositions, camera.notes)?.clause ?? camera.notes,
+  };
+}
+
+const cameraPhrase = (camera: CameraSpec, cine: BibleCinematography): string => {
+  const resolved = resolveCameraSpec(camera, cine);
+  return [resolved.shotSize, resolved.angle, resolved.lens, resolved.lighting, resolved.notes]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(", ");
+};
 
 /** action/stage-direction lines (no character) describe what we see */
 const actionText = (shot: Shot): string =>
@@ -89,10 +149,13 @@ export function composeKeyframePrompt(shot: Shot, scene: Scene | undefined, bibl
   const location = shotLocation(shot, scene, bible);
   if (location) parts.push(`in ${location.name}: ${location.stylePrompt || location.description}`);
 
-  const camera = cameraPhrase(shot.camera);
+  const camera = cameraPhrase(shot.camera, bible.cinematography);
   if (camera) parts.push(camera);
 
   if (bible.style.artDirection) parts.push(bible.style.artDirection);
 
-  return parts.filter(Boolean).join(". ");
+  return parts
+    .filter(Boolean)
+    .map((p) => p.replace(/\.\s*$/, ""))
+    .join(". ");
 }

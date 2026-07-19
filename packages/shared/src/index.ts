@@ -714,11 +714,77 @@ export const bibleStyleSchema = z.object({
 });
 export type BibleStyle = z.infer<typeof bibleStyleSchema>;
 
+/* ---------- cinematography bank (doc 26 as structured data) ---------- */
+/* The director's language — shot sizes, camera moves, lighting banks,
+ * composition — imported into the bible so shot specs can reference entries
+ * by id ("ws", "sitcom.warm-home") and prompts expand to the full paste-in
+ * clause. Camera-spec fields stay strings: a value that matches an entry id
+ * or name resolves to its clause; anything else passes through as free text. */
+
+export const cineClauseSchema = z.object({
+  /** short stable slug referenced from camera specs ("ws", "push-in") */
+  id: z.string(),
+  name: z.string(),
+  /** the paste-in prompt clause this entry expands to */
+  clause: z.string().default(""),
+  /** when/why to use it — shown in pickers and fed to the director agent */
+  use: z.string().default(""),
+});
+export type CineClause = z.infer<typeof cineClauseSchema>;
+
+export const cineLightingBankSchema = z.object({
+  /** bank slug — entries resolve as "<bank>.<entry>" ("concert.follow-spot") */
+  id: z.string(),
+  name: z.string(),
+  use: z.string().default(""),
+  entries: z.array(cineClauseSchema).default([]),
+});
+export type CineLightingBank = z.infer<typeof cineLightingBankSchema>;
+
+/** Per-dancer signature camera — "the camera dances their style too". */
+export const cineDanceSignatureSchema = z.object({
+  /** bible character name (matched case-insensitively; ids differ per seed) */
+  character: z.string(),
+  danceStyle: z.string().default(""),
+  camera: z.string().default(""),
+  clause: z.string().default(""),
+});
+export type CineDanceSignature = z.infer<typeof cineDanceSignatureSchema>;
+
+/** Master prompt formulas (doc 26 §10.1) — S-P2 shot generation consumes
+ * ltxCoverage/transitionMorph/seedanceHero; keyframe documents the still side. */
+export const cineTemplatesSchema = z.object({
+  keyframe: z.string().default(""),
+  ltxCoverage: z.string().default(""),
+  transitionMorph: z.string().default(""),
+  seedanceHero: z.string().default(""),
+});
+export type CineTemplates = z.infer<typeof cineTemplatesSchema>;
+
+export const bibleCinematographySchema = z.object({
+  shotSizes: z.array(cineClauseSchema).default([]),
+  angles: z.array(cineClauseSchema).default([]),
+  moves: z.array(cineClauseSchema).default([]),
+  lenses: z.array(cineClauseSchema).default([]),
+  compositions: z.array(cineClauseSchema).default([]),
+  lighting: z.array(cineLightingBankSchema).default([]),
+  danceSignatures: z.array(cineDanceSignatureSchema).default([]),
+  /** full-crew dance shots (overhead kaleidoscope, formation wide, finale crane) */
+  formations: z.array(cineClauseSchema).default([]),
+  templates: cineTemplatesSchema.default({}),
+  /** grammar digest for the director agent (one move per clip, i2v agrees
+   * with the still, dance never tighter than WS, …) */
+  rules: z.string().default(""),
+  negativePrompt: z.string().default(""),
+});
+export type BibleCinematography = z.infer<typeof bibleCinematographySchema>;
+
 export const bibleSchema = z.object({
   version: z.literal(1).default(1),
   characters: z.array(bibleCharacterSchema).default([]),
   locations: z.array(bibleLocationSchema).default([]),
   style: bibleStyleSchema.default({}),
+  cinematography: bibleCinematographySchema.default({}),
   updatedAt: z.string().default(""),
 });
 export type Bible = z.infer<typeof bibleSchema>;
@@ -756,6 +822,13 @@ export const bibleUpdateStyleSchema = z.object({
   project: z.string().min(1),
   style: bibleStyleSchema,
 });
+
+/** Import/replace the cinematography bank (empty = curated doc-26 bank). */
+export const bibleImportCinematographySchema = z.object({
+  project: z.string().min(1),
+  cinematography: bibleCinematographySchema.optional(),
+});
+export type BibleImportCinematography = z.input<typeof bibleImportCinematographySchema>;
 
 /** Seed the Animal Sitcom bible from the videofast repo (paths.videofastDir):
  * six structured characters, reference images + voice ref clips copied in. */
@@ -963,3 +1036,4 @@ export const portFileSchema = z.object({
 export type PortFile = z.infer<typeof portFileSchema>;
 
 export * from "./storyboard.js";
+export * from "./cinematographyBank.js";

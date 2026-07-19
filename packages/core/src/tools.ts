@@ -471,8 +471,12 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       description:
         "Append a shot to a scene (sceneId from production_get). Shots are the atomic production " +
         "unit: give each one its script lines (character = bible character id, null for action " +
-        "lines), the characters present, and a camera spec drawn from the style bible's " +
-        "cinematography language. New shots start at status \"draft\"; location defaults to the scene's.",
+        "lines), the characters present, and a camera spec written in the cinematography bank's " +
+        "vocabulary when one is installed (bible_get → cinematography): shotSize \"ws\", angle " +
+        "\"low\", move \"push-in\", lighting \"sitcom.warm-home\", notes = a composition id or free " +
+        "text — prompts expand ids to the full clauses. Respect the bank's rules (one move, one " +
+        "lighting logic per shot; dance never tighter than ws). New shots start at status " +
+        "\"draft\"; location defaults to the scene's.",
       schema: withProjectDefault(productionAddShotSchema.omit({ project: true })),
       handler: async ({ project, ...input }) => {
         await requireProject(project);
@@ -555,9 +559,11 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       description:
         "The production bible — the persistent cast & world memory: characters (appearance slots, " +
         "identity anchors, personality, speech pattern, locked voice, reference images), locations, " +
-        "and the style bible (art direction, negative prompt). Consult it before writing dialogue or " +
-        "describing a character, and keep it authoritative: new recurring characters/locations belong " +
-        "in the bible, not just in a script.",
+        "the style bible (art direction, negative prompt), and the cinematography bank (shot-size/" +
+        "angle/move/lens/lighting/composition clause banks + per-dancer camera signatures + grammar " +
+        "rules — the vocabulary for shot camera specs). Consult it before writing dialogue, " +
+        "describing a character, or speccing shots, and keep it authoritative: new recurring " +
+        "characters/locations belong in the bible, not just in a script.",
       schema: { project: z.string().default("playground") },
       handler: async ({ project }) => {
         await requireProject(project);
@@ -597,6 +603,36 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         await requireProject(project);
         const bible = await api.studio.bible.upsertLocation.mutate({ project, location });
         return json({ ok: true, locations: bible.locations.map((l) => l.id) });
+      },
+    }),
+
+    defineTool({
+      name: "import_cinematography",
+      title: "Import cinematography bank",
+      description:
+        "Install the doc-26 cinematography prompt bible into bible.cinematography as structured " +
+        "banks: shot sizes, angles, camera moves, lenses, lighting banks (dune/avatar/sitcom/" +
+        "concert/universal), compositions, per-dancer camera signatures, crew formations, the " +
+        "LTX/Seedance prompt templates, and the grammar rules. After importing, write shot camera " +
+        "specs in bank vocabulary — shotSize \"ws\", angle \"low\", move \"push-in\", lighting " +
+        "\"sitcom.warm-home\", notes \"symmetry\" — and composed prompts expand them to the full " +
+        "paste-in clauses (free text still passes through). Replaces any existing bank.",
+      schema: { project: z.string().default("playground") },
+      handler: async ({ project }) => {
+        await requireProject(project);
+        const bible = await api.studio.bible.importCinematography.mutate({ project });
+        const cine = bible.cinematography;
+        return json({
+          ok: true,
+          shotSizes: cine.shotSizes.map((c) => c.id),
+          angles: cine.angles.map((c) => c.id),
+          moves: cine.moves.map((c) => c.id),
+          lenses: cine.lenses.map((c) => c.id),
+          compositions: cine.compositions.map((c) => c.id),
+          lighting: cine.lighting.map((b) => ({ bank: b.id, entries: b.entries.map((e) => e.id) })),
+          danceSignatures: cine.danceSignatures.map((d) => d.character),
+          formations: cine.formations.map((f) => f.id),
+        });
       },
     }),
 

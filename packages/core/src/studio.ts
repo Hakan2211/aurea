@@ -14,11 +14,14 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  bibleCinematographySchema,
   bibleSchema,
+  CINEMATOGRAPHY_BANK,
   productionSchema,
   shotSchema,
   type Bible,
   type BibleCharacter,
+  type BibleCinematography,
   type BibleLocation,
   type BibleStyle,
   type Episode,
@@ -307,6 +310,16 @@ export class StudioStore extends EventEmitter {
     return this.updateBible(project, bible);
   }
 
+  /** Install the cinematography bank — the curated doc-26 bible by default,
+   * or a caller-provided bank (replace, not merge: the bank is one document). */
+  importCinematography(project: string, cinematography?: BibleCinematography): Bible {
+    const bible = this.getBible(project);
+    bible.cinematography = bibleCinematographySchema.parse(
+      cinematography ?? structuredClone(CINEMATOGRAPHY_BANK),
+    );
+    return this.updateBible(project, bible);
+  }
+
   /* ---------- Animal Sitcom seed ---------- */
 
   /** Populate the bible (and an empty season 1) from the videofast repo.
@@ -353,6 +366,8 @@ export class StudioStore extends EventEmitter {
     }
     const styleEmpty = !bible.style.artDirection && !bible.style.negativePrompt;
     if (styleEmpty || overwrite) bible.style = { ...ANIMAL_SITCOM_STYLE };
+    const cineEmpty = !bible.cinematography.shotSizes.length && !bible.cinematography.moves.length;
+    if (cineEmpty || overwrite) bible.cinematography = structuredClone(CINEMATOGRAPHY_BANK);
     this.updateBible(project, bible);
 
     let prod = this.getProduction(project);
