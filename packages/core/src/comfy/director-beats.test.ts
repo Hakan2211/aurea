@@ -66,7 +66,7 @@ function directorNode(epsilon?: number) {
     epsilon,
     hasCustomAudio: false,
     inpaintAudio: true,
-    hasMotion: false,
+    hasIcLoraTrack: false,
     models: null,
   });
   return graph.director.inputs as Record<string, unknown>;

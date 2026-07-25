@@ -242,6 +242,25 @@ export class ComfyClient {
     }
   }
 
+  /** The output slot names a node class declares. Node packs are versioned by
+   * nobody — /object_info carries no version — so the only honest way to ask
+   * "is this pack new enough?" is to look for a surface only the new version
+   * has. An added output is the safest such marker: it can't be confused with a
+   * user setting, and reading it costs the same request hasNode() already made. */
+  async outputNames(classType: string, timeoutMs = 5_000): Promise<string[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/object_info/${encodeURIComponent(classType)}`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) return [];
+      const body = (await res.json()) as Record<string, { output_name?: unknown }>;
+      const names = body[classType]?.output_name;
+      return Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
   /** Stage a file into ComfyUI's input tree (multipart /upload/image — the
    * endpoint takes any media; LoadImage and LoadAudio both read from input).
    * Returns the staged name ("subfolder/file") for graph inputs. */

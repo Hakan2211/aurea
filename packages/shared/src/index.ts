@@ -249,6 +249,24 @@ export const directorMotionSchema = z.object({
   useItsAudio: z.boolean().default(false),
 });
 
+/* A cast reference. LTX reads subjects off a REFERENCE SHEET — one image whose
+ * cells hold the characters, props and settings the shot needs — carried into
+ * the render by the Ingredients IC-LoRA. So refs are authored one subject at a
+ * time here and the render path lays them out into a sheet, writing the
+ * "Top Row Left (Character - Sterling)" description block the model expects.
+ * That's the whole reason a ref carries prose: the picture alone doesn't tell
+ * LTX which cell is a character and which is a prop. */
+export const directorRefSchema = z.object({
+  /** library relPath of the still — a hero frame or a character-sheet crop */
+  image: z.string().min(1),
+  /** what to call it in the sheet description, and in the shot prompt */
+  name: z.string().default(""),
+  kind: z.enum(["character", "prop", "setting"]).default("character"),
+  /** wardrobe, markings, colour — what must stay true across the shot */
+  description: z.string().default(""),
+});
+export type DirectorRef = z.infer<typeof directorRefSchema>;
+
 export const directorRetakeSchema = z.object({
   /** library relPath of the finished take being fixed */
   source: z.string().min(1),
@@ -272,6 +290,12 @@ export const directorSpecSchema = z.object({
   promptZones: z.array(directorPromptZoneSchema).max(12).default([]),
   audio: z.array(directorAudioSchema).max(12).default([]),
   motion: directorMotionSchema.optional(),
+  /** the cast (and props, and sets) this shot must stay on-model for. Six is
+   * the sheet's own ceiling — three rows of two, the layout the Ingredients
+   * IC-LoRA's own examples use. */
+  refs: z.array(directorRefSchema).max(6).default([]),
+  /** 0..1 — how hard the sheet holds the shot to its subjects. 1 = as trained. */
+  refStrength: z.number().min(0).max(1).default(1),
   retake: directorRetakeSchema.optional(),
   /** fill the silence between voice takes with generated sound */
   inpaintAudio: z.boolean().default(true),
@@ -1384,3 +1408,4 @@ export type PortFile = z.infer<typeof portFileSchema>;
 
 export * from "./storyboard.js";
 export * from "./cinematographyBank.js";
+export * from "./refSheet.js";

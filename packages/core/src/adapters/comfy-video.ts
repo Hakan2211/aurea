@@ -29,7 +29,15 @@ import {
   snapSize,
   type TimelineInput,
 } from "../comfy/director-timeline.js";
-import { DIRECTOR_NODES, resolveIcLora, resolveTuning } from "../comfy/capabilities.js";
+import {
+  DIRECTOR_NODES,
+  hasRefTrack,
+  resolveIcLora,
+  resolveIngredientsLora,
+  resolveTuning,
+} from "../comfy/capabilities.js";
+import { composeSheetPrompt } from "@aurea/shared";
+import { composeRefSheet } from "./ref-sheet.js";
 import { probeMedia } from "./ffmpeg-export.js";
 import { jobRunDir } from "./proc.js";
 import type { JobResources } from "../scheduler.js";
@@ -225,6 +233,17 @@ export class ComfyVideoAdapter implements EngineAdapter {
       throw new Error("A Director shot needs at least one keyframe (or a retake to fix)");
     }
 
+    /* A cast sheet and a motion reference both need the IC-LoRA slot, and there
+     * is exactly one. Rather than silently drop whichever loses, say so — the
+     * user picked both deliberately and only they can decide which the shot is
+     * really about. */
+    if (spec.refs.length > 0 && spec.motion && !spec.retake) {
+      throw new Error(
+        "A shot can carry cast references or a motion reference, not both — they share " +
+          "the single IC-LoRA slot LTX offers. Remove one.",
+      );
+    }
+
     /* A retake re-renders one window of an existing take in place: everything
      * outside the window is the original's own pixels, re-encoded. So its
      * timeline can't carry a fresh cast of keyframes or voice takes — the guide
@@ -298,9 +317,49 @@ export class ComfyVideoAdapter implements EngineAdapter {
        * guide node will never look at. */
       const keyframes = spec.retake ? [] : spec.keyframes;
       const motion = spec.retake ? undefined : spec.motion;
+      const refs = spec.retake ? [] : spec.refs;
+
+      /* --- the cast -------------------------------------------------------
+       * References are one picture to LTX: a sheet of cells, plus prose saying
+       * which cell is which. Both are built here so the prompt can't drift from
+       * the layout, and both are gated on the two things this needs — a pack new
+       * enough to read a still off the IC-LoRA track, and the Ingredients weight
+       * — checked before anything is uploaded. */
+      let refSheet: { file: string; strength: number } | undefined;
+      let ingredientsLora: string | null = null;
+      if (refs.length > 0) {
+        if (!(await hasRefTrack(client))) {
+          throw new Error(
+            "Cast references need WhatDreamsCost-ComfyUI v2.0.4 or newer (older versions " +
+              "treat the reference sheet as a video and fail). Update the pack in your " +
+              "ComfyUI, restart it, and try again.",
+          );
+        }
+        ingredientsLora = await resolveIngredientsLora(client);
+        if (!ingredientsLora) {
+          throw new Error(
+            "Cast references need the LTX Ingredients IC-LoRA — download " +
+              "ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors from " +
+              "huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients (gated: accept the " +
+              "licence first) into your ComfyUI's models/loras folder.",
+          );
+        }
+        const sheet = await composeRefSheet({
+          images: refs.map((r, i) => resolve(r.image, `reference ${i + 1}`)),
+          out: path.join(jobRunDir(job.id), "refs", "sheet.png"),
+          aspect: width / height,
+        });
+        refSheet = {
+          file: await client.uploadInput(`${job.id}-refsheet.png`, fs.readFileSync(sheet.file)),
+          strength: spec.refStrength,
+        };
+      }
 
       const timeline: TimelineInput = {
-        globalPrompt: spec.globalPrompt.trim() || payload.prompt,
+        /* The sheet's description block rides the GLOBAL prompt, which the relay
+         * prepends to every beat — so each beat is read against the same cast,
+         * and a beat that only says "he leans in" still knows who "he" is. */
+        globalPrompt: composeSheetPrompt(refs, spec.globalPrompt.trim() || payload.prompt),
         fps,
         durationFrames,
         keyframes: await Promise.all(
@@ -341,6 +400,7 @@ export class ComfyVideoAdapter implements EngineAdapter {
               },
             ]
           : undefined,
+        refSheet,
         retake: spec.retake
           ? {
               file: await stage(spec.retake.source, "retake", "take to fix"),
@@ -381,10 +441,10 @@ export class ComfyVideoAdapter implements EngineAdapter {
         // just the window, so "off" keeps the original line under the new
         // picture and "on" lets LTX score the window afresh
         inpaintAudio: spec.retake ? spec.retake.regenerateAudio : spec.inpaintAudio,
-        hasMotion: !!motion,
-        icLora: icLora ?? undefined,
+        hasIcLoraTrack: !!motion || !!refSheet,
+        icLora: (motion ? icLora : ingredientsLora) ?? undefined,
         // the IC-LoRA is loaded as trained; how hard the reference bites is the
-        // per-segment motion strength inside timeline_data
+        // per-segment strength inside timeline_data
         icLoraStrength: 1,
         overrideAudio: motion?.useItsAudio ?? false,
         isRetake: !!spec.retake,
@@ -410,7 +470,9 @@ export class ComfyVideoAdapter implements EngineAdapter {
                   ? "Encoding the take to fix"
                   : motion
                     ? "Encoding keyframes and motion"
-                    : "Encoding keyframes",
+                    : refSheet
+                      ? "Encoding keyframes and the cast sheet"
+                      : "Encoding keyframes",
               });
             }
             else if (classType === "SamplerCustomAdvanced") {

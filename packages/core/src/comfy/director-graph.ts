@@ -84,9 +84,9 @@ const ID = {
   save: "save",
 } as const;
 
-/** LTXDirector output slots (the installed non-CS node — the CS fork inserts
- * `negative` at 2 and shifts everything after it, which is why multi-subject
- * support has to re-derive these) */
+/** LTXDirector output slots. Verified against the pack at v2.0.4, which left
+ * them untouched — cast references arrived as a new kind of segment on the
+ * existing IC-LoRA track rather than as new node surface. */
 const OUT = {
   model: 0,
   positive: 1,
@@ -119,11 +119,16 @@ export interface DirectorGraphSpec {
   hasCustomAudio: boolean;
   /** fill the gaps between takes with generated sound */
   inpaintAudio: boolean;
-  /** the shot has a motion reference on its timeline */
-  hasMotion: boolean;
-  /** IC-LoRA driving motion transfer; "None" disables it. Must be a name the
-   * running ComfyUI offers for LTXDirectorGuide.ic_lora_name — see
-   * resolveIcLora(), which is why this is a resolved string and not a kind. */
+  /** the shot has something on its IC-LoRA track — a motion reference whose
+   * movement is transferred, or a cast sheet whose subjects are. The node reads
+   * both from `motionSegments` and tells them apart by file extension, so one
+   * flag turns the track on for either. */
+  hasIcLoraTrack: boolean;
+  /** IC-LoRA carrying that track — motion-track / union-control for movement,
+   * ingredients for a cast sheet; "None" disables it. There is one slot, so a
+   * shot gets one or the other. Must be a name the running ComfyUI offers for
+   * LTXDirectorGuide.ic_lora_name — see resolveIcLora(), which is why this is a
+   * resolved string and not a kind. */
   icLora?: string;
   /** weight the IC-LoRA is loaded at (1 = as trained). Distinct from the
    * per-segment motion strength, which rides in timeline_data. */
@@ -198,7 +203,7 @@ export function directorGraph(spec: DirectorGraphSpec): ComfyGraph {
     img_compression: GUIDE_COMPRESSION,
     use_custom_audio: spec.hasCustomAudio,
     inpaint_audio: spec.inpaintAudio,
-    use_custom_motion: spec.hasMotion,
+    use_custom_motion: spec.hasIcLoraTrack,
     // lifts the motion reference's own audio onto the shot — the node then
     // reads the motion segments as the audio track and masks to match
     override_audio: !!spec.overrideAudio,
@@ -315,7 +320,7 @@ export function directorGraph(spec: DirectorGraphSpec): ComfyGraph {
       guide_data: link(ID.director, OUT.guideData),
       motion_guide_data: link(ID.director, OUT.motionGuideData),
       model: link(ID.director, OUT.model),
-      ic_lora_name: spec.hasMotion ? (spec.icLora ?? "None") : "None",
+      ic_lora_name: spec.hasIcLoraTrack ? (spec.icLora ?? "None") : "None",
       ic_lora_strength: spec.icLoraStrength ?? 1,
       upscale_method: "bicubic",
       image_attention_strength: 1,

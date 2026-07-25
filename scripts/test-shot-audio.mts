@@ -67,7 +67,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     seed: 1,
     hasCustomAudio: true,
     inpaintAudio: true,
-    hasMotion: false,
+    hasIcLoraTrack: false,
     models: null,
   });
   const director = graph.director.inputs as Record<string, unknown>;

@@ -242,12 +242,18 @@ export const KJNODES_PIN: CustomNodeSpec = {
  * LTXDirectorCropGuides). Pinned to the commit the external install was
  * verified against on 2026-07-25 — the node's `timeline_data` contract is one
  * we synthesise by hand, so an unpinned upgrade could move it underneath us.
- * `av` (PyAV) does the audio/video decoding for timeline segments. */
+ * `av` (PyAV) does the audio/video decoding for timeline segments.
+ *
+ * Bumped bf71104 → fbf22af (v2.0.4) on 2026-07-25 for cast references: only
+ * that version reads a still off the IC-LoRA track. Re-verified externally
+ * first — V4's two-voice shot and V5's motion/retake both still pass, and every
+ * node input the graph writes came through unchanged. A managed engine on the
+ * old pin re-fetches when this version string changes. */
 export const WHATDREAMSCOST_PIN: CustomNodeSpec = {
   id: "director-nodes",
   name: "LTX Director nodes",
-  version: "2.0.3-bf71104",
-  url: "https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI/archive/bf7110434fe9abc06f039090b9de116720325c5e.zip",
+  version: "2.0.4-fbf22af",
+  url: "https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI/archive/fbf22afdfce99587c80c4e8625f545deaa6c66a0.zip",
   dir: "WhatDreamsCost-ComfyUI",
   marker: "ltx_director.py",
   pipArgs: ["av", "pillow", "numpy"],

@@ -24,18 +24,25 @@ interface ParsedSegment {
   isEndFrame: boolean;
 }
 
+interface ParsedMotion {
+  videoFile: string;
+  start: number;
+  length: number;
+  trimStart: number;
+  videoStrength: number;
+  /** only a cast sheet carries these — a motion clip is a clip */
+  isStaticImage?: boolean;
+  videoDurationFrames?: number;
+  videoAttentionStrength?: number;
+  resampleMode?: string;
+}
+
 /** what the node will do with our JSON */
 function parse(inputs: ReturnType<typeof buildTimelineData>) {
   const data = JSON.parse(inputs.timeline_data) as {
     segments: ParsedSegment[];
     audioSegments: Array<{ audioFile: string; start: number; length: number; trimStart: number }>;
-    motionSegments: Array<{
-      videoFile: string;
-      start: number;
-      length: number;
-      trimStart: number;
-      videoStrength: number;
-    }>;
+    motionSegments: ParsedMotion[];
     global_prompt: string;
     retakeMode: boolean;
   };
@@ -327,6 +334,58 @@ test("a retake drops keyframes, takes and motion the node would ignore", () => {
   assert.deepEqual(data.segments, []);
   assert.deepEqual(data.audioSegments, []);
   assert.deepEqual(data.motionSegments, []);
+});
+
+/* --- cast references ------------------------------------------------
+ * The sheet rides the same IC-LoRA track as a motion reference, so these pin
+ * the two things that make it a REFERENCE rather than a clip: it starts at
+ * frame 0, and it is one frame long unless someone asks otherwise. */
+
+test("a cast sheet lands at frame 0 as a one-frame still", () => {
+  const out = buildTimelineData({
+    ...base,
+    keyframes: [{ file: "hero.png", atFrame: 0, strength: 1 }],
+    refSheet: { file: "aurea/sheet.png", strength: 0.9 },
+  });
+  assert.deepEqual(parse(out).motionSegments, [
+    {
+      videoFile: "aurea/sheet.png",
+      isStaticImage: true,
+      start: 0,
+      length: 1,
+      trimStart: 0,
+      videoDurationFrames: 1,
+      videoStrength: 0.9,
+      videoAttentionStrength: 0.65,
+      resampleMode: "nearest",
+    },
+  ]);
+});
+
+test("a sheet held for longer snaps to LTX's frame stride and the clip", () => {
+  const span = (spanFrames: number) =>
+    parse(buildTimelineData({ ...base, refSheet: { file: "aurea/sheet.png", spanFrames } }))
+      .motionSegments[0];
+  // 24 frames of hold → the next valid 8n+1
+  assert.equal(span(24).length, 25);
+  assert.equal(span(24).videoDurationFrames, 25);
+  // and never past the end of the shot
+  assert.equal(span(500).length, base.durationFrames);
+});
+
+test("a retake drops the cast sheet too", () => {
+  const out = buildTimelineData({
+    ...base,
+    refSheet: { file: "aurea/sheet.png" },
+    retake: {
+      file: "aurea/take.mp4",
+      atFrame: 24,
+      lengthFrames: 24,
+      prompt: "fix his hand",
+      sourceDurationFrames: 121,
+    },
+  });
+  assert.deepEqual(parse(out).motionSegments, []);
 });
 
 test("no retake means retakeMode stays off", () => {

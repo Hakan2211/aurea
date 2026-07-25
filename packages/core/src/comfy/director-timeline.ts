@@ -63,6 +63,19 @@ export interface TimelineMotionSegment {
   strength?: number;
 }
 
+export interface TimelineRefSheet {
+  /** staged ComfyUI input name of the composed reference sheet (a still) */
+  file: string;
+  /** 0..1 — how hard the sheet holds the shot to its subjects */
+  strength?: number;
+  /** How many frames of the shot the sheet is held against. One is the
+   * canonical recipe — the Ingredients IC-LoRA's own workflow feeds a single
+   * frame — and it's also the cheap one: every extra frame is VAE-encoded and
+   * appended to the latent as context the sampler pays attention over. The
+   * pack's editor defaults to the whole clip instead, so this stays a knob. */
+  spanFrames?: number;
+}
+
 export interface TimelineRetake {
   /** staged name of the mp4 being fixed */
   file: string;
@@ -84,6 +97,8 @@ export interface TimelineInput {
   promptZones?: TimelinePromptZone[];
   audio?: TimelineAudioSegment[];
   motion?: TimelineMotionSegment[];
+  /** the cast sheet, if this shot references one */
+  refSheet?: TimelineRefSheet;
   retake?: TimelineRetake;
 }
 
@@ -151,7 +166,14 @@ export function buildTimelineData(input: TimelineInput): TimelineNodeInputs {
     global_prompt: input.globalPrompt,
     segments,
     audioSegments: fitAudio(input.audio ?? [], duration),
-    motionSegments: motionSegments(input.motion ?? []),
+    /* Both a motion reference and a cast sheet ride the IC-LoRA track — the
+     * node decides which by file extension — so they land in one array. They
+     * can't coexist in practice (one ic_lora_name per render), and the adapter
+     * refuses that combination before we get here. */
+    motionSegments: [
+      ...motionSegments(input.motion ?? []),
+      ...refSegments(input.refSheet, duration),
+    ],
     retakeMode: false,
   };
 
@@ -223,6 +245,38 @@ function motionSegments(motion: TimelineMotionSegment[]) {
     trimStart: Math.max(0, Math.round(m.trimStartFrames ?? 0)),
     videoStrength: round3(clamp(m.strength ?? 1, 0, 1)),
   }));
+}
+
+/** The reference sheet as the node wants it: a segment on the IC-LoRA track
+ * whose file happens to be a still. `isStaticImage` is the pack's own flag for
+ * this and is read by its editor, not by python — python decides off the file
+ * extension — but writing it keeps a timeline we generate loadable in the
+ * ComfyUI editor, which is how anyone would debug one of our renders.
+ *
+ * It sits at frame 0: a reference is a fact about the whole shot, not an event
+ * in it, and the guide code ramps the mask for segments that start later (an
+ * inserted still mid-shot is a keyframe, which is a different feature). Its span
+ * is quantized to LTX's 8n+1 stride because the guide encoder truncates to that
+ * anyway — better to say what we get. */
+function refSegments(sheet: TimelineRefSheet | undefined, duration: number) {
+  if (!sheet) return [];
+  const asked = Math.max(1, Math.round(sheet.spanFrames ?? 1));
+  const span = Math.min(asked <= 1 ? 1 : snapFrames(asked), duration);
+  return [
+    {
+      videoFile: sheet.file,
+      isStaticImage: true,
+      start: 0,
+      length: span,
+      trimStart: 0,
+      videoDurationFrames: span,
+      videoStrength: round3(clamp(sheet.strength ?? 1, 0, 1)),
+      // the pack's own default for a segment's attention weight, written out
+      // rather than left implicit so the timeline reads the same in its editor
+      videoAttentionStrength: 0.65,
+      resampleMode: "nearest",
+    },
+  ];
 }
 
 /* --- retake ---------------------------------------------------------

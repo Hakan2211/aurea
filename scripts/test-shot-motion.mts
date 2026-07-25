@@ -76,7 +76,7 @@ const reuse = (which: string) =>
     seed: 1,
     hasCustomAudio: false,
     inpaintAudio: true,
-    hasMotion: true,
+    hasIcLoraTrack: true,
     icLora: "ltxv\\ltx2\\ic-lora-motion-track.safetensors",
     icLoraStrength: 1,
     overrideAudio: true,
@@ -142,7 +142,7 @@ const reuse = (which: string) =>
     seed: 1,
     hasCustomAudio: false,
     inpaintAudio: false,
-    hasMotion: false,
+    hasIcLoraTrack: false,
     isRetake: true,
     models: null,
   });

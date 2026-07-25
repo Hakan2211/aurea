@@ -5,6 +5,7 @@ import type {
   BibleLocation,
   BibleStyle,
   DirectorAttachment,
+  DirectorRef,
   DirectorToolCall,
   Episode,
   ImageDeckGenerate,
@@ -28,6 +29,7 @@ import type {
   TtsGenerate,
   VideoGenerate,
 } from "@aurea/shared";
+import { castRef, characterRef, settingRef } from "@aurea/shared";
 import type { Asset, AssetKind, ChatMessage } from "@/data/sample";
 import {
   assetLibrary,
@@ -1112,10 +1114,11 @@ export function useVideoLab() {
   }).data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("video");
   // the doc-26 camera bank, so a prompt beat can say "ws" and mean the clause
-  const cinematography = trpc.studio.bible.get.useQuery(
+  const bible = trpc.studio.bible.get.useQuery(
     { project },
     { enabled: !!project, staleTime: 60_000 },
-  ).data?.cinematography;
+  ).data;
+  const cinematography = bible?.cinematography;
   const allAssets = trpc.library.list.useQuery().data?.assets;
   const images = allAssets?.filter((a) => a.kind === "image");
   const mutation = trpc.labs.video.generate.useMutation(invalidate);
@@ -1158,6 +1161,21 @@ export function useVideoLab() {
       /** shot sizes and moves for the prompt-beat camera pickers; empty until
        * the project's bible has the cinematography bank imported */
       cinematography: cinematography ?? EMPTY_CINEMATOGRAPHY,
+      /** The cast a Director shot can reference, already turned into sheet cells
+       * — a character with a locked storyboard reference fills a ref slot with
+       * its own image AND the wardrobe/anchor prose from the bible, which is the
+       * whole point of having a bible. Characters with no reference still are
+       * skipped: a cell needs a picture. */
+      cast: (bible?.characters ?? [])
+        .map((c) => {
+          const image = characterRef(c);
+          return image ? { id: c.id, name: c.name, ref: castRef(c, image) } : null;
+        })
+        .filter((c): c is { id: string; name: string; ref: DirectorRef } => c !== null),
+      /** the show's sets, same deal — a location with a still can be a cell */
+      sets: (bible?.locations ?? [])
+        .filter((l) => l.refs.length > 0)
+        .map((l) => ({ id: l.id, name: l.name, ref: settingRef(l, l.refs[0]) })),
     };
     if (!catalog || !kindAssets) {
       return {
@@ -1249,7 +1267,7 @@ export function useVideoLab() {
       canGenerate: !!frame,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, capabilities, cinematography, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
+  }, [catalog, capabilities, bible, cinematography, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
 }
 
 /* ---------- studio: bible + production (LIVE) ---------- */
