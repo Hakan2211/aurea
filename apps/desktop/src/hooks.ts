@@ -1132,11 +1132,15 @@ export function useVideoLab() {
         swatch: labSwatch(a.id),
         url: media ? media(a.url) : undefined,
       })),
-      /** voice takes usable as ia2v dialogue audio (lip-sync) */
+      /** voice takes usable as ia2v dialogue audio (lip-sync). The url is what
+       * the Director's audio lane measures: nothing on disk records a take's
+       * length, and the lane can't draw a block without one, so it loads the
+       * metadata in the browser rather than making the core ffprobe every
+       * asset in the library on every list. */
       audioSources: (allAssets ?? [])
         .filter((a) => a.kind === "audio")
         .slice(0, 30)
-        .map((a) => ({ relPath: a.relPath, name: a.name })),
+        .map((a) => ({ relPath: a.relPath, name: a.name, url: media ? media(a.url) : undefined })),
       failures: labFailures(jobsData, "video"),
       retry: (id: string) => retryJob({ id }),
       /** a rejected enqueue — surfaced under the Generate button */

@@ -474,14 +474,25 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
       };
     case "video": {
       const seedance = payload.engine === "seedance";
+      const d = payload.director;
+      // a Director shot is a timeline, so the rail says what's on it rather
+      // than the single "lip-sync" flag the one-take path could get away with
+      const voices = d ? d.audio.length : payload.audio ? 1 : 0;
       return {
         ...base,
         title: title(payload.prompt),
         kind: "video",
         engine: seedance ? "Seedance" : "LTX-2.3",
-        detail: `${payload.resolution} · ${payload.durationSec}s${payload.audio ? " · lip-sync" : ""}${
-          seedance ? ` · ${seedanceEstimate(payload.durationSec, payload.resolution)}` : ""
-        }`,
+        detail: [
+          payload.resolution,
+          `${payload.durationSec}s`,
+          d ? `Director · ${d.keyframes.length} keyframe${d.keyframes.length === 1 ? "" : "s"}` : "",
+          d && d.promptZones.length ? `${d.promptZones.length} beats` : "",
+          voices ? (d ? `${voices} voice${voices === 1 ? "" : "s"}` : "lip-sync") : "",
+          seedance ? seedanceEstimate(payload.durationSec, payload.resolution) : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
       };
     }
     default:
