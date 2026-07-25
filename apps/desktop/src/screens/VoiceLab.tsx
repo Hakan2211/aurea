@@ -6,12 +6,12 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   CloudUpload,
   HelpCircle,
   ListMusic,
   Maximize2,
   Mic,
-  MoreHorizontal,
   MoreVertical,
   Music4,
   Pause,
@@ -27,7 +27,7 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useVoiceLab } from "@/hooks";
+import { downloadAsset, useVoiceLab } from "@/hooks";
 import type { Voice, VoiceTake } from "@/data/sample";
 import { Chip, GoldButton, Waveform, cx } from "@/components/ui";
 import { useAudioPlayer, type AudioPlayer } from "@/components/useAudioPlayer";
@@ -244,17 +244,21 @@ function AddVoiceModal({
 function VoiceRow({
   voice,
   active,
+  player,
   onSelect,
   onRemove,
 }: {
   voice: Voice;
   active: boolean;
+  player: AudioPlayer;
   onSelect: () => void;
   /** present only for studio voices — the rest are read-only */
   onRemove?: () => void;
 }) {
   const [menu, setMenu] = useState(false);
   const [armed, setArmed] = useState(false);
+  const playingSample =
+    !!voice.sampleUrl && player.src === voice.sampleUrl && player.playing;
   return (
     <div className="relative">
       <button
@@ -279,10 +283,34 @@ function VoiceRow({
             <span className="truncate text-[12px] font-medium text-cream">{voice.name}</span>
             {active && <i className="h-1.5 w-1.5 rounded-full bg-sage" />}
           </span>
-          <Chip tone={voice.kind === "cloned" ? "gold" : "muted"} className="mt-1 text-[9px] uppercase tracking-wider">
-            {voice.kind}
-          </Chip>
+          <span className="mt-1 flex items-center gap-1">
+            <Chip tone={voice.kind === "cloned" ? "gold" : "muted"} className="text-[9px] uppercase tracking-wider">
+              {voice.kind}
+            </Chip>
+            {voice.rvcTrained && (
+              <Chip tone="gold" className="text-[9px] uppercase tracking-wider">
+                RVC
+              </Chip>
+            )}
+          </span>
         </span>
+        {voice.sampleUrl && (
+          <span
+            title={playingSample ? "Pause sample" : "Play the voice's reference clip"}
+            onClick={(e) => {
+              e.stopPropagation();
+              player.toggle(voice.sampleUrl);
+            }}
+            className={cx(
+              "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition",
+              playingSample
+                ? "border-gold/60 text-gold"
+                : "border-cream/15 text-cream/70 hover:border-gold/50 hover:text-gold",
+            )}
+          >
+            {playingSample ? <Pause size={11} /> : <Play size={11} className="ml-0.5" />}
+          </span>
+        )}
         <span
           onClick={(e) => {
             if (!onRemove) return;
@@ -321,10 +349,12 @@ function VoiceRow({
 
 function VoicesPanel({
   voiceId,
+  player,
   onSelect,
   onAdd,
 }: {
   voiceId: string;
+  player: AudioPlayer;
   onSelect: (id: string) => void;
   onAdd: () => void;
 }) {
@@ -347,6 +377,7 @@ function VoicesPanel({
             key={v.id}
             voice={v}
             active={v.id === voiceId}
+            player={player}
             onSelect={() => onSelect(v.id)}
             onRemove={
               v.source === "studio"
@@ -434,11 +465,51 @@ function CenterStage({
   const [mode, setMode] = useState<"speak" | "convert">("speak");
   const [engineId, setEngineId] = useState(lab.engines[0].id);
   const [engineOpen, setEngineOpen] = useState(false);
+  const [source, setSource] = useState<{ rel: string; name: string } | null>(null);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [vcSing, setVcSing] = useState(false);
+  const [vcSteps, setVcSteps] = useState("");
+  const [vcShift, setVcShift] = useState("");
+  // RVC singing: octave-correct the vocals into the target voice's register —
+  // "auto" measures the song against the voice ref, no gender assumptions
+  const [vcPitch, setVcPitch] = useState<"auto" | "none" | "octave-down" | "octave-up">("auto");
+  const [vcError, setVcError] = useState<string | null>(null);
+  // "auto" prefers the voice's trained RVC model (the better path) when it exists
+  const [vcEngineSel, setVcEngineSel] = useState<"auto" | "seedvc" | "rvc">("auto");
+  // DramaBox-only knobs (its delivery is prompt-driven — pace/emotion don't apply)
+  const [dbxSeed, setDbxSeed] = useState("42");
+  const [dbxCfg, setDbxCfg] = useState(2.5);
+  const [dbxStg, setDbxStg] = useState(1.5);
+  const [dbxDurMult, setDbxDurMult] = useState(0.9);
+  const [dbxGenDur, setDbxGenDur] = useState("");
+  const [dbxWatermark, setDbxWatermark] = useState(false);
+  const sourceInput = useRef<HTMLInputElement>(null);
 
   const engine = lab.engines.find((e) => e.id === engineId) ?? lab.engines[0];
   // player drives the clock/waveform only while the selected take is its clip
   const loaded = !!selectedTake?.url && player.src === selectedTake.url;
   const canGenerate = !lab.busy && !!script.trim();
+  const rvcReady = lab.rvcAvailable && !!voice.rvcTrained;
+  const vcEngine =
+    vcEngineSel !== "auto" ? vcEngineSel : rvcReady ? ("rvc" as const) : ("seedvc" as const);
+  const canConvert =
+    !lab.busy &&
+    !!source &&
+    voice.kind === "cloned" &&
+    (vcEngine === "rvc" ? rvcReady : lab.convertAvailable);
+  const vcStepsDefault = vcSing ? lab.convertStepsDefault.sing : lab.convertStepsDefault.speak;
+
+  const uploadSource = async (file: File) => {
+    setVcError(null);
+    try {
+      // full songs allowed — cap at 5 min to bound the payload
+      const sample = await sampleFromBlob(file, 300);
+      const rel = await lab.addSource(file.name.replace(/\.[^.]+$/, "") || "source", sample.wavBase64);
+      setSource({ rel, name: file.name });
+    } catch (err) {
+      setVcError(String((err as Error).message ?? err));
+    }
+  };
 
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
@@ -449,6 +520,25 @@ function CenterStage({
           <Chip tone={voice.kind === "cloned" ? "gold" : "muted"} className="text-[9px] uppercase tracking-wider">
             {voice.kind}
           </Chip>
+          {voice.kind === "cloned" && voice.rvcTrained && (
+            <Chip tone="gold" className="text-[9px] uppercase tracking-wider">
+              RVC ready
+            </Chip>
+          )}
+          {voice.kind === "cloned" && !voice.rvcTrained && voice.rvcTraining && (
+            <Chip tone="muted" className="text-[9px] uppercase tracking-wider">
+              Training RVC…
+            </Chip>
+          )}
+          {voice.kind === "cloned" && !voice.rvcTrained && !voice.rvcTraining && lab.rvcAvailable && (
+            <button
+              onClick={() => lab.trainRvc(voice.id)}
+              title={`Trains a dedicated RVC v2 model from this voice's reference clip on Replicate (${lab.rvcTrainEstimate}, billed to your Replicate account). Unlocks the higher-quality cloud conversion.`}
+              className="rounded-full border border-gold/35 px-2.5 py-1 text-[10px] font-medium text-gold transition hover:bg-gold/10"
+            >
+              Train RVC voice · {lab.rvcTrainEstimate}
+            </button>
+          )}
           <button className="text-fog/60 transition hover:text-gold">
             <Pencil size={13} />
           </button>
@@ -514,20 +604,224 @@ function CenterStage({
         </div>
       </div>
 
-      {/* script */}
-      <section>
-        <PanelLabel>Script</PanelLabel>
-        <textarea
-          value={script}
-          onChange={(e) => setScript(e.target.value.slice(0, lab.scriptMax))}
-          rows={3}
-          className="mt-2 w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 text-[12px] leading-relaxed text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
-          placeholder="Type the line to speak…"
-        />
-        <div className="mt-1 text-right text-[10px] tabular-nums text-fog/70">
-          {script.length} / {lab.scriptMax}
-        </div>
-      </section>
+      {/* script (speak) / conversion source (convert) */}
+      {mode === "speak" ? (
+        <section>
+          <PanelLabel>Script</PanelLabel>
+          <textarea
+            value={script}
+            onChange={(e) => setScript(e.target.value.slice(0, lab.scriptMax))}
+            rows={3}
+            className="mt-2 w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 text-[12px] leading-relaxed text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
+            placeholder="Type the line to speak…"
+          />
+          <div className="mt-1 text-right text-[10px] tabular-nums text-fog/70">
+            {script.length} / {lab.scriptMax}
+          </div>
+        </section>
+      ) : (
+        <section>
+          <PanelLabel hint>Voice-to-voice conversion (Seed-VC)</PanelLabel>
+          <div className="mt-2 space-y-2 rounded-xl border border-cream/10 bg-surface p-3">
+            <input
+              ref={sourceInput}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadSource(f);
+                e.target.value = "";
+              }}
+            />
+            {source ? (
+              <div className="flex items-center gap-2 rounded-lg border border-gold/30 bg-gold/6 px-3 py-2">
+                <Music4 size={13} className="shrink-0 text-gold/80" />
+                <span className="min-w-0 flex-1 truncate text-[12px] text-cream/90">
+                  {source.name}
+                </span>
+                <button
+                  title="Clear source"
+                  onClick={() => setSource(null)}
+                  className="text-fog/60 transition hover:text-red-400"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => sourceInput.current?.click()}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-dashed border-cream/15 py-2.5 text-[12px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                >
+                  <CloudUpload size={13} />
+                  {lab.addingSource ? "Uploading…" : "Upload source audio"}
+                </button>
+                <div className="relative flex-1">
+                  <button
+                    onClick={() => setSourceOpen((o) => !o)}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-cream/15 py-2.5 text-[12px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                  >
+                    <ListMusic size={13} /> From library
+                    <ChevronDown size={11} className={cx("transition-transform", sourceOpen && "rotate-180")} />
+                  </button>
+                  {sourceOpen && (
+                    <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-52 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
+                      {lab.convertSources.length === 0 && (
+                        <p className="px-3 py-2 text-[11px] text-fog">No audio in the library yet</p>
+                      )}
+                      {lab.convertSources.map((a) => (
+                        <button
+                          key={a.relPath}
+                          onClick={() => {
+                            setSource({ rel: a.relPath, name: a.name });
+                            setSourceOpen(false);
+                            if (a.kind === "music") setVcSing(true);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-cream/85 transition hover:bg-cream/5"
+                        >
+                          <span className="flex-1 truncate">{a.name}</span>
+                          <span className="text-[10px] text-fog">{a.kind}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
+              <div className="flex overflow-hidden rounded-lg border border-cream/10">
+                {(
+                  [
+                    { sing: false, label: "Speech" },
+                    { sing: true, label: "Singing" },
+                  ] as const
+                ).map(({ sing, label }) => (
+                  <button
+                    key={label}
+                    onClick={() => setVcSing(sing)}
+                    className={cx(
+                      "px-3 py-1.5 text-[11px] font-medium transition",
+                      vcSing === sing
+                        ? "bg-gold/12 text-gold"
+                        : "text-fog hover:bg-cream/5 hover:text-cream",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex overflow-hidden rounded-lg border border-cream/10">
+                {(
+                  [
+                    { id: "seedvc", label: "Seed-VC · local", enabled: lab.convertAvailable },
+                    { id: "rvc", label: "RVC · cloud", enabled: rvcReady },
+                  ] as const
+                ).map(({ id, label, enabled }) => (
+                  <button
+                    key={id}
+                    onClick={() => enabled && setVcEngineSel(id)}
+                    title={
+                      enabled
+                        ? id === "rvc"
+                          ? `Converts through ${voice.name}'s trained RVC model on Replicate (${lab.rvcConvertEstimate})`
+                          : "Zero-shot conversion on your GPU"
+                        : id === "rvc"
+                          ? lab.rvcAvailable
+                            ? "Train this voice's RVC model first"
+                            : "Add a Replicate token in Settings → AI Providers"
+                          : "Seed-VC engine not installed"
+                    }
+                    className={cx(
+                      "px-3 py-1.5 text-[11px] font-medium transition",
+                      vcEngine === id
+                        ? "bg-gold/12 text-gold"
+                        : enabled
+                          ? "text-fog hover:bg-cream/5 hover:text-cream"
+                          : "cursor-not-allowed text-fog/40",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {vcEngine === "seedvc" && (
+                <label className="flex items-center gap-1.5 text-[11px] text-fog">
+                  Steps
+                  <input
+                    type="number"
+                    value={vcSteps}
+                    min={4}
+                    max={100}
+                    placeholder={String(vcStepsDefault)}
+                    onChange={(e) => setVcSteps(e.target.value)}
+                    className="w-14 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+                  />
+                </label>
+              )}
+              {vcSing && vcEngine === "rvc" && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-fog">Pitch</span>
+                  <div className="flex overflow-hidden rounded-lg border border-cream/10">
+                    {(
+                      [
+                        { id: "auto", label: "Auto match", hint: "Measure the song and the voice, shift the vocals by whole octaves into its register" },
+                        { id: "none", label: "Keep", hint: "Convert at the song's original pitch" },
+                        { id: "octave-down", label: "Oct −", hint: "Force the vocals one octave down" },
+                        { id: "octave-up", label: "Oct +", hint: "Force the vocals one octave up" },
+                      ] as const
+                    ).map(({ id, label, hint }) => (
+                      <button
+                        key={id}
+                        onClick={() => setVcPitch(id)}
+                        title={hint}
+                        className={cx(
+                          "px-2.5 py-1.5 text-[11px] font-medium transition",
+                          vcPitch === id
+                            ? "bg-gold/12 text-gold"
+                            : "text-fog hover:bg-cream/5 hover:text-cream",
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {vcSing && (
+                <label className="flex items-center gap-1.5 text-[11px] text-fog">
+                  Semitones
+                  <input
+                    type="number"
+                    value={vcShift}
+                    min={-24}
+                    max={24}
+                    placeholder="0"
+                    onChange={(e) => setVcShift(e.target.value)}
+                    className="w-14 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+                  />
+                </label>
+              )}
+            </div>
+
+            {vcError && <p className="text-[10px] text-red-400">{vcError}</p>}
+            <p className="text-[10px] leading-relaxed text-fog/70">
+              {voice.kind !== "cloned"
+                ? "Pick a cloned voice on the left as the conversion target."
+                : vcEngine === "rvc"
+                  ? rvcReady
+                    ? `Converts through ${voice.name}'s trained RVC model on Replicate — the highest-quality path (${lab.rvcConvertEstimate} per run, billed to your Replicate account).`
+                    : lab.rvcAvailable
+                      ? `Train ${voice.name}'s RVC model first (button next to the voice name, ${lab.rvcTrainEstimate}).`
+                      : "Add a Replicate API token in Settings → AI Providers to unlock RVC."
+                  : !lab.convertAvailable
+                    ? "Seed-VC engine not installed — Settings → Engines → Install."
+                    : `Converts into ${voice.name}'s voice. Singing mode keeps melody and timing (full-mix conversion works best on sparse arrangements).`}
+            </p>
+          </div>
+        </section>
+      )}
 
       {/* clone from sample */}
       <section>
@@ -549,31 +843,110 @@ function CenterStage({
         </button>
       </section>
 
-      {/* pace + emotion */}
-      <div className="flex gap-6">
-        <Slider
-          label="Pace"
-          hint
-          value={pace}
-          display={`${pace.toFixed(2)}x`}
-          min={0.5}
-          max={1.5}
-          step={0.05}
-          ticks={["Slower", "Normal", "Faster"]}
-          onChange={setPace}
-        />
-        <Slider
-          label="Emotion"
-          hint
-          value={emotion}
-          display={emotion.toFixed(2)}
-          min={0}
-          max={1}
-          step={0.05}
-          ticks={["Calm", "Neutral", "Expressive"]}
-          onChange={setEmotion}
-        />
-      </div>
+      {/* pace + emotion (chatterbox/qwen) — or the DramaBox knob panel */}
+      {engineId !== "dramabox" ? (
+        <div className="flex gap-6">
+          <Slider
+            label="Pace"
+            hint
+            value={pace}
+            display={`${pace.toFixed(2)}x`}
+            min={0.5}
+            max={1.5}
+            step={0.05}
+            ticks={["Slower", "Normal", "Faster"]}
+            onChange={setPace}
+          />
+          <Slider
+            label="Emotion"
+            hint
+            value={emotion}
+            display={emotion.toFixed(2)}
+            min={0}
+            max={1}
+            step={0.05}
+            ticks={["Calm", "Neutral", "Expressive"]}
+            onChange={setEmotion}
+          />
+        </div>
+      ) : (
+        <section className="space-y-3">
+          <div className="flex gap-6">
+            <Slider
+              label="CFG"
+              hint
+              value={dbxCfg}
+              display={dbxCfg.toFixed(1)}
+              min={1}
+              max={6}
+              step={0.1}
+              ticks={["Loose", "Default", "Faithful"]}
+              onChange={setDbxCfg}
+            />
+            <Slider
+              label="STG"
+              hint
+              value={dbxStg}
+              display={dbxStg.toFixed(1)}
+              min={0}
+              max={4}
+              step={0.1}
+              ticks={["Off", "Default", "Strong"]}
+              onChange={setDbxStg}
+            />
+            <Slider
+              label="Speed"
+              hint
+              value={dbxDurMult}
+              display={`${dbxDurMult.toFixed(2)}x`}
+              min={0.5}
+              max={1.5}
+              step={0.05}
+              ticks={["Tighter", "Default", "Slower"]}
+              onChange={setDbxDurMult}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-1.5 text-[11px] text-fog">
+              Seed
+              <input
+                type="number"
+                value={dbxSeed}
+                min={0}
+                placeholder="42"
+                onChange={(e) => setDbxSeed(e.target.value)}
+                className="w-20 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-fog">
+              Duration (s)
+              <input
+                type="number"
+                value={dbxGenDur}
+                min={0}
+                max={300}
+                placeholder="auto"
+                onChange={(e) => setDbxGenDur(e.target.value)}
+                className="w-20 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-fog">
+              <input
+                type="checkbox"
+                checked={dbxWatermark}
+                onChange={(e) => setDbxWatermark(e.target.checked)}
+                className="accent-gold"
+              />
+              Watermark
+            </label>
+          </div>
+          <p className="text-[10px] leading-relaxed text-fog/70">
+            Write stage directions in [brackets], (parens) or *stars* — [laughs], (nervously),
+            *sighs*. They're performed, not spoken; everything else is read aloud. Keep the seed
+            fixed for a consistent timbre.
+          </p>
+        </section>
+      )}
 
       {/* speak / convert */}
       <section className="mt-auto">
@@ -602,7 +975,26 @@ function CenterStage({
             <p className="text-[11px] text-fog">Generate speech from script</p>
             <GoldButton
               onClick={() =>
-                canGenerate && lab.generate({ text: script, voice: voice.id, engine: engineId, pace, emotion })
+                canGenerate &&
+                lab.generate({
+                  text: script,
+                  voice: voice.id,
+                  engine: engineId,
+                  pace,
+                  emotion,
+                  ...(engineId === "dramabox"
+                    ? {
+                        seed: /^\d+$/.test(dbxSeed) ? Number(dbxSeed) : undefined,
+                        cfgScale: dbxCfg,
+                        stgScale: dbxStg,
+                        durationMultiplier: dbxDurMult,
+                        genDuration: /^\d+(\.\d+)?$/.test(dbxGenDur)
+                          ? Number(dbxGenDur)
+                          : undefined,
+                        watermark: dbxWatermark || undefined,
+                      }
+                    : {}),
+                })
               }
               className={cx(
                 "mt-2 w-full justify-center py-2.5",
@@ -617,14 +1009,33 @@ function CenterStage({
             <p className="flex items-center gap-1 text-[11px] text-fog">
               Voice-to-voice conversion <HelpCircle size={11} className="text-fog/50" />
             </p>
-            <button
+            <GoldButton
+              onClick={() =>
+                canConvert &&
+                source &&
+                lab.convert({
+                  source: source.rel,
+                  voice: voice.id,
+                  engine: vcEngine === "rvc" ? ("rvc" as const) : undefined,
+                  mode: vcSing ? "sing" : "speak",
+                  diffusionSteps: /^\d+$/.test(vcSteps)
+                    ? Math.min(100, Math.max(4, Number(vcSteps)))
+                    : vcStepsDefault,
+                  semitoneShift: /^-?\d+$/.test(vcShift)
+                    ? Math.min(24, Math.max(-24, Number(vcShift)))
+                    : 0,
+                  pitchMode: vcPitch,
+                })
+              }
               className={cx(
-                "mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-cream/15 py-2.5 text-[12px] text-cream/80 transition hover:border-gold/50 hover:text-gold",
+                "mt-2 w-full justify-center py-2.5",
                 mode !== "convert" && "opacity-40",
+                !canConvert && "pointer-events-none opacity-40",
               )}
             >
-              <Music4 size={13} /> Upload source audio
-            </button>
+              <ArrowRightLeft size={13} />{" "}
+              {lab.busy ? "Working…" : `Convert to ${voice.name}`}
+            </GoldButton>
           </div>
         </div>
       </section>
@@ -654,13 +1065,17 @@ function TakeRow({
   active,
   player,
   onSelect,
+  onDelete,
 }: {
   take: VoiceTake;
   active: boolean;
   player: AudioPlayer;
   onSelect: () => void;
+  /** absent while the take is still generating */
+  onDelete?: () => void;
 }) {
   const playing = player.playing && !!take.url && player.src === take.url;
+  const [armed, setArmed] = useState(false);
   return (
     <div
       onClick={onSelect}
@@ -697,18 +1112,41 @@ function TakeRow({
         <div className="flex shrink-0 flex-col items-end gap-1">
           {/* while generating, duration holds the job's stage text */}
           <span className="text-[11px] tabular-nums text-cream/80">{take.duration}</span>
-          <MoreHorizontal size={13} className="text-fog/60" />
+          {onDelete && (
+            <button
+              title={armed ? "Click again to delete from disk" : "Delete take"}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!armed) {
+                  setArmed(true);
+                  window.setTimeout(() => setArmed(false), 2500);
+                  return;
+                }
+                setArmed(false);
+                onDelete();
+              }}
+              className={cx(
+                "flex items-center gap-1 text-[10px] transition",
+                armed ? "text-[#e07a6b]" : "text-fog/60 hover:text-[#e07a6b]",
+              )}
+            >
+              <Trash2 size={12} />
+              {armed && "Sure?"}
+            </button>
+          )}
         </div>
       </div>
 
-      {active && (
+      {active && !take.generating && (
         <div className="mt-2.5 flex gap-1.5">
-          <GoldButton className="flex-1 justify-center py-2">
-            <Bookmark size={12} /> Save to assets
+          <GoldButton
+            onClick={() => {
+              if (take.url) void downloadAsset(take.url, `${take.label || "take"}.wav`);
+            }}
+            className={cx("flex-1 justify-center py-2", !take.url && "pointer-events-none opacity-40")}
+          >
+            <Bookmark size={12} /> Download
           </GoldButton>
-          <button className="flex w-9 items-center justify-center rounded-lg border border-cream/10 text-cream/70 transition hover:border-gold/40 hover:text-gold">
-            <Bookmark size={13} />
-          </button>
         </div>
       )}
     </div>
@@ -725,6 +1163,8 @@ function TakesRail({
   onSelect: (id: string) => void;
 }) {
   const lab = useVoiceLab();
+  // a failed TTS/convert used to vanish silently — surface it above the takes
+  const [dismissed, setDismissed] = useState<string[]>([]);
   return (
     <aside className="flex w-[316px] shrink-0 flex-col border-l hairline bg-[#0e0e10]">
       <div className="flex items-center justify-between p-4 pb-3">
@@ -734,6 +1174,32 @@ function TakesRail({
         </button>
       </div>
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3">
+        {lab.failures
+          .filter((f) => !dismissed.includes(f.id))
+          .map((f) => (
+            <div key={f.id} className="rounded-xl border border-red-500/30 bg-red-500/6 p-3">
+              <div className="flex items-center gap-2">
+                <CircleAlert size={14} className="shrink-0 text-red-400" />
+                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-cream">
+                  {f.title}
+                </span>
+                <button
+                  onClick={() => lab.retry(f.id)}
+                  className="shrink-0 rounded-lg border border-cream/15 px-2 py-1 text-[10px] text-cream/85 transition hover:border-gold/45 hover:text-gold"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={() => setDismissed((prev) => [...prev, f.id])}
+                  title="Dismiss"
+                  className="shrink-0 text-fog/60 transition hover:text-cream"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-red-300">{f.error}</p>
+            </div>
+          ))}
         {lab.takes.map((t) => (
           <TakeRow
             key={t.id}
@@ -741,6 +1207,15 @@ function TakesRail({
             active={t.id === selectedId}
             player={player}
             onSelect={() => onSelect(t.id)}
+            onDelete={
+              t.relPath
+                ? () => {
+                    void lab.removeTake(t.relPath!).catch((err) =>
+                      console.error("remove take:", err),
+                    );
+                  }
+                : undefined
+            }
           />
         ))}
       </div>
@@ -843,6 +1318,7 @@ export function VoiceLab() {
       <div className="flex min-h-0 flex-1">
         <VoicesPanel
           voiceId={voice.id}
+          player={player}
           onSelect={setVoiceId}
           onAdd={() => setClone({ open: true, file: null })}
         />

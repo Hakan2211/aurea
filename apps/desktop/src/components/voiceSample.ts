@@ -51,11 +51,11 @@ export interface VoiceSample {
   url: string;
 }
 
-export async function sampleFromBlob(blob: Blob): Promise<VoiceSample> {
+export async function sampleFromBlob(blob: Blob, maxSeconds = MAX_SECONDS): Promise<VoiceSample> {
   const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
   try {
     const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
-    const frames = Math.min(decoded.length, Math.floor(MAX_SECONDS * decoded.sampleRate));
+    const frames = Math.min(decoded.length, Math.floor(maxSeconds * decoded.sampleRate));
     if (frames < decoded.sampleRate) throw new Error("sample is shorter than a second");
     const mono = new Float32Array(frames);
     for (let ch = 0; ch < decoded.numberOfChannels; ch++) {

@@ -82,8 +82,7 @@ export class TtsAdapter implements EngineAdapter {
         if (!this.runtime.componentReady("chatterbox")) {
           throw new Error("Chatterbox engine not installed — Settings → Engines → Install");
         }
-        const weights = this.models.list().find((m) => m.id === "chatterbox-tts");
-        if (weights?.status.state !== "installed") {
+        if (!this.models.ready("chatterbox-tts")) {
           throw new Error("Chatterbox voice weights not installed — Settings → Models");
         }
         const ref = voiceRefCandidates(payload.voice, storage.dataRoot, paths.videofastDir).find(
