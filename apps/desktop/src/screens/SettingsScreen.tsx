@@ -98,6 +98,29 @@ function ToggleList({
 }
 
 /** Path field that commits on Enter/blur — the value is owned by studiod. */
+/** a single opt-in render knob — denser than ToggleList, which owns its card */
+function TuningToggle({
+  label,
+  hint,
+  on,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  on: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-4">
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-cream/85">{label}</div>
+        <div className="mt-0.5 text-[10px] leading-relaxed text-fog">{hint}</div>
+      </div>
+      <Toggle on={on} onChange={() => onChange(!on)} />
+    </div>
+  );
+}
+
 function PathInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const commit = () => {
@@ -597,6 +620,8 @@ function EnginesSection() {
     setMusicMode,
     videoMode,
     setVideoMode,
+    videoTuning,
+    setVideoTuning,
   } = useSettings();
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
   return (
@@ -716,6 +741,53 @@ function EnginesSection() {
                 {m}
               </button>
             ))}
+          </div>
+        </div>
+        <div className="mt-4 space-y-2 border-t border-cream/8 pt-3">
+          <div className="text-[11px] font-medium text-cream/90">Render tuning</div>
+          <p className="text-[10px] leading-relaxed text-fog">
+            Opt-in changes to how LTX renders. All of them need the KJNodes pack; defaults keep
+            the render identical to the verified pipeline.
+          </p>
+          <TuningToggle
+            label="Chunked feed-forward"
+            hint="On by default: ~23% faster on large shots (10s at 896×1152), neutral on small ones. No extra dependencies."
+            on={videoTuning.chunkFeedForward}
+            onChange={(on) => setVideoTuning({ chunkFeedForward: on })}
+          />
+          <TuningToggle
+            label="SageAttention"
+            hint="Faster INT8 attention — needs `pip install sageattention` in ComfyUI's python, or the render fails."
+            on={videoTuning.sageAttention}
+            onChange={(on) => setVideoTuning({ sageAttention: on })}
+          />
+          <TuningToggle
+            label="NAG (negative guidance)"
+            hint="Makes the negative prompt bite at cfg 1, where classifier-free guidance does nothing."
+            on={videoTuning.nag}
+            onChange={(on) => setVideoTuning({ nag: on })}
+          />
+          <div className="flex items-center gap-4 pt-1">
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] text-cream/85">Sampler</div>
+              <div className="mt-0.5 text-[10px] leading-relaxed text-fog">
+                cfg++ runs an ancestral base pass and a cfg++ refine — the official 2.3 pairing.
+              </div>
+            </div>
+            <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+              {(["euler", "cfg_pp"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setVideoTuning({ sampler: s })}
+                  className={cx(
+                    "px-3 py-1.5 transition",
+                    videoTuning.sampler === s ? "bg-gold text-ink" : "text-fog hover:text-cream",
+                  )}
+                >
+                  {s === "euler" ? "euler" : "cfg++"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

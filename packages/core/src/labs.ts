@@ -10,6 +10,8 @@ import type { EnqueueJobResolved, JobPayload } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
+import type { ComfyService } from "./comfy/service.js";
+import { probeVideoCapabilities, type VideoCapabilities } from "./comfy/capabilities.js";
 import { seedanceEstimate } from "./adapters/seedance.js";
 import { RVC_CONVERT_ESTIMATE, RVC_TRAIN_ESTIMATE, rvcModelPath } from "./adapters/replicate-rvc.js";
 
@@ -43,6 +45,7 @@ export class Labs {
     private settings: SettingsStore,
     private models: ModelManager,
     private runtime: EngineRuntime,
+    private comfy: ComfyService,
   ) {}
 
   private vf(): string | null {
@@ -349,6 +352,14 @@ export class Labs {
       promptMax: 1000,
       tip: "The start frame anchors identity — generate it in the Image lab first, then describe the motion here.",
     };
+  }
+
+  /** Which LTX features the video engine can reach right now (Director
+   * timeline, attention patches, multi-subject refs). Probed live against the
+   * ComfyUI that videoMode points at — never boots one to find out. */
+  videoCapabilities(): Promise<VideoCapabilities> {
+    const mode = this.settings.get().engines.videoMode;
+    return probeVideoCapabilities(this.comfy.idleUrl(mode), mode);
   }
 }
 

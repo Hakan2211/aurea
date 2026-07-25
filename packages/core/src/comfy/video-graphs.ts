@@ -12,6 +12,7 @@
 
 import type { ComfyGraph } from "./client.js";
 import { LTX23_AV_TEMPLATE } from "./ltx23-template.js";
+import { NO_TUNING, applyTuning, type RenderTuning, type TuningAnchors } from "./tuning.js";
 
 /* node ids in the exported template */
 const N = {
@@ -34,6 +35,21 @@ const N = {
   /* the Gemma prompt-enhance branch (managed strips it) */
   enhance: ["340:345", "340:346", "340:347", "340:348", "340:349"],
 } as const;
+
+/** Where render tuning splices into this template: after the distilled LoRA,
+ * feeding both CFGGuiders. The enhance branch's LoraLoader (340:345) keeps the
+ * untuned model on purpose — it runs Gemma text generation, not diffusion.
+ * Base pass = 8-step sigmas (340:308) → sampler 340:298; refine = 340:288. */
+const TUNING_ANCHORS: TuningAnchors = {
+  source: [N.distillLora, 0],
+  consumers: [
+    ["340:290", "model"],
+    ["340:315", "model"],
+  ],
+  negative: ["340:314", 0],
+  baseSampler: "340:298",
+  refineSampler: "340:288",
+};
 
 export interface LtxModelNames {
   checkpoint: string;
@@ -72,6 +88,8 @@ export interface VideoGraphSpec {
   seed: number;
   /** managed loader names; null = external install's conventional names */
   models: LtxModelNames | null;
+  /** optional attention/sampler tuning; omitted = the verified default render */
+  tuning?: RenderTuning;
 }
 
 export function ltx23Graph(spec: VideoGraphSpec): ComfyGraph {
@@ -117,6 +135,7 @@ export function ltx23Graph(spec: VideoGraphSpec): ComfyGraph {
     input(N.positive).text = [N.prompt, 0];
   }
 
+  applyTuning(graph, spec.tuning ?? NO_TUNING, TUNING_ANCHORS);
   return graph;
 }
 

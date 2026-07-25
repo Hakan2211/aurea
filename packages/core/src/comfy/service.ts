@@ -77,6 +77,16 @@ export class ComfyService {
     return this.proc !== null;
   }
 
+  /** URL of a ComfyUI we could talk to *right now*, without starting anything:
+   * the configured one in external mode, the managed sidecar only while it is
+   * already resident. Capability probes use this — booting a sidecar to answer
+   * "which nodes do you have?" would cost 3 minutes and a GPU. */
+  idleUrl(mode?: "managed" | "external"): string | null {
+    const { engines } = this.settings.get();
+    if ((mode ?? engines.comfyMode) === "external") return engines.comfyUrl.replace(/\/$/, "");
+    return this.baseUrl;
+  }
+
   /** resident, idle, and not mid-boot — safe for the scheduler to evict */
   canEvict(): boolean {
     return this.proc !== null && this.busy === 0 && !this.starting;

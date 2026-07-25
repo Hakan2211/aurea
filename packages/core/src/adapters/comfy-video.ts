@@ -21,11 +21,27 @@ import type { ComfyService } from "../comfy/service.js";
 import type { ModelManager } from "../models/manager.js";
 import { ComfyClient } from "../comfy/client.js";
 import { LTX23_MANAGED, ltx23Graph, silentWav } from "../comfy/video-graphs.js";
+import { resolveTuning } from "../comfy/capabilities.js";
 import { jobRunDir } from "./proc.js";
 import type { JobResources } from "../scheduler.js";
 import type { AdapterProgress, AdapterRun, EngineAdapter } from "./types.js";
 
 const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
+
+/** The render tuning knobs fail inside ComfyUI, far from the toggle that
+ * turned them on — SageAttention in particular needs a pip package the node
+ * pack does not install. Translate those into something the user can act on. */
+function explainTuningFailure(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/sageattention/i.test(message)) {
+    return new Error(
+      "SageAttention is on (Settings → Engines → Render tuning) but the `sageattention` " +
+        "package is not installed in the python that runs your ComfyUI. Install it there, " +
+        "or turn the toggle off.",
+    );
+  }
+  return err instanceof Error ? err : new Error(message);
+}
 
 const LOADERS = new Set([
   "CheckpointLoaderSimple",
@@ -106,6 +122,7 @@ export class ComfyVideoAdapter implements EngineAdapter {
           // our flat store only when the copy is ours; a linked root (or an
           // external ComfyUI) carries the template's conventional names
           models: this.models.managedCopy("ltx-23-22b-fp8") ? LTX23_MANAGED : null,
+          tuning: await resolveTuning(client, this.settings.get().engines.videoTuning),
         });
         if (!audio) {
           // repatch the placeholder LoadAudio to the staged silence
@@ -137,6 +154,8 @@ export class ComfyVideoAdapter implements EngineAdapter {
             if (pass <= 1) report({ progress: 6 + frac * 49 });
             else report({ progress: 55 + frac * 30 });
           },
+        }).catch((err: unknown) => {
+          throw explainTuningFailure(err);
         });
 
         const video = files.find((f) => VIDEO_EXT.test(f.filename));

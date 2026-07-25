@@ -151,7 +151,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     },
     scheduler,
   });
-  const labs = new Labs(settings, models, runtime);
+  const labs = new Labs(settings, models, runtime, comfy);
   // the Director's tools call back into this very server; coords resolve after listen
   let selfCoords: { port: number; token: string } | null = null;
   const director = new DirectorService(settings, () => {

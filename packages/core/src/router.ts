@@ -235,6 +235,7 @@ export const appRouter = router({
     }),
     video: router({
       catalog: procedure.query(({ ctx }) => ctx.labs.videoCatalog()),
+      capabilities: procedure.query(({ ctx }) => ctx.labs.videoCapabilities()),
       generate: procedure.input(videoGenerateSchema).mutation(({ ctx, input }) => {
         const { project, ...payload } = input;
         return generate(ctx, { type: "video", ...payload }, project);

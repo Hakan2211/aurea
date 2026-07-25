@@ -29,6 +29,11 @@ export interface ComfyOutputImage {
 export type ComfyOutputFile = ComfyOutputImage;
 
 const HISTORY_POLL_MS = 2_000;
+/** how long a node-presence answer stays good (see hasNode) */
+const CAPABILITY_TTL_MS = 60_000;
+/** "<baseUrl>::<class_type>" → last answer; module-scoped so every client
+ * instance against the same ComfyUI shares it */
+const nodeCache = new Map<string, { present: boolean; until: number }>();
 
 export class ComfyClient {
   constructor(private baseUrl: string) {
@@ -180,6 +185,61 @@ export class ComfyClient {
       }
     }
     return files;
+  }
+
+  /** Is this node class registered on the running ComfyUI? Uses the
+   * per-class endpoint (/object_info/<class> answers {} for unknown classes)
+   * because the full /object_info is multi-megabyte. Answers are cached per
+   * URL for CAPABILITY_TTL_MS so a screen paint costs at most one request per
+   * node — short enough that installing a pack and restarting Comfy shows up
+   * without restarting studiod. */
+  async hasNode(classType: string, timeoutMs = 5_000): Promise<boolean> {
+    const key = `${this.baseUrl}::${classType}`;
+    const hit = nodeCache.get(key);
+    if (hit && Date.now() < hit.until) return hit.present;
+    let present = false;
+    try {
+      const res = await fetch(`${this.baseUrl}/object_info/${encodeURIComponent(classType)}`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok) {
+        const body = (await res.json()) as Record<string, unknown>;
+        present = Object.keys(body).length > 0;
+      }
+    } catch {
+      return false; // unreachable — don't cache, the server may still be booting
+    }
+    nodeCache.set(key, { present, until: Date.now() + CAPABILITY_TTL_MS });
+    return present;
+  }
+
+  /** true only when every class is registered (probed concurrently) */
+  async hasNodes(classTypes: string[], timeoutMs = 5_000): Promise<boolean> {
+    const found = await Promise.all(classTypes.map((c) => this.hasNode(c, timeoutMs)));
+    return found.every(Boolean);
+  }
+
+  /** The options a node offers for a combo input — e.g. every lora filename
+   * via LoraLoaderModelOnly.lora_name. Lets a capability probe see which
+   * weights an external ComfyUI has without reaching into its disk. */
+  async comboOptions(classType: string, inputName: string, timeoutMs = 5_000): Promise<string[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/object_info/${encodeURIComponent(classType)}`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) return [];
+      const body = (await res.json()) as Record<
+        string,
+        { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }
+      >;
+      const input = body[classType]?.input;
+      const spec = input?.required?.[inputName] ?? input?.optional?.[inputName];
+      // combo inputs arrive as [["a.safetensors", "b.safetensors"], {…opts}]
+      const options = Array.isArray(spec) ? spec[0] : undefined;
+      return Array.isArray(options) ? options.filter((o): o is string => typeof o === "string") : [];
+    } catch {
+      return [];
+    }
   }
 
   /** Stage a file into ComfyUI's input tree (multipart /upload/image — the

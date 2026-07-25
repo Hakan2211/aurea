@@ -412,6 +412,31 @@ export const settingsSchema = z.object({
        * to external); "external" = queue on comfyUrl, whose install already
        * has the LTX weights under their conventional names */
       videoMode: z.enum(["managed", "external"]).default("external"),
+      /** LTX render tuning — all opt-in, all needing comfyui-kjnodes. Defaults
+       * keep the render byte-identical to the verified pipeline. */
+      videoTuning: z
+        .object({
+          /** Chunk each transformer block's feed-forward. Pure torch, no extra
+           * dependencies, and measured on a 3090 Ti (2026-07-25, seed 424242):
+           * neutral on a 5s 704×896 shot (83.9s vs 83.6s, inside the ±20% run
+           * noise) but a clear win once the shot is big — 10s at 896×1152 ran
+           * 173.8s vs 224.6s over three alternating pairs, with the chunked
+           * arm's WORST run still beating the plain arm's best. It only bites
+           * when activations strain the allocator, which is exactly where
+           * Director shots live, so it defaults on. The adapter drops it
+           * automatically when KJNodes isn't installed. */
+          chunkFeedForward: z.boolean().default(true),
+          /** INT8 attention kernels — needs `sageattention` installed in
+           * ComfyUI's python, or the render fails at the patch node */
+          sageAttention: z.boolean().default(false),
+          /** "cfg_pp" = ancestral base + cfg++ refine (the official 2.3
+           * pairing); "euler" = what this pipeline has always shipped */
+          sampler: z.enum(["euler", "cfg_pp"]).default("euler"),
+          /** normalized attention guidance — makes the negative prompt bite
+           * at cfg 1, where classifier-free guidance does nothing */
+          nag: z.boolean().default(false),
+        })
+        .default({}),
       /** python.exe of the Chatterbox TTS venv (character voices) */
       chatterboxPython: z.string().nullable().default(null),
       /** python.exe of the Qwen3-TTS venv (narrator voices) */
@@ -456,7 +481,20 @@ export type Settings = z.infer<typeof settingsSchema>;
 export const settingsUpdateSchema = z.object({
   storage: settingsSchema.shape.storage.partial().optional(),
   paths: settingsSchema.shape.paths.partial().optional(),
-  engines: settingsSchema.shape.engines.removeDefault().partial().optional(),
+  engines: settingsSchema.shape.engines
+    .removeDefault()
+    .partial()
+    // videoTuning is a nested object: accept a partial so toggling one knob
+    // doesn't silently reset the others to their schema defaults (the store
+    // merges it onto the current value)
+    .extend({
+      videoTuning: settingsSchema.shape.engines
+        .removeDefault()
+        .shape.videoTuning.removeDefault()
+        .partial()
+        .optional(),
+    })
+    .optional(),
   providers: settingsSchema.shape.providers.partial().optional(),
   general: settingsSchema.shape.general.partial().optional(),
   advanced: settingsSchema.shape.advanced.partial().optional(),
@@ -1206,6 +1244,7 @@ export const runtimeComponentIdSchema = z.enum([
   "python",
   "comfy",
   "gguf",
+  "kjnodes",
   "chatterbox",
   "acestep",
   "seedvc",

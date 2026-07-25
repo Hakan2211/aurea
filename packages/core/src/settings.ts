@@ -90,7 +90,12 @@ export class SettingsStore extends EventEmitter {
       ...this.settings,
       storage: { ...this.settings.storage, ...patch.storage },
       paths: { ...this.settings.paths, ...patch.paths },
-      engines: { ...this.settings.engines, ...patch.engines },
+      engines: {
+        ...this.settings.engines,
+        ...patch.engines,
+        // nested object — merge so a one-knob patch keeps the other knobs
+        videoTuning: { ...this.settings.engines.videoTuning, ...patch.engines?.videoTuning },
+      },
       providers: { ...this.settings.providers, ...patch.providers },
       general: { ...this.settings.general, ...patch.general },
       advanced: { ...this.settings.advanced, ...patch.advanced },

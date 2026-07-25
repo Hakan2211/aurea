@@ -1106,6 +1106,10 @@ export function useAssetLibrary() {
 
 export function useVideoLab() {
   const catalog = trpc.labs.video.catalog.useQuery().data;
+  // which LTX features this machine's ComfyUI can reach — gates Director mode
+  const capabilities = trpc.labs.video.capabilities.useQuery(undefined, {
+    staleTime: 60_000,
+  }).data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("video");
   const allAssets = trpc.library.list.useQuery().data?.assets;
   const images = allAssets?.filter((a) => a.kind === "image");
@@ -1132,6 +1136,9 @@ export function useVideoLab() {
       retry: (id: string) => retryJob({ id }),
       /** a rejected enqueue — surfaced under the Generate button */
       error: mutation.error?.message ?? null,
+      /** null while the probe is in flight; the panel treats that as "unknown"
+       * rather than "unsupported" so Director doesn't flicker off on load */
+      capabilities: capabilities ?? null,
     };
     if (!catalog || !kindAssets) {
       return {
@@ -1223,7 +1230,7 @@ export function useVideoLab() {
       canGenerate: !!frame,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
+  }, [catalog, capabilities, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
 }
 
 /* ---------- studio: bible + production (LIVE) ---------- */
@@ -1515,6 +1522,15 @@ export function useSettings() {
       videoMode: live?.engines.videoMode ?? "external",
       setVideoMode(mode: Settings["engines"]["videoMode"]) {
         update({ engines: { videoMode: mode } });
+      },
+      videoTuning: live?.engines.videoTuning ?? {
+        chunkFeedForward: true,
+        sageAttention: false,
+        sampler: "euler" as const,
+        nag: false,
+      },
+      setVideoTuning(patch: Partial<Settings["engines"]["videoTuning"]>) {
+        update({ engines: { videoTuning: patch } });
       },
       setDefaultProvider(id: Settings["providers"]["default"]) {
         update({ providers: { default: id } });

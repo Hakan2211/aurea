@@ -18,7 +18,8 @@
     "mcp:on": "node scripts/mcp-toggle.mjs on",
     "mcp:off": "node scripts/mcp-toggle.mjs off",
     "mcp:status": "node scripts/mcp-toggle.mjs status",
-    "typecheck:core": "tsc --noEmit -p packages/core"
+    "typecheck:core": "tsc --noEmit -p packages/core",
+    "test:core": "tsx --test packages/core/src/**/*.test.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

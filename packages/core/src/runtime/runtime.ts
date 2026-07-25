@@ -213,7 +213,32 @@ export const GGUF_NODE_PIN: CustomNodeSpec = {
   },
 };
 
-export const CUSTOM_NODES: CustomNodeSpec[] = [GGUF_NODE_PIN];
+/** KJNodes carries the LTX 2.3 render tuning (chunked feed-forward, the
+ * SageAttention patches, NAG) plus VAELoaderKJ. Pinned to the commit the
+ * external install was verified against on 2026-07-25. Its __init__ imports
+ * every node module eagerly with no try/except, so the full requirements list
+ * has to go in — one missing dep and the whole pack fails to register. */
+export const KJNODES_PIN: CustomNodeSpec = {
+  id: "kjnodes",
+  name: "KJNodes (LTX tuning)",
+  version: "1.4.7-e27a505",
+  url: "https://github.com/kijai/ComfyUI-KJNodes/archive/e27a505b3ba6ce42687fe00500deda103d9d6071.zip",
+  dir: "ComfyUI-KJNodes",
+  marker: "nodes/ltxv_nodes.py",
+  pipArgs: [
+    "pillow>=10.3.0",
+    "color-matcher",
+    "matplotlib",
+    "mss",
+    "opencv-python-headless",
+  ],
+  check: {
+    code: "import color_matcher, matplotlib, mss, cv2; print('kjnodes deps ok')",
+    expect: /kjnodes deps ok/,
+  },
+};
+
+export const CUSTOM_NODES: CustomNodeSpec[] = [GGUF_NODE_PIN, KJNODES_PIN];
 
 const TORCH_INDEX = "https://download.pytorch.org/whl/cu128";
 /** rough site-packages + wheel cache footprint of the torch + requirements
