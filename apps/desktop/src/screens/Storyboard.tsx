@@ -10,6 +10,7 @@ import { useNavigate } from "react-router";
 import {
   Check,
   ChevronDown,
+  Clapperboard,
   Images,
   LayoutPanelTop,
   RotateCcw,
@@ -30,6 +31,7 @@ import {
 } from "@aurea/shared";
 import { Chip, GhostButton, GoldButton, Progress, cx } from "@/components/ui";
 import { useBible, useProduction, useStoryboard } from "@/hooks";
+import type { ShotPrefill } from "@/screens/VideoLab";
 
 const STATUS_TONE: Record<ShotStatus, "muted" | "violet" | "gold" | "ember" | "sage"> = {
   draft: "muted",
@@ -391,6 +393,37 @@ function BoardInspector({
       seed: seed.trim() ? Number(seed.trim()) : undefined,
     });
 
+  /* Send to Director: the core composes the shot into a Director timeline and
+   * the Video lab opens with it loaded — nothing is enqueued here, because the
+   * beats and the audio lane are worth a look before a ten-minute render. */
+  const navigate = useNavigate();
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const sendToDirector = async () => {
+    setSending(true);
+    setSendError(null);
+    try {
+      const spec = await board.composeShot(shot.id);
+      const state: { shot: ShotPrefill } = {
+        shot: {
+          shotId: shot.id,
+          title: `${code} · ${shot.title || "Untitled"}`,
+          sentAt: Date.now(),
+          prompt: spec.prompt,
+          startFrame: spec.startFrame,
+          durationSec: spec.durationSec,
+          director: spec.director,
+          notes: spec.notes,
+        },
+      };
+      navigate("/video", { state });
+    } catch (err) {
+      setSendError(String((err as Error).message));
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <aside className="flex w-[340px] shrink-0 flex-col border-l hairline">
       <header className="flex items-center justify-between border-b hairline px-3 py-2.5">
@@ -584,6 +617,12 @@ function BoardInspector({
           </p>
         )}
 
+        {sendError && (
+          <p className="rounded-lg border border-ember/40 bg-ember/10 px-2.5 py-2 text-[10px] leading-relaxed text-[#e0968b]">
+            {sendError}
+          </p>
+        )}
+
         <GoldButton
           className="w-full justify-center"
           disabled={refs.length === 0 || board.pending || jobs.length > 0}
@@ -592,6 +631,21 @@ function BoardInspector({
           <Sparkles size={13} />
           {shot.keyframes.length > 0 ? "Generate more takes" : "Generate keyframes"}
         </GoldButton>
+
+        {/* the boarded shot's next step: shoot it */}
+        <GhostButton
+          className="w-full justify-center"
+          disabled={shot.keyframes.length === 0 || sending}
+          onClick={sendToDirector}
+          title={
+            shot.keyframes.length === 0
+              ? "Board the shot first — the selected keyframe is the take's first frame"
+              : "Compose this shot into a Director timeline and open it in the Video lab"
+          }
+        >
+          <Clapperboard size={13} />
+          {sending ? "Composing…" : "Send to Director"}
+        </GhostButton>
       </div>
     </aside>
   );

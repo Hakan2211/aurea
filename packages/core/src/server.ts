@@ -96,15 +96,24 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     importOutput: (job) => {
       const imported = projects.importJobOutputDetailed(job);
       // storyboard delivery: finished stills become keyframes on their shot
-      const board = job.payload?.type === "image" ? job.payload.board : undefined;
+      const board =
+        job.payload?.type === "image" || job.payload?.type === "video"
+          ? job.payload.board
+          : undefined;
       if (board && job.project && imported.files.length) {
         const projectId = job.project.replace(/^\//, "").split("/")[0];
         const dataRoot = settings.get().storage.dataRoot;
         const rels = imported.files.map((f) => path.relative(dataRoot, f).split(path.sep).join("/"));
         try {
-          studio.attachKeyframes(projectId, board.shotId, rels);
+          // stills become the shot's keyframes; a Director take becomes one of
+          // its video takes (same delivery, opposite ends of the pipeline)
+          if (job.payload?.type === "video") {
+            studio.attachTake(projectId, board.shotId, rels, job.payload.engine);
+          } else {
+            studio.attachKeyframes(projectId, board.shotId, rels);
+          }
         } catch {
-          // the shot was deleted while the render ran — the stills stay in the library
+          // the shot was deleted while the render ran — the files stay in the library
         }
       }
       // sung vocals in a cloned voice: chain a singing-conversion job on the

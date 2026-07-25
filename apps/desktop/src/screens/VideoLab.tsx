@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import {
   AudioLines,
   Check,
@@ -11,6 +11,7 @@ import {
   Download,
   FileText,
   HelpCircle,
+  LayoutPanelTop,
   Lightbulb,
   ListPlus,
   Maximize2,
@@ -34,7 +35,12 @@ import {
   Waypoints,
   X,
 } from "lucide-react";
-import { composeZonePrompt, sheetLayout, type DirectorRef } from "@aurea/shared";
+import {
+  composeZonePrompt,
+  sheetLayout,
+  type DirectorRef,
+  type DirectorSpec,
+} from "@aurea/shared";
 import { downloadAsset, useJobs, useLikes, useRemoveAssets, useSendToTimeline, useVideoLab } from "@/hooks";
 import type { VideoStage, VideoTake } from "@/data/sample";
 import { Chip, GoldButton, Progress, cx } from "@/components/ui";
@@ -157,10 +163,33 @@ interface RetakeDraft {
   regenerateAudio: boolean;
 }
 
+/** A shot arriving from the Storyboard's "Send to Director": the composed spec
+ * (studio.board.shotSpec), plus what the panel needs to say where it came from
+ * and where the finished take goes back to. `sentAt` is what makes a second
+ * send of the same shot re-seed the panel. */
+export interface ShotPrefill {
+  shotId: string;
+  title: string;
+  sentAt: number;
+  prompt: string;
+  startFrame: string | null;
+  durationSec: number;
+  director: DirectorSpec;
+  notes: string[];
+}
+
 /** Shortest retake worth queuing. Under a latent frame (stride 8, so a third of
  * a second at 24fps) the freed window rounds away to nothing and the render
  * comes back as the original. */
 const MIN_RETAKE_SEC = 8 / 24;
+
+/** The catalog offers a fixed ladder of lengths, so a composed shot lands on
+ * the shortest one that still holds it (never shorter — a cut-off last line is
+ * worse than a second of air). */
+function snapDuration(sec: number, ladder: string[], fallback: string): string {
+  const fits = ladder.filter((d) => parseInt(d) >= sec);
+  return fits[0] ?? ladder[ladder.length - 1] ?? fallback;
+}
 
 const fmtTime = (sec: number) => `${sec.toFixed(1)}s`;
 const clampSec = (sec: number, max: number) =>
@@ -905,55 +934,83 @@ function PickerHeading({ children }: { children: React.ReactNode }) {
 /* ---------- left panel: params ---------- */
 
 function ParamsPanel({
+  prefill,
   retake,
   setRetake,
 }: {
+  /** a shot sent over from the Storyboard; the panel is keyed on it, so every
+   * piece of state below can seed from it in its initializer */
+  prefill: ShotPrefill | null;
   retake: RetakeDraft | null;
   setRetake: (r: RetakeDraft | null) => void;
 }) {
   const lab = useVideoLab();
-  const [prompt, setPrompt] = useState(lab.prompt);
+  const [prompt, setPrompt] = useState(prefill?.prompt ?? lab.prompt);
   const [engineId, setEngineId] = useState(lab.engines[0].id);
-  const [duration, setDuration] = useState(lab.duration);
+  const [duration, setDuration] = useState(() =>
+    prefill ? snapDuration(prefill.durationSec, lab.durations, lab.duration) : lab.duration,
+  );
   const [resolution, setResolution] = useState(lab.resolution);
   const [motion, setMotion] = useState(lab.motionStrength);
   /** null = the default (newest library still); set by the Replace picker */
-  const [frameRel, setFrameRel] = useState<string | null>(null);
+  const [frameRel, setFrameRel] = useState<string | null>(prefill?.startFrame ?? null);
   /** null = closed. "start" retargets the start frame; a number retargets that
    * Director keyframe — one picker, two jobs. */
   const [picking, setPicking] = useState<"start" | number | null>(null);
   const pickerOpen = picking !== null;
   /** Shot Director: extra keyframes beyond the start frame, in seconds */
-  const [directorOn, setDirectorOn] = useState(false);
-  const [keyframes, setKeyframes] = useState<DirectorKeyframe[]>([]);
+  const [directorOn, setDirectorOn] = useState(!!prefill);
+  const [keyframes, setKeyframes] = useState<DirectorKeyframe[]>(
+    // keyframe 0 IS the start frame here, and the panel puts it back at submit
+    prefill ? prefill.director.keyframes.filter((k) => k.atSec > 0) : [],
+  );
   /** prompt beats — the shot's phrasing over time; empty = one prompt throughout */
-  const [beats, setBeats] = useState<DirectorBeat[]>([]);
+  const [beats, setBeats] = useState<DirectorBeat[]>(
+    // a composed beat arrives already expanded (the storyboard resolved the
+    // camera ids), so its pickers stay empty rather than expanding it twice
+    prefill
+      ? prefill.director.promptZones.map((z) => ({
+          text: z.prompt,
+          lengthSec: z.lengthSec,
+          shot: z.shot,
+          move: z.move,
+        }))
+      : [],
+  );
   /** how hard a beat boundary lands: 0.001 a cut, 0.5 a dissolve */
-  const [blend, setBlend] = useState(0.001);
+  const [blend, setBlend] = useState(prefill?.director.epsilon ?? 0.001);
   /** optional dialogue take — switches the render to ia2v lip-sync */
   const [audioRel, setAudioRel] = useState<string | null>(null);
   const [audioOpen, setAudioOpen] = useState(false);
   /** Director audio lane: voice takes locked to timecodes. The simple path's
    * single take is the one-segment case of this, so turning the Director on
    * carries it onto the lane rather than dropping it. */
-  const [lane, setLane] = useState<DirectorTake[]>([]);
+  const [lane, setLane] = useState<DirectorTake[]>(prefill?.director.audio ?? []);
   /** generate sound in the gaps between takes rather than leaving them silent */
-  const [roomTone, setRoomTone] = useState(true);
+  const [roomTone, setRoomTone] = useState(prefill?.director.inpaintAudio ?? true);
   /** an existing clip's movement, transferred onto this shot */
   const [motionRef, setMotionRef] = useState<DirectorMotion | null>(null);
   /** the cast this shot must stay on-model for — composed into one reference
    * sheet at render time */
-  const [castRefs, setCastRefs] = useState<DirectorRef[]>([]);
-  const [refStrength, setRefStrength] = useState(1);
+  const [castRefs, setCastRefs] = useState<DirectorRef[]>(prefill?.director.refs ?? []);
+  const [refStrength, setRefStrength] = useState(prefill?.director.refStrength ?? 1);
 
   // the dead-core fallback shape predates the live fields — narrow before use
   const chosen = frameRel ? lab.frames.find((f) => f.relPath === frameRel) : undefined;
   const defaultRel = "relPath" in lab.startFrame ? lab.startFrame.relPath : undefined;
-  const frameName = chosen?.name ?? lab.startFrame.name;
-  const frameMeta = chosen?.meta ?? lab.startFrame.meta;
+  /* A named frame is the frame, whether or not the panel's roll (the newest 60
+   * stills) happens to hold it — a shot sent over from the board can point at a
+   * keyframe boarded weeks ago. Falling back to `chosen` here would silently
+   * render the newest image in the library instead of the one that was asked
+   * for, so only the thumbnail degrades, never the render. */
+  const effectiveRel = frameRel ?? defaultRel;
+  const frameName = chosen?.name ?? (frameRel ? (frameRel.split("/").pop() ?? frameRel) : lab.startFrame.name);
+  const frameMeta = chosen?.meta ?? (frameRel ? "start frame" : lab.startFrame.meta);
   const frameSwatch = chosen?.swatch ?? lab.startFrame.swatch;
-  const startFrameUrl = chosen?.url ?? ("url" in lab.startFrame ? lab.startFrame.url : undefined);
-  const effectiveRel = chosen?.relPath ?? defaultRel;
+  const startFrameUrl =
+    chosen?.url ??
+    lab.stillUrl(frameRel) ??
+    (frameRel ? undefined : "url" in lab.startFrame ? lab.startFrame.url : undefined);
   const canGenerate = "canGenerate" in lab ? !!effectiveRel : false;
   const audioName = audioRel
     ? (lab.audioSources.find((a) => a.relPath === audioRel)?.name ?? audioRel)
@@ -1035,6 +1092,7 @@ function ParamsPanel({
   const director = retakeReady
     ? {
         globalPrompt: prompt,
+        negativePrompt: prefill?.director.negativePrompt,
         fps: 24,
         keyframes: [],
         promptZones: [],
@@ -1053,6 +1111,8 @@ function ParamsPanel({
     : directorOn && !directorBlocked && effectiveRel
       ? {
           globalPrompt: prompt,
+          // a shot from the storyboard carries the show's own negative prompt
+          negativePrompt: prefill?.director.negativePrompt,
           fps: 24,
           // the start frame is always keyframe 0; the rest ride on top
           keyframes: [
@@ -1075,6 +1135,28 @@ function ParamsPanel({
   return (
     <aside className="flex w-[280px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+        {/* a shot sent over from the board — what was composed for you, and
+            what the composer couldn't do on its own */}
+        {prefill && (
+          <section className="rounded-xl border border-gold/25 bg-gold/5 px-2.5 py-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-gold">
+              <LayoutPanelTop size={11} /> From the storyboard
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-cream/90">
+              {prefill.title || prefill.shotId}
+            </p>
+            <p className="mt-0.5 text-[9px] leading-relaxed text-fog/80">
+              Beats, cast and the audio lane are composed below — edit anything. The finished take
+              lands back on the shot.
+            </p>
+            {prefill.notes.map((n) => (
+              <p key={n} className="mt-1.5 text-[9px] leading-relaxed text-gold/75">
+                {n}
+              </p>
+            ))}
+          </section>
+        )}
+
         {/* 1 · prompt */}
         <section>
           <div className="flex items-center justify-between">
@@ -1711,6 +1793,9 @@ function ParamsPanel({
               // have just taken off the lane
               audio: director ? undefined : (audioRel ?? undefined),
               director,
+              // a shot sent over from the board delivers its take back to the
+              // board; a retake is a fix for a clip, not a new take of a shot
+              board: prefill && !retake ? { shotId: prefill.shotId } : undefined,
             })
           }
           className={cx(
@@ -2495,10 +2580,19 @@ export function VideoLab() {
   /** a retake is marked on the preview player and rendered from the params
    * panel, so the draft lives here, above both */
   const [retake, setRetake] = useState<RetakeDraft | null>(null);
+  /* "Send to Director" navigates here with the composed shot. Keying the panel
+   * on it re-seeds every control from the spec — including a second send of the
+   * same shot, once its voice takes exist and the timing is no longer a guess. */
+  const prefill = (useLocation().state as { shot?: ShotPrefill } | null)?.shot ?? null;
 
   return (
     <div className="flex h-full">
-      <ParamsPanel retake={retake} setRetake={setRetake} />
+      <ParamsPanel
+        key={prefill ? `${prefill.shotId}:${prefill.sentAt}` : "free"}
+        prefill={prefill}
+        retake={retake}
+        setRetake={setRetake}
+      />
       <PreviewPanel
         takeId={takeId}
         onSelect={setTakeId}

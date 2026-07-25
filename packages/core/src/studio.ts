@@ -202,6 +202,31 @@ export class StudioStore extends EventEmitter {
     return { shot, production: this.updateProduction(project, prod) };
   }
 
+  /** Shot Director delivery, the video half of attachKeyframes: a finished
+   * take lands on its shot and carries a boarded shot to "generated". Later
+   * statuses (synced, approved) are a human's call and stay put — a re-render
+   * of an approved shot must not quietly un-approve it. */
+  attachTake(
+    project: string,
+    shotId: string,
+    assets: string[],
+    engine: string,
+  ): { shot: Shot; production: Production } {
+    const prod = this.getProduction(project);
+    const shot = this.allShots(prod).find((s) => s.id === shotId);
+    if (!shot) throw new Error(`unknown shot "${shotId}"`);
+    const fresh = assets.map((asset) => ({
+      id: randomUUID().slice(0, 8),
+      asset,
+      engine,
+      label: "",
+    }));
+    shot.videoTakes.push(...fresh);
+    if (!shot.selectedTake && fresh.length) shot.selectedTake = fresh[0].id;
+    if (shot.status === "draft" || shot.status === "boarded") shot.status = "generated";
+    return { shot, production: this.updateProduction(project, prod) };
+  }
+
   removeEpisode(project: string, id: string): Production {
     const prod = this.getProduction(project);
     for (const season of prod.seasons) {

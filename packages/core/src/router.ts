@@ -41,6 +41,8 @@ import {
   productionUpdateShotSchema,
   composeKeyframePrompt,
   resolveKeyframeRefs,
+  shotComposeSchema,
+  shotRenderSchema,
   storyboardGenerateSchema,
   studioSeedSchema,
   ttsGenerateSchema,
@@ -59,6 +61,7 @@ import {
   type Vram,
 } from "@aurea/shared";
 import { describeExport, sequenceEnd } from "./adapters/ffmpeg-export.js";
+import { composeShotFromBoard } from "./shot-director.js";
 import { labEnqueue } from "./labs.js";
 import { removeAssets, scanLibrary } from "./library.js";
 import { procedure, router, type Context } from "./trpc.js";
@@ -469,6 +472,47 @@ export const appRouter = router({
               board: { shotId: shot.id },
             },
           });
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      /** Shot Director: a boarded shot → a renderable Director spec (beats
+       * from the script lines, cast refs from the bible, the audio lane from
+       * measured voice takes). Read-only — the Storyboard's "Send to Director"
+       * previews it, and shot_from_storyboard renders the same thing. */
+      shotSpec: procedure.input(shotComposeSchema).query(async ({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          return await composeShotFromBoard(ctx, input);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+
+      /** …and render it. The composed spec rides back with the job so callers
+       * can see what was assumed without recomposing. */
+      renderShot: procedure.input(shotRenderSchema).mutation(async ({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        try {
+          const composed = await composeShotFromBoard(ctx, input);
+          if (!composed.startFrame) {
+            throw new Error(
+              `shot "${input.shotId}" has no keyframe — board it first (generate_keyframe)`,
+            );
+          }
+          const payload: JobPayload = {
+            type: "video",
+            ...composed.videoInput,
+            resolution: input.resolution,
+            seed: input.seed,
+          };
+          return {
+            job: generate(ctx, payload, input.project),
+            spec: composed.director,
+            durationSec: composed.durationSec,
+            notes: composed.notes,
+          };
         } catch (err) {
           throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
         }

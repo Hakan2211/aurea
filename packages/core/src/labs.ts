@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { EnqueueJobResolved, JobPayload } from "@aurea/shared";
+import { MAX_SHEET_REFS, OPEN_AIR_WARN_SEC, type EnqueueJobResolved, type JobPayload } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
@@ -351,6 +351,31 @@ export class Labs {
       resolutions: ["704 × 896 (portrait)", "896 × 704 (landscape)", "1280 × 720 (16:9)"],
       promptMax: 1000,
       tip: "The start frame anchors identity — generate it in the Image lab first, then describe the motion here.",
+      /** The Shot Director surface, stated rather than discovered: what a spec
+       * may hold (the schema's own ceilings) and the handful of rules that are
+       * measured facts about LTX, not preferences. Whether this machine can
+       * actually run a Director shot is a separate, live question —
+       * labs.video.capabilities probes the node pack and the weights. */
+      director: {
+        limits: {
+          keyframes: 24,
+          promptZones: 12,
+          audio: 12,
+          refs: MAX_SHEET_REFS,
+          durationSecMax: 30,
+          fpsMax: 60,
+          /** past this much open air between voice takes, LTX improvises */
+          openAirWarnSec: OPEN_AIR_WARN_SEC,
+        },
+        rules: [
+          "Every time is in seconds; the builder converts to frames and snaps the clip to LTX's 8n+1 rule.",
+          "Prompt beats tile the shot in order from 0s — the first beat starts the take and the last one stretches to the end.",
+          "A beat must NAME the character who speaks and say the others keep their mouths closed; that is what localises lip-sync when two characters share a frame.",
+          `Keep open air between voice takes under ~${OPEN_AIR_WARN_SEC}s — LTX fills a longer gap with invented dialogue, not room tone (measured 2026-07-25).`,
+          "Cast references and a motion reference share the single IC-LoRA slot: a shot can carry one or the other, never both.",
+          "A retake re-renders one window of a finished take in place. It ignores keyframes, beats and the audio lane, takes its length/rate/size from the source, opens up to 8 frames early, and fixes artefacts rather than choreography.",
+        ],
+      },
     };
   }
 

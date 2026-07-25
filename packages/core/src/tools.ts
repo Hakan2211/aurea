@@ -10,6 +10,7 @@ import { z } from "zod";
 import {
   bibleCharacterSchema,
   bibleLocationSchema,
+  directorSpecSchema,
   episodePatchSchema,
   imageDeckGenerateSchema,
   imageGenerateSchema,
@@ -22,6 +23,7 @@ import {
   scenePatchSchema,
   settingsUpdateSchema,
   shotPatchSchema,
+  shotRenderSchema,
   storyboardGenerateSchema,
   timelineAddClipSchema,
   timelineClipPatchSchema,
@@ -260,11 +262,23 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         "(aspects, presets, voices, styles, resolutions).",
       schema: { lab: z.enum(["image", "voice", "music", "video"]) },
       handler: async ({ lab }) => {
+        if (lab === "video") {
+          // the video lab has a second, live question — which LTX features the
+          // ComfyUI it points at can actually reach. Report it beside the
+          // catalog so an agent never has to guess whether generate_shot works.
+          const [catalog, capabilities] = await Promise.all([
+            api.labs.video.catalog.query(),
+            api.labs.video.capabilities.query(),
+          ]);
+          return json({
+            ...catalog,
+            director: { ...catalog.director, capabilities },
+          });
+        }
         const catalogs = {
           image: () => api.labs.image.catalog.query(),
           voice: () => api.labs.voice.catalog.query(),
           music: () => api.labs.music.catalog.query(),
-          video: () => api.labs.video.catalog.query(),
         };
         return json(await catalogs[lab]());
       },
@@ -339,6 +353,112 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       handler: async ({ project, ...payload }) => {
         await requireProject(project);
         return json(await api.labs.video.generate.mutate({ ...payload, project }));
+      },
+    }),
+
+    defineTool({
+      name: "generate_shot",
+      title: "Generate a Director shot",
+      description:
+        "Enqueue ONE continuous LTX take composed as a timeline — the Shot Director. Use this " +
+        "instead of generate_video whenever a shot needs more than a single prompt and a start " +
+        "frame: keyframes pinned at times (a start frame at 0s, an end frame the take morphs " +
+        "into), prompt beats that change the action or camera mid-take, cloned-voice takes locked " +
+        "to timecodes so each character lip-syncs their own line, a motion reference, or cast " +
+        "references that hold an ensemble on-model. Everything is authored in SECONDS. Read " +
+        "lab_catalog('video').director first: it carries the limits, the rules that are measured " +
+        "facts about LTX (beat wording, gap length, the one IC-LoRA slot), and whether this " +
+        "machine can run Director shots at all. Returns the job — wait_for_job for the mp4.",
+      schema: withProjectDefault(
+        videoGenerateSchema.omit({ project: true }).extend({
+          director: directorSpecSchema.describe(
+            "the shot timeline — keyframes, promptZones, audio, refs, motion (see lab_catalog)",
+          ),
+        }),
+      ),
+      handler: async ({ project, ...payload }) => {
+        await requireProject(project);
+        return json(await api.labs.video.generate.mutate({ ...payload, project }));
+      },
+    }),
+
+    defineTool({
+      name: "shot_retake",
+      title: "Retake part of a shot",
+      description:
+        "Re-render ONE window of a finished take in place, against the take itself — the fix for " +
+        "a two-second artefact that would otherwise cost a whole re-roll. Everything outside the " +
+        "window is the original's own pixels, so the cut is seamless. Keyframes, prompt beats and " +
+        "voice takes do not apply, and the length, frame rate and size come from the source. Two " +
+        "things to know: the window opens up to 8 frames EARLY (mark the bad bit, not its first " +
+        "frame), and a retake fixes artefacts, not choreography — asked for a new action inside a " +
+        "window pinned at both ends, LTX declines it. Returns the job.",
+      schema: {
+        project: z.string().default("playground"),
+        source: z.string().min(1).describe("library relPath of the finished take (list_assets)"),
+        atSec: z.number().min(0).describe("start of the window to re-render"),
+        lengthSec: z.number().min(0.3).max(30).describe("how much of it to re-render"),
+        prompt: z.string().min(1).describe("what the window should show instead"),
+        shotPrompt: z
+          .string()
+          .optional()
+          .describe("what the whole take is of — anchors the frames outside the window"),
+        strength: z
+          .number()
+          .min(0)
+          .max(1)
+          .default(1)
+          .describe("how far from the original the window may go"),
+        regenerateAudio: z
+          .boolean()
+          .default(false)
+          .describe("re-render the window's SOUND too; off keeps the original line under it"),
+        seed: z.number().int().optional(),
+      },
+      handler: async ({ project, source, atSec, lengthSec, prompt, shotPrompt, strength, regenerateAudio, seed }) => {
+        await requireProject(project);
+        const anchor = shotPrompt?.trim() || prompt;
+        return json(
+          await api.labs.video.generate.mutate({
+            project,
+            prompt: anchor,
+            seed,
+            director: {
+              globalPrompt: anchor,
+              retake: { source, atSec, lengthSec, prompt, strength, regenerateAudio },
+              inpaintAudio: regenerateAudio,
+            },
+          }),
+        );
+      },
+    }),
+
+    defineTool({
+      name: "shot_from_storyboard",
+      title: "Render a boarded shot",
+      description:
+        "Compose a boarded shot into a Director timeline and render it — the storyboard's own " +
+        "answer to 'now shoot it'. The spec is composed from what the show already knows: the " +
+        "selected keyframe becomes the start frame, each script line becomes a prompt beat that " +
+        "names its speaker (and tells everyone else to keep their mouth shut, which is what " +
+        "localises lip-sync), the bible's characters become cast references when this machine can " +
+        "render them, and voice takes are laid on the audio lane at measured lengths. Pass takes " +
+        "to say which wav speaks which character's line — generate_speech them first — and atSec " +
+        "to place one exactly. dryRun returns the composed spec without rendering, which is the " +
+        "way to check the beats before spending a render. The finished mp4 attaches to the shot " +
+        "and moves it to 'generated'. Returns the job plus the spec and any composition notes.",
+      schema: {
+        ...shotRenderSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe("compose and return the spec without enqueueing a render"),
+      },
+      handler: async ({ project, dryRun, ...input }) => {
+        await requireProject(project);
+        if (dryRun) return json(await api.studio.board.shotSpec.query({ ...input, project }));
+        return json(await api.studio.board.renderShot.mutate({ ...input, project }));
       },
     }),
 

@@ -1144,6 +1144,13 @@ export function useVideoLab() {
         .filter((a) => a.kind === "audio")
         .slice(0, 30)
         .map((a) => ({ relPath: a.relPath, name: a.name, url: media ? media(a.url) : undefined })),
+      /** The preview url of ANY library still by relPath — the panel's roll is
+       * the newest 60 images, and a shot sent from the storyboard may name a
+       * keyframe older than that. */
+      stillUrl: (rel: string | null | undefined) => {
+        const a = rel ? (allAssets ?? []).find((x) => x.relPath === rel) : undefined;
+        return a && media ? media(a.url) : undefined;
+      },
       /** every video take in the library — what a motion reference is picked
        * from. Wider than `takes` (which is this lab's newest eight) because the
        * clip whose movement you want is often an old one, or an import. */
@@ -1467,8 +1474,14 @@ export function useStoryboard() {
       active,
       /** queued/running board jobs for one shot */
       shotJobs: (shotId: string) => active.filter((j) => j.payload.board?.shotId === shotId),
+      /** A boarded shot as a Director timeline — beats composed from the script
+       * lines, cast refs from the bible, voice takes measured and placed. The
+       * core does the composing (it can measure a take and probe the engine),
+       * so "Send to Director" and the shot_from_storyboard tool hand the Video
+       * lab the same shot. */
+      composeShot: (shotId: string) => utils.studio.board.shotSpec.fetch({ project, shotId }),
     };
-  }, [project, jobsData, mutate, mutation.isPending, mutation.error]);
+  }, [project, jobsData, utils, mutate, mutation.isPending, mutation.error]);
 }
 
 /* sample toggle ids ↔ persisted settings fields */

@@ -324,6 +324,10 @@ export const videoPayloadSchema = z.object({
    * has always done; present = the Director graph (external ComfyUI with the
    * WhatDreamsCost pack, or managed once its node spec is installed). */
   director: directorSpecSchema.optional(),
+  /** storyboard delivery: attach the finished take to this shot's videoTakes
+   * (and move a boarded shot to "generated"), the way a finished keyframe
+   * attaches to its shot's keyframes */
+  board: z.object({ shotId: z.string().min(1) }).optional(),
 });
 
 export const jobPayloadSchema = z.discriminatedUnion("type", [
@@ -977,6 +981,45 @@ export const storyboardGenerateSchema = z.object({
 });
 export type StoryboardGenerate = z.input<typeof storyboardGenerateSchema>;
 
+/* ---------- storyboard → Shot Director ----------
+ * Composing a boarded shot into a Director timeline (composeShotSpec) needs
+ * two facts the production documents don't hold: how long each voice take runs,
+ * and whether this machine can render cast references. studiod supplies both,
+ * so callers only say which shot — and, optionally, which takes speak which
+ * lines and where they land. */
+
+export const shotTakeInputSchema = z.object({
+  /** library relPath of a voice take (list_assets / generate_speech output) */
+  take: z.string().min(1),
+  /** bible character id whose line it is; null = fall on the next open line */
+  character: z.string().nullable().default(null),
+  /** exact placement; omitted = laid out in script order after the lead-in */
+  atSec: z.number().min(0).optional(),
+});
+
+export const shotComposeSchema = z.object({
+  project: z.string().min(1),
+  shotId: z.string().min(1),
+  /** omitted = long enough to hold the placed takes */
+  durationSec: z.number().min(1).max(30).optional(),
+  /** the shot's own voTakes are used when this is empty */
+  takes: z.array(shotTakeInputSchema).max(12).default([]),
+  gapSec: z.number().min(0).max(10).optional(),
+  leadInSec: z.number().min(0).max(10).optional(),
+  /** override the anchor prompt (defaults to the shot's composed prompt) */
+  prompt: z.string().optional(),
+  /** force cast references on/off; omitted = on when the engine supports them */
+  refs: z.boolean().optional(),
+});
+export type ShotCompose = z.input<typeof shotComposeSchema>;
+
+/** compose + enqueue, in one call */
+export const shotRenderSchema = shotComposeSchema.extend({
+  resolution: z.string().default("896 × 704 (landscape)"),
+  seed: z.number().int().optional(),
+});
+export type ShotRender = z.input<typeof shotRenderSchema>;
+
 /** studio.onUpdate payload — which document changed for which project, so
  * open screens can converge on Director/MCP edits without polling */
 export const studioUpdateEventSchema = z.object({
@@ -1409,3 +1452,4 @@ export type PortFile = z.infer<typeof portFileSchema>;
 export * from "./storyboard.js";
 export * from "./cinematographyBank.js";
 export * from "./refSheet.js";
+export * from "./shotSpec.js";

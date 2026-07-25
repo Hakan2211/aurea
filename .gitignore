@@ -4,3 +4,6 @@ dist-electron/
 release/
 *.local
 .DS_Store
+
+# CDP check screenshots (v5/v6/v7 panel checks write these into the repo root)
+v[0-9]-*.png

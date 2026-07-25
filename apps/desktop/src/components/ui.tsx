@@ -87,17 +87,25 @@ export function GhostButton({
   children,
   className,
   onClick,
+  disabled,
+  title,
 }: {
   children: ReactNode;
   className?: string;
   onClick?: () => void;
+  disabled?: boolean;
+  /** why the button is disabled, or what it does — hover text */
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       className={cx(
         "inline-flex items-center gap-1.5 rounded-lg border border-cream/10 px-3 py-1.5",
         "text-[12px] font-medium text-cream/80 transition hover:border-gold/40 hover:text-gold",
+        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cream/10 disabled:hover:text-cream/80",
         className,
       )}
     >
