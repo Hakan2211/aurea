@@ -16,7 +16,13 @@ CAPTION    = os.environ["AUREA_CAPTION"]
 DURATION   = int(os.environ.get("AUREA_DURATION", "30"))
 VOCALS     = os.environ.get("AUREA_VOCALS") == "1"
 LYRICS     = os.environ.get("AUREA_LYRICS", "")
-SEED       = int(os.environ.get("AUREA_SEED", "7203"))
+SEED       = int(os.environ.get("AUREA_SEED", "-1"))  # -1 = random each run
+BPM        = os.environ.get("AUREA_BPM", "")          # "" = auto estimation
+LANGUAGE   = os.environ.get("AUREA_LANGUAGE", "unknown")
+KEYSCALE   = os.environ.get("AUREA_KEYSCALE", "")     # "" = auto detection
+TIMESIG    = os.environ.get("AUREA_TIMESIG", "")      # "" = auto detection
+STEPS      = int(os.environ.get("AUREA_STEPS", "8"))  # turbo default
+SHIFT      = float(os.environ.get("AUREA_SHIFT", "3.0"))
 OUT_WAV    = os.environ["AUREA_OUT_WAV"]
 
 LM_MODEL   = "acestep-5Hz-lm-1.7B"                  # the LM the registry ships
@@ -53,10 +59,17 @@ kwargs = dict(
     caption=CAPTION,
     instrumental=not VOCALS,
     duration=DURATION,
-    inference_steps=8,
-    shift=3.0,
+    inference_steps=STEPS,
+    shift=SHIFT,
     seed=SEED,
+    vocal_language=LANGUAGE,
 )
+if BPM:
+    kwargs["bpm"] = int(BPM)
+if KEYSCALE:
+    kwargs["keyscale"] = KEYSCALE
+if TIMESIG:
+    kwargs["timesignature"] = TIMESIG
 if not VOCALS:
     kwargs["lyrics"] = "[Instrumental]"
 elif LYRICS:

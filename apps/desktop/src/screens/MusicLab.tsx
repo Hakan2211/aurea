@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   AudioWaveform,
-  Bookmark,
   Check,
   ChevronDown,
+  CircleAlert,
+  Dices,
+  Download,
   Drum,
   Guitar,
   HelpCircle,
   ListFilter,
+  ListPlus,
   Mic,
   MoreVertical,
   Music2,
@@ -16,13 +19,14 @@ import {
   Plus,
   Sparkles,
   Star,
+  Trash2,
   X,
 } from "lucide-react";
-import { useMusicLab } from "@/hooks";
+import { downloadAsset, useMusicLab, useSendToTimeline } from "@/hooks";
 import type { MusicStem, MusicTrack } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Waveform, cx } from "@/components/ui";
 import { SendToTimeline } from "@/components/SendToTimeline";
-import { useAudioPlayer, type AudioPlayer } from "@/components/useAudioPlayer";
+import { useAudioPlayer, useMediaDuration, type AudioPlayer } from "@/components/useAudioPlayer";
 
 /* Music lab — UI-Design/Music lab.jpg. Create panel (description → style →
  * duration → arrangement → cloned-voice vocals) over ACE-Step local; generated
@@ -59,19 +63,51 @@ function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
 
 /* ---------- left panel: create ---------- */
 
+const LYRIC_TAGS = ["[verse]", "[chorus]", "[bridge]"];
+const DUET_SKELETON = "[verse - male]\n\n[verse - female]\n\n[chorus - both]\n";
+/** default: keep ACE-Step's own generated singing — the Seed-VC pass is opt-in */
+const NO_CONVERSION = { id: "", label: "No conversion — ACE-Step vocals" };
+
 function CreatePanel() {
   const lab = useMusicLab();
   const [description, setDescription] = useState(lab.description);
   const [styles, setStyles] = useState(lab.styles);
+  const [styleOpen, setStyleOpen] = useState(false);
+  const [customStyle, setCustomStyle] = useState("");
   const [duration, setDuration] = useState(lab.durationSec);
   const [arrangement, setArrangement] = useState(lab.arrangement);
-  const [voiceId, setVoiceId] = useState(lab.singVoices[0]?.id ?? "");
+  const [voiceId, setVoiceId] = useState("");
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [lyrics, setLyrics] = useState("");
+  const [duet, setDuet] = useState(false);
+  const [advOpen, setAdvOpen] = useState(false);
+  const [bpm, setBpm] = useState("");
+  const [seed, setSeed] = useState("");
+  const [language, setLanguage] = useState("unknown");
+  const [keyscale, setKeyscale] = useState("");
+  const [timesig, setTimesig] = useState("");
+  const [steps, setSteps] = useState("");
+  const [shiftVal, setShiftVal] = useState("");
+  const lyricsRef = useRef<HTMLTextAreaElement>(null);
 
-  const voice = lab.singVoices.find((v) => v.id === voiceId) ?? lab.singVoices[0];
+  const voice =
+    (voiceId ? lab.singVoices.find((v) => v.id === voiceId) : undefined) ?? NO_CONVERSION;
   const canGenerate = !lab.busy && !!description.trim();
   const fmt = (sec: number) =>
     `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
+  const num = (s: string) => (s.trim() !== "" && !Number.isNaN(Number(s)) ? Number(s) : undefined);
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+  const insertTag = (tag: string) => {
+    const el = lyricsRef.current;
+    const pos = el?.selectionStart ?? lyrics.length;
+    const next = `${lyrics.slice(0, pos)}${tag}\n${lyrics.slice(pos)}`.slice(0, lab.lyricsMax);
+    setLyrics(next);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(pos + tag.length + 1, pos + tag.length + 1);
+    });
+  };
 
   return (
     <aside className="flex w-[288px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
@@ -113,16 +149,59 @@ function CreatePanel() {
                 </button>
               </Chip>
             ))}
-            <button
-              onClick={() => {
-                const next = lab.styleLibrary.find((t) => !styles.includes(t));
-                if (next) setStyles((prev) => [...prev, next]);
-              }}
-              className="inline-flex items-center gap-1 rounded-full border border-dashed border-cream/20 px-2 py-0.5 text-[11px] text-fog transition hover:border-gold/50 hover:text-gold"
-            >
-              <Plus size={10} /> Add style
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setStyleOpen((o) => !o)}
+                className={cx(
+                  "inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[11px] transition",
+                  styleOpen
+                    ? "border-gold/60 text-gold"
+                    : "border-cream/20 text-fog hover:border-gold/50 hover:text-gold",
+                )}
+              >
+                <Plus size={10} /> Add style
+              </button>
+              {styleOpen && (
+                <div className="absolute left-0 top-full z-10 mt-1 w-60 rounded-xl border border-cream/12 bg-raised p-2 shadow-xl">
+                  <input
+                    autoFocus
+                    value={customStyle}
+                    onChange={(e) => setCustomStyle(e.target.value.slice(0, 40))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const tag = customStyle.trim();
+                        if (tag && !styles.includes(tag)) setStyles((prev) => [...prev, tag]);
+                        setCustomStyle("");
+                        setStyleOpen(false);
+                      }
+                      if (e.key === "Escape") setStyleOpen(false);
+                    }}
+                    placeholder="Type any style + Enter…"
+                    className="w-full rounded-lg border border-cream/10 bg-surface px-2 py-1.5 text-[11px] text-cream placeholder:text-fog/60 focus:border-gold/40 focus:outline-none"
+                  />
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {lab.styleLibrary
+                      .filter((t) => !styles.includes(t))
+                      .map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => {
+                            setStyles((prev) => [...prev, t]);
+                            setStyleOpen(false);
+                          }}
+                          className="rounded-full border border-cream/12 px-2 py-0.5 text-[10px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
+          <p className="mt-1.5 text-[10px] text-fog/70">
+            Styles also work written straight into the description.
+          </p>
         </section>
 
         {/* 3 · duration */}
@@ -170,11 +249,56 @@ function CreatePanel() {
               </button>
             ))}
           </div>
+          {arrangement === "vocals" && (
+            <div className="mt-2 flex items-center justify-between rounded-xl border border-cream/10 bg-surface px-3 py-2">
+              <span className="text-[11px] text-cream/85">Duet (two singers)</span>
+              <Toggle
+                on={duet}
+                onChange={() => {
+                  setDuet((d) => {
+                    if (!d && !lyrics.trim()) setLyrics(DUET_SKELETON);
+                    return !d;
+                  });
+                }}
+              />
+            </div>
+          )}
         </section>
 
-        {/* 5 · cloned voice */}
+        {/* 5 · lyrics (vocals only) */}
+        {arrangement === "vocals" && (
+          <section>
+            <PanelLabel hint>5 · Lyrics</PanelLabel>
+            <textarea
+              ref={lyricsRef}
+              value={lyrics}
+              onChange={(e) => setLyrics(e.target.value.slice(0, lab.lyricsMax))}
+              rows={7}
+              className="mt-2 w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 font-mono text-[11px] leading-relaxed text-cream placeholder:font-sans placeholder:text-fog focus:border-gold/40 focus:outline-none"
+              placeholder="Leave blank and the model writes the lyrics…"
+            />
+            <div className="mt-1 flex items-center justify-between">
+              <div className="flex gap-1">
+                {LYRIC_TAGS.map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => insertTag(t)}
+                    className="rounded-md border border-cream/10 px-1.5 py-0.5 font-mono text-[10px] text-fog transition hover:border-gold/40 hover:text-gold"
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[10px] tabular-nums text-fog/70">
+                {lyrics.length} / {lab.lyricsMax}
+              </span>
+            </div>
+          </section>
+        )}
+
+        {/* 6 · cloned voice */}
         <section className={cx(arrangement !== "vocals" && "opacity-40")}>
-          <PanelLabel hint>5 · Sing in cloned voice</PanelLabel>
+          <PanelLabel hint>6 · Cloned voice (optional)</PanelLabel>
           <div className="relative mt-2">
             <button
               onClick={() => arrangement === "vocals" && setVoiceOpen((o) => !o)}
@@ -189,7 +313,7 @@ function CreatePanel() {
             </button>
             {voiceOpen && (
               <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-cream/12 bg-raised shadow-xl">
-                {lab.singVoices.map((v) => (
+                {[NO_CONVERSION, ...lab.singVoices].map((v) => (
                   <button
                     key={v.id}
                     onClick={() => {
@@ -209,8 +333,127 @@ function CreatePanel() {
             )}
           </div>
           <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
-            Vocals render neutral, then convert to the character voice.
+            {voiceId
+              ? "Vocals render neutral, then convert to the character voice (Seed-VC pass)."
+              : "ACE-Step sings with its own generated voice — no conversion pass."}
           </p>
+        </section>
+
+        {/* advanced */}
+        <section>
+          <button
+            onClick={() => setAdvOpen((o) => !o)}
+            className="flex w-full items-center justify-between text-[10px] font-semibold uppercase tracking-[0.14em] text-fog transition hover:text-cream"
+          >
+            Advanced settings
+            <ChevronDown size={13} className={cx("transition-transform", advOpen && "rotate-180")} />
+          </button>
+          {advOpen && (
+            <div className="mt-2.5 space-y-2.5 rounded-xl bg-surface p-3">
+              <label className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-fog">BPM</span>
+                <input
+                  type="number"
+                  value={bpm}
+                  min={lab.bpmRange[0]}
+                  max={lab.bpmRange[1]}
+                  placeholder="auto"
+                  onChange={(e) => setBpm(e.target.value)}
+                  className="w-20 rounded-lg border border-cream/10 bg-raised px-2 py-1.5 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-fog">Seed</span>
+                <span className="flex items-center gap-1.5">
+                  <input
+                    value={seed}
+                    placeholder="random"
+                    onChange={(e) => setSeed(e.target.value.replace(/\D/g, ""))}
+                    className="w-24 rounded-lg border border-cream/10 bg-raised px-2 py-1.5 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+                  />
+                  <button
+                    title="Random seed"
+                    onClick={() => setSeed(String(Math.floor(Math.random() * 1_000_000_000)))}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-cream/10 text-cream/70 transition hover:border-gold/40 hover:text-gold"
+                  >
+                    <Dices size={12} />
+                  </button>
+                </span>
+              </label>
+              <label className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-fog">Language</span>
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="w-24 rounded-lg border border-cream/10 bg-raised px-2 py-1.5 text-[11px] text-cream focus:border-gold/40 focus:outline-none"
+                >
+                  {lab.languages.map((l) => (
+                    <option key={l} value={l}>
+                      {l === "unknown" ? "auto" : l}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-fog">Key / scale</span>
+                <input
+                  value={keyscale}
+                  placeholder={'auto — e.g. "C Major"'}
+                  onChange={(e) => setKeyscale(e.target.value.slice(0, 20))}
+                  className="w-32 rounded-lg border border-cream/10 bg-raised px-2 py-1.5 text-right text-[11px] text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+                />
+              </label>
+              <div className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-fog">Time signature</span>
+                <div className="flex gap-1">
+                  {["", ...lab.timesignatures].map((t) => (
+                    <button
+                      key={t || "auto"}
+                      onClick={() => setTimesig(t)}
+                      className={cx(
+                        "rounded-md border px-2 py-1 text-[10px] tabular-nums transition",
+                        timesig === t
+                          ? "border-gold/60 bg-gold/12 text-gold"
+                          : "border-cream/10 text-cream/70 hover:border-gold/35",
+                      )}
+                    >
+                      {t ? `${t}/4` : "auto"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-fog">Steps</span>
+                <input
+                  type="number"
+                  value={steps}
+                  min={1}
+                  max={100}
+                  placeholder={String(lab.stepsDefault)}
+                  onChange={(e) => setSteps(e.target.value)}
+                  className="w-20 rounded-lg border border-cream/10 bg-raised px-2 py-1.5 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="text-fog">Shift</span>
+                <input
+                  type="number"
+                  value={shiftVal}
+                  min={0.5}
+                  max={10}
+                  step={0.5}
+                  placeholder={String(lab.shiftDefault)}
+                  onChange={(e) => setShiftVal(e.target.value)}
+                  className="w-20 rounded-lg border border-cream/10 bg-raised px-2 py-1.5 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
+                />
+              </label>
+              {lab.metadataManagedOnly && (
+                <p className="pt-1 text-[10px] leading-relaxed text-fog/70">
+                  Language, key and time signature apply in managed engine mode only.
+                </p>
+              )}
+            </div>
+          )}
         </section>
       </div>
 
@@ -223,7 +466,20 @@ function CreatePanel() {
               styles,
               durationSec: duration,
               arrangement,
-              singVoice: arrangement === "vocals" ? voiceId : undefined,
+              singVoice: arrangement === "vocals" && voiceId ? voiceId : undefined,
+              lyrics: arrangement === "vocals" && lyrics.trim() ? lyrics : undefined,
+              duet: arrangement === "vocals" && duet,
+              bpm:
+                num(bpm) !== undefined
+                  ? clamp(Math.round(num(bpm)!), lab.bpmRange[0], lab.bpmRange[1])
+                  : undefined,
+              seed: /^\d+$/.test(seed) ? Number(seed) : undefined,
+              language,
+              keyscale: keyscale.trim() || undefined,
+              timesignature: (timesig || undefined) as "2" | "3" | "4" | "6" | undefined,
+              steps:
+                num(steps) !== undefined ? clamp(Math.round(num(steps)!), 1, 100) : undefined,
+              shift: num(shiftVal) !== undefined ? clamp(num(shiftVal)!, 0.5, 10) : undefined,
             })
           }
           className={cx(
@@ -246,12 +502,25 @@ function TrackCard({
   active,
   player,
   onSelect,
+  onCancel,
+  onDelete,
+  onSend,
+  sending,
 }: {
   track: MusicTrack;
   active: boolean;
   player: AudioPlayer;
   onSelect: () => void;
+  /** stop the job behind a generating card */
+  onCancel: () => void;
+  onDelete: () => void;
+  onSend: () => void;
+  sending: boolean;
 }) {
+  const [menu, setMenu] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const probed = useMediaDuration(track.generating ? undefined : track.url);
+
   if (track.generating) {
     return (
       <div className="rounded-xl border hairline bg-surface/50 p-3.5">
@@ -272,7 +541,9 @@ function TrackCard({
             </div>
             <p className="mt-1.5 text-[10px] text-fog/80">{track.generating.stage}</p>
           </div>
-          <GhostButton className="shrink-0">Cancel</GhostButton>
+          <GhostButton onClick={onCancel} className="shrink-0">
+            Cancel
+          </GhostButton>
         </div>
       </div>
     );
@@ -280,10 +551,10 @@ function TrackCard({
 
   const loaded = !!track.url && player.src === track.url;
   return (
-    <button
+    <div
       onClick={onSelect}
       className={cx(
-        "w-full rounded-xl border p-3.5 text-left transition",
+        "relative w-full cursor-pointer rounded-xl border p-3.5 text-left transition",
         active
           ? "border-gold/50 bg-surface"
           : "border-transparent bg-surface/50 hover:border-cream/15",
@@ -291,7 +562,7 @@ function TrackCard({
     >
       <div className="flex items-center gap-3.5">
         <span className={cx("h-12 w-12 shrink-0 rounded-lg", track.swatch)} />
-        <span
+        <button
           onClick={(e) => {
             e.stopPropagation();
             player.toggle(track.url);
@@ -299,13 +570,13 @@ function TrackCard({
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110"
         >
           {loaded && player.playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
-        </span>
+        </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-[13px] font-medium text-cream">{track.title}</span>
             {track.starred && <Star size={11} className="shrink-0 text-gold" fill="currentColor" />}
             <Chip tone="muted" className="ml-auto shrink-0 text-[9px] tabular-nums">
-              {track.bpm ? `${track.bpm} BPM` : "—"}
+              {track.duration || probed || "…"}
             </Chip>
           </div>
           <Waveform
@@ -314,11 +585,75 @@ function TrackCard({
             played={loaded ? player.played : 0}
             className="mt-1.5 h-7!"
           />
-          <div className="mt-1 text-[10px] tabular-nums text-fog">{track.duration}</div>
+          <div className="mt-1 text-[10px] tabular-nums text-fog">
+            {(track.duration || probed) && `${track.duration || probed} · `}
+            {track.arrangement}
+          </div>
         </div>
-        <MoreVertical size={14} className="shrink-0 text-fog/60" />
+        <button
+          title="Track options"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenu((m) => !m);
+            setArmed(false);
+          }}
+          className="shrink-0 text-fog/60 transition hover:text-cream"
+        >
+          <MoreVertical size={14} />
+        </button>
       </div>
-    </button>
+
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenu(false);
+            }}
+          />
+          <div className="absolute right-2 top-12 z-20 w-52 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenu(false);
+                onSend();
+              }}
+              disabled={sending || !track.relPath}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+            >
+              <ListPlus size={12} /> {sending ? "Sending…" : "Send to timeline"}
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenu(false);
+                if (track.url) void downloadAsset(track.url, `${track.title || "track"}.wav`);
+              }}
+              disabled={!track.url}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+            >
+              <Download size={12} /> Download
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!armed) {
+                  setArmed(true);
+                  return;
+                }
+                setMenu(false);
+                setArmed(false);
+                onDelete();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5"
+            >
+              <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -332,6 +667,17 @@ function TracksPanel({
   onSelect: (id: string) => void;
 }) {
   const lab = useMusicLab();
+  const timeline = useSendToTimeline();
+  const [newestFirst, setNewestFirst] = useState(true);
+  const [filter, setFilter] = useState<"all" | "instrumental" | "vocals">("all");
+  const [dismissed, setDismissed] = useState<string[]>([]);
+
+  const generating = lab.tracks.filter((t) => t.generating);
+  let finished = lab.tracks.filter((t) => !t.generating);
+  if (filter !== "all") finished = finished.filter((t) => t.arrangement === filter);
+  if (!newestFirst) finished = [...finished].reverse();
+  const shown = [...generating, ...finished];
+
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between p-4 pb-3">
@@ -339,29 +685,85 @@ function TracksPanel({
           Generated tracks
         </h2>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 rounded-lg border border-cream/10 px-2.5 py-1.5 text-[11px] text-cream/80 transition hover:border-gold/35">
-            Newest <ChevronDown size={11} className="text-fog" />
+          <button
+            onClick={() => setNewestFirst((n) => !n)}
+            title="Toggle sort order"
+            className="flex items-center gap-1.5 rounded-lg border border-cream/10 px-2.5 py-1.5 text-[11px] text-cream/80 transition hover:border-gold/35"
+          >
+            {newestFirst ? "Newest" : "Oldest"}
+            <ChevronDown
+              size={11}
+              className={cx("text-fog transition-transform", !newestFirst && "rotate-180")}
+            />
           </button>
-          <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/10 text-fog transition hover:border-gold/35 hover:text-gold">
+          <button
+            onClick={() =>
+              setFilter((f) =>
+                f === "all" ? "instrumental" : f === "instrumental" ? "vocals" : "all",
+              )
+            }
+            title={`Filter: ${filter} — click to cycle`}
+            className={cx(
+              "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition",
+              filter === "all"
+                ? "border-cream/10 text-fog hover:border-gold/35 hover:text-gold"
+                : "border-gold/40 text-gold",
+            )}
+          >
             <ListFilter size={13} />
+            {filter !== "all" && filter}
           </button>
         </div>
       </header>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-3">
-        {lab.tracks.map((t) => (
+        {lab.failures
+          .filter((f) => !dismissed.includes(f.id))
+          .map((f) => (
+            <div key={f.id} className="rounded-xl border border-red-500/30 bg-red-500/6 p-3">
+              <div className="flex items-center gap-2">
+                <CircleAlert size={14} className="shrink-0 text-red-400" />
+                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-cream">
+                  {f.title}
+                </span>
+                <button
+                  onClick={() => lab.retry(f.id)}
+                  className="shrink-0 rounded-lg border border-cream/15 px-2 py-1 text-[10px] text-cream/85 transition hover:border-gold/45 hover:text-gold"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={() => setDismissed((prev) => [...prev, f.id])}
+                  title="Dismiss"
+                  className="shrink-0 text-fog/60 transition hover:text-cream"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-red-300">{f.error}</p>
+            </div>
+          ))}
+        {shown.map((t) => (
           <TrackCard
             key={t.id}
             track={t}
             active={t.id === trackId}
             player={player}
             onSelect={() => onSelect(t.id)}
+            onCancel={() => lab.cancel(t.id)}
+            onDelete={() => {
+              if (t.relPath) void lab.remove(t.relPath);
+            }}
+            onSend={() => {
+              if (t.relPath) void timeline.send(t.relPath);
+            }}
+            sending={timeline.sending}
           />
         ))}
       </div>
 
       <div className="border-t hairline py-2 text-center text-[10px] uppercase tracking-wider text-fog/70">
-        {lab.tracks.length} tracks
+        {shown.length} tracks
       </div>
     </section>
   );
@@ -375,6 +777,8 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
   const lab = useMusicLab();
   const [tab, setTab] = useState<"stems" | "lyrics" | "details">("stems");
   const [stems, setStems] = useState<MusicStem[]>(lab.stems);
+  const probed = useMediaDuration(track.url);
+  const duration = track.duration || probed || "—";
 
   const setGain = (id: string, gainDb: number) =>
     setStems((prev) => prev.map((s) => (s.id === id ? { ...s, gainDb } : s)));
@@ -395,10 +799,9 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
               )}
             </div>
             <p className="mt-0.5 text-[10px] tabular-nums text-fog">
-              {track.duration} · {track.bpm ? `${track.bpm} BPM` : "—"} · {track.key || "—"}
+              {duration} · {track.bpm ? `${track.bpm} BPM` : "—"} · {track.key || "—"}
             </p>
           </div>
-          <MoreVertical size={14} className="shrink-0 text-fog/60" />
         </div>
         <Waveform
           seed={track.waveSeed}
@@ -428,7 +831,10 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
         {tab === "stems" && (
           <>
             <PanelLabel>Stems</PanelLabel>
-            <p className="mt-1 text-[10px] text-fog/70">Toggle stems to preview in track.</p>
+            <p className="mt-1 text-[10px] leading-relaxed text-fog/70">
+              Stem separation isn't wired to the engine yet — these controls are a
+              preview of the coming mixer and don't change the file.
+            </p>
             <div className="mt-3 space-y-2.5">
               {stems.map((stem) => {
                 const Icon = stemIcons[stem.id];
@@ -485,10 +891,9 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
 
         {tab === "lyrics" &&
           (track.arrangement === "vocals" ? (
-            <p className="text-[12px] leading-relaxed text-cream/85">
-              Rise before the light does — the grind is a quiet room.
-              <br />
-              Nobody claps for reps, but the reps are coming soon.
+            <p className="text-[12px] leading-relaxed text-fog">
+              Lyrics aren't stored with the track yet — the words you (or the model)
+              wrote live in the generation job only.
             </p>
           ) : (
             <p className="text-[12px] leading-relaxed text-fog">
@@ -503,7 +908,7 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
                 ["Engine", "ACE-Step · local"],
                 ["Tempo", track.bpm ? `${track.bpm} BPM` : "—"],
                 ["Key", track.key || "—"],
-                ["Duration", track.duration],
+                ["Duration", duration],
                 ["Arrangement", track.arrangement],
                 ["Format", "WAV · 48 kHz · stems"],
               ] as [string, string][]
@@ -518,8 +923,14 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
       </div>
 
       <div className="space-y-2 p-4 pt-2">
-        <GoldButton className="w-full justify-center py-2.5">
-          <Bookmark size={13} /> Save to assets
+        <GoldButton
+          onClick={() => {
+            if (track.url) void downloadAsset(track.url, `${track.title || "track"}.wav`);
+          }}
+          disabled={!track.url}
+          className="w-full justify-center py-2.5"
+        >
+          <Download size={13} /> Download WAV
         </GoldButton>
         <SendToTimeline
           relPath={track.generating ? undefined : track.relPath}

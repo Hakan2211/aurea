@@ -49,7 +49,14 @@ export class MusicAdapter implements EngineAdapter {
 
       const runDir = jobRunDir(job.id);
       const out = path.join(runDir, "out", "track.wav");
-      const caption = [payload.description, ...payload.styles.map((s) => s.toLowerCase())]
+      const caption = [
+        payload.description,
+        ...payload.styles.map((s) => s.toLowerCase()),
+        // no engine duet param — steer via the caption (best-effort)
+        ...(payload.duet && payload.arrangement === "vocals"
+          ? ["duet, male and female vocals, two singers trading lines"]
+          : []),
+      ]
         .filter(Boolean)
         .join(", ");
 
@@ -62,8 +69,7 @@ export class MusicAdapter implements EngineAdapter {
         if (!this.runtime.componentReady("acestep")) {
           throw new Error("ACE-Step engine not installed — Settings → Engines → Install");
         }
-        const weights = this.models.list().find((m) => m.id === "acestep-v15");
-        if (weights?.status.state !== "installed") {
+        if (!this.models.ready("acestep-v15")) {
           throw new Error("ACE-Step checkpoints not installed — Settings → Models");
         }
         const script = path.join(runDir, "music_acestep.py");
@@ -77,6 +83,16 @@ export class MusicAdapter implements EngineAdapter {
         env.AUREA_DURATION = String(payload.durationSec);
         env.AUREA_VOCALS = payload.arrangement === "vocals" ? "1" : "0";
         env.AUREA_OUT_WAV = out;
+        if (payload.lyrics && payload.arrangement === "vocals") env.AUREA_LYRICS = payload.lyrics;
+        if (payload.seed !== undefined) env.AUREA_SEED = String(payload.seed);
+        if (payload.bpm !== undefined) env.AUREA_BPM = String(payload.bpm);
+        if (payload.language && payload.language !== "unknown") {
+          env.AUREA_LANGUAGE = payload.language;
+        }
+        if (payload.keyscale) env.AUREA_KEYSCALE = payload.keyscale;
+        if (payload.timesignature) env.AUREA_TIMESIG = payload.timesignature;
+        if (payload.steps !== undefined) env.AUREA_STEPS = String(payload.steps);
+        if (payload.shift !== undefined) env.AUREA_SHIFT = String(payload.shift);
       } else {
         // external: the operator's own checkout runs videofast's CLI
         if (!paths.videofastDir) throw new Error("videofast path not set — Settings → Storage");
@@ -92,6 +108,14 @@ export class MusicAdapter implements EngineAdapter {
           "--acestep-root", engines.acestepDir,
         ];
         if (payload.arrangement === "vocals") args.push("--vocals");
+        // language/keyscale/timesignature are managed-only — the CLI has no flags for them
+        if (payload.lyrics && payload.arrangement === "vocals") {
+          args.push("--lyrics", payload.lyrics);
+        }
+        if (payload.seed !== undefined) args.push("--seed", String(payload.seed));
+        if (payload.bpm !== undefined) args.push("--bpm", String(payload.bpm));
+        if (payload.steps !== undefined) args.push("--steps", String(payload.steps));
+        if (payload.shift !== undefined) args.push("--shift", String(payload.shift));
         cwd = engines.acestepDir;
       }
 
