@@ -108,6 +108,35 @@ export function resolveCameraSpec(camera: CameraSpec, cine: BibleCinematography)
   };
 }
 
+/** One bank entry's paste-in clause. Unknown values pass through unchanged, so
+ * free text keeps working with or without an imported bank. */
+export function cineClause(list: CineClause[], value: string | undefined | null): string {
+  const raw = (value ?? "").trim();
+  if (!raw) return "";
+  return findClause(list, raw)?.clause ?? raw;
+}
+
+/** One prompt beat's text for the LTX prompt relay: what happens, then how
+ * it's shot. Same order as composeKeyframePrompt so a beat reads like the
+ * storyboard line it came from.
+ *
+ * This is where camera ids become language — call it when COMPOSING a shot
+ * spec, never when rendering one (directorSpec.promptZones[].prompt is
+ * already expanded; expanding again would stack the clause twice). */
+export function composeZonePrompt(
+  zone: { prompt: string; shot?: string; move?: string },
+  cine: BibleCinematography,
+): string {
+  return [
+    zone.prompt.trim(),
+    cineClause(cine.shotSizes, zone.shot),
+    cineClause(cine.moves, zone.move),
+  ]
+    .filter(Boolean)
+    .map((p) => p.replace(/[.,\s]*$/, ""))
+    .join(", ");
+}
+
 const cameraPhrase = (camera: CameraSpec, cine: BibleCinematography): string => {
   const resolved = resolveCameraSpec(camera, cine);
   return [resolved.shotSize, resolved.angle, resolved.lens, resolved.lighting, resolved.notes]

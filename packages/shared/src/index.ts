@@ -192,6 +192,84 @@ export const rvcTrainPayloadSchema = z.object({
   voice: z.string().min(1),
 });
 
+/* ---------- Shot Director ----------
+ * The optional `director` block on a video job. Absent → the proven
+ * single-keyframe graph renders exactly as before. Present → the shot is a
+ * timeline: images pinned at times, prompts that change over the take, voice
+ * takes locked to timecodes, an optional motion reference, and a retake
+ * window. Times are authored in SECONDS; the builder converts and snaps to
+ * LTX's 8n+1 frame rule so callers never have to think in frames. */
+
+export const directorKeyframeSchema = z.object({
+  /** library relPath of the still */
+  image: z.string().min(1),
+  /** when it lands, in seconds from the start of the shot */
+  atSec: z.number().min(0).default(0),
+  /** 1 = locked to this exact frame, lower = a suggestion LTX may drift from */
+  strength: z.number().min(0).max(1).default(1),
+});
+
+export const directorPromptZoneSchema = z.object({
+  /** the beat as the relay will read it — camera references already expanded */
+  prompt: z.string().min(1),
+  /** how long this beat holds before the next one takes over */
+  lengthSec: z.number().min(0.1),
+  /** cinematography-bank ids this beat was composed from ("ws", "push-in").
+   * Kept beside the composed prompt so a saved shot can be re-opened with its
+   * pickers intact. Expansion belongs to whoever COMPOSES the spec (the lab
+   * panel, the Director agent) via composeZonePrompt — the render path takes
+   * `prompt` verbatim, so a beat is never expanded twice. */
+  shot: z.string().default(""),
+  move: z.string().default(""),
+});
+export type DirectorPromptZone = z.infer<typeof directorPromptZoneSchema>;
+
+export const directorAudioSchema = z.object({
+  /** library relPath of a voice take (or any audio asset) */
+  take: z.string().min(1),
+  atSec: z.number().min(0).default(0),
+  /** skip this far into the take before using it */
+  trimStartSec: z.number().min(0).default(0),
+});
+
+export const directorMotionSchema = z.object({
+  /** library relPath of the video whose motion is transferred */
+  video: z.string().min(1),
+  atSec: z.number().min(0).default(0),
+  lengthSec: z.number().min(0.1).optional(),
+  /** which IC-LoRA carries the motion */
+  icLora: z.enum(["union", "motionTrack"]).default("motionTrack"),
+  strength: z.number().min(0).max(2).default(1),
+});
+
+export const directorRetakeSchema = z.object({
+  /** library relPath of the finished take being fixed */
+  source: z.string().min(1),
+  atSec: z.number().min(0),
+  lengthSec: z.number().min(0.1),
+  prompt: z.string().min(1),
+  strength: z.number().min(0).max(1).default(1),
+});
+
+export const directorSpecSchema = z.object({
+  /** anchors cast, wardrobe and style across every beat */
+  globalPrompt: z.string().default(""),
+  negativePrompt: z.string().optional(),
+  /** 24 is the house rate; 48 buys cleaner fast motion at double the cost */
+  fps: z.number().min(1).max(60).default(24),
+  keyframes: z.array(directorKeyframeSchema).max(24).default([]),
+  promptZones: z.array(directorPromptZoneSchema).max(12).default([]),
+  audio: z.array(directorAudioSchema).max(12).default([]),
+  motion: directorMotionSchema.optional(),
+  retake: directorRetakeSchema.optional(),
+  /** fill the silence between voice takes with generated sound */
+  inpaintAudio: z.boolean().default(true),
+  /** prompt-zone boundary softness: 0.001 = a hard cut between beats,
+   * 0.5+ = a dissolve. The relay paper's default is 0.001. */
+  epsilon: z.number().min(0.0001).max(0.99).default(0.001),
+});
+export type DirectorSpec = z.infer<typeof directorSpecSchema>;
+
 export const videoPayloadSchema = z.object({
   type: z.literal("video"),
   prompt: z.string().min(1),
@@ -207,6 +285,10 @@ export const videoPayloadSchema = z.object({
   resolution: z.string().default("1280 × 720"),
   motionStrength: z.number().min(0).max(1).optional(),
   seed: z.number().int().optional(),
+  /** Shot Director timeline. Omitted = the single-keyframe render this lab
+   * has always done; present = the Director graph (external ComfyUI with the
+   * WhatDreamsCost pack, or managed once its node spec is installed). */
+  director: directorSpecSchema.optional(),
 });
 
 export const jobPayloadSchema = z.discriminatedUnion("type", [
@@ -1245,6 +1327,7 @@ export const runtimeComponentIdSchema = z.enum([
   "comfy",
   "gguf",
   "kjnodes",
+  "director-nodes",
   "chatterbox",
   "acestep",
   "seedvc",

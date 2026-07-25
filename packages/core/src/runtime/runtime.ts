@@ -238,7 +238,26 @@ export const KJNODES_PIN: CustomNodeSpec = {
   },
 };
 
-export const CUSTOM_NODES: CustomNodeSpec[] = [GGUF_NODE_PIN, KJNODES_PIN];
+/** The Shot Director's timeline nodes (LTXDirector, LTXDirectorGuide,
+ * LTXDirectorCropGuides). Pinned to the commit the external install was
+ * verified against on 2026-07-25 — the node's `timeline_data` contract is one
+ * we synthesise by hand, so an unpinned upgrade could move it underneath us.
+ * `av` (PyAV) does the audio/video decoding for timeline segments. */
+export const WHATDREAMSCOST_PIN: CustomNodeSpec = {
+  id: "director-nodes",
+  name: "LTX Director nodes",
+  version: "2.0.3-bf71104",
+  url: "https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI/archive/bf7110434fe9abc06f039090b9de116720325c5e.zip",
+  dir: "WhatDreamsCost-ComfyUI",
+  marker: "ltx_director.py",
+  pipArgs: ["av", "pillow", "numpy"],
+  check: {
+    code: "import av, PIL, numpy; print('director deps ok')",
+    expect: /director deps ok/,
+  },
+};
+
+export const CUSTOM_NODES: CustomNodeSpec[] = [GGUF_NODE_PIN, KJNODES_PIN, WHATDREAMSCOST_PIN];
 
 const TORCH_INDEX = "https://download.pytorch.org/whl/cu128";
 /** rough site-packages + wheel cache footprint of the torch + requirements

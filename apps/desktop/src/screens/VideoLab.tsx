@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import {
   AudioLines,
   Check,
+  Film,
   ChevronDown,
   ChevronRight,
   CircleAlert,
@@ -31,6 +32,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { composeZonePrompt } from "@aurea/shared";
 import { downloadAsset, useJobs, useLikes, useRemoveAssets, useSendToTimeline, useVideoLab } from "@/hooks";
 import type { VideoStage, VideoTake } from "@/data/sample";
 import { Chip, GoldButton, Progress, cx } from "@/components/ui";
@@ -99,6 +101,378 @@ function Select({
   );
 }
 
+/** A Director keyframe beyond the start frame: a library still pinned to a
+ * time, with how hard LTX is asked to hold it. */
+interface DirectorKeyframe {
+  image: string;
+  atSec: number;
+  strength: number;
+}
+
+/** A prompt beat: what changes at this point in the take, optionally shot with
+ * a camera the bank already has language for. The camera ids stay separate
+ * from the typed line until submit, so the pickers survive an edit. */
+interface DirectorBeat {
+  text: string;
+  lengthSec: number;
+  shot: string;
+  move: string;
+}
+
+/** A voice take on the audio lane: a library clip locked to a timecode, which
+ * is what LTX lip-syncs to. `trimStartSec` skips a lead-in the take doesn't
+ * need — the line starts when the character starts speaking, not when the file
+ * does. */
+interface DirectorTake {
+  take: string;
+  atSec: number;
+  trimStartSec: number;
+}
+
+const fmtTime = (sec: number) => `${sec.toFixed(1)}s`;
+const clampSec = (sec: number, max: number) =>
+  Math.min(max, Math.max(0, Number.isFinite(sec) ? sec : 0));
+
+/** The relay quantises beats to latent frames (stride 8), so a beat under 8
+ * pixel frames can't get one of its own — at 24fps that's a third of a second. */
+const MIN_BEAT_SEC = 8 / 24;
+
+/** How much open air on the audio lane before LTX starts improvising into it.
+ * Measured 2026-07-25 on the breakroom two-shot: 0.7s holes came back silent,
+ * a 2.7s hole came back as invented speech with matching mouth movement. */
+const IMPROV_GAP_SEC = 1.5;
+
+/** Two of these sit side by side in a 280px panel, so a shot size shows as the
+ * bank's abbreviation ("WS — wide / full shot" → "WS") — which is what the
+ * clause is called on set anyway. Moves have no abbreviation and read fine as
+ * written. The full description rides along as the option's tooltip. */
+const shortName = (name: string) =>
+  name.includes("—") ? name.split("—")[0].trim() : name.trim();
+
+/* pr-4 keeps a long entry name from running under the native chevron;
+ * truncate ellipses whatever still overflows */
+/* no width here on purpose — each caller sets its own, and a `w-full` left in
+ * the shared string would fight the narrow shot-size picker */
+const selectInput =
+  "truncate rounded-md border border-cream/10 bg-ink py-1 pl-1.5 pr-4 text-[10px] " +
+  "text-cream outline-none focus:border-gold/40";
+
+/** A cinematography-bank picker. Values are bank ids ("ws", "push-in"); empty
+ * means the beat says nothing about the camera and LTX keeps the last one. */
+function BankSelect({
+  value,
+  placeholder,
+  entries,
+  onChange,
+  className,
+}: {
+  value: string;
+  placeholder: string;
+  entries: { id: string; name: string; use: string }[];
+  onChange: (v: string) => void;
+  className?: string;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ colorScheme: "dark" }}
+      title={entries.find((e) => e.id === value)?.use ?? placeholder}
+      className={cx(selectInput, className ?? "min-w-0 flex-1", !value && "text-fog/70")}
+    >
+      <option value="">{placeholder}</option>
+      {entries.map((e) => (
+        <option key={e.id} value={e.id} title={e.use}>
+          {shortName(e.name)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** How long each take runs. Nothing on disk records it — the library scans
+ * files, it doesn't ffprobe them — and the lane can't lay a take out without
+ * it, so the browser loads the metadata (not the audio) and we remember what
+ * it said. A take that fails to load is remembered as 0 so it's asked once,
+ * and shows on the lane as a marker rather than a block. */
+function useTakeDurations(sources: { relPath: string; url?: string }[]) {
+  const [known, setKnown] = useState<Record<string, number>>({});
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    for (const s of sources) {
+      if (!s.url || asked.current.has(s.relPath)) continue;
+      asked.current.add(s.relPath);
+      const el = new Audio();
+      el.preload = "metadata";
+      const record = (sec: number) => setKnown((k) => ({ ...k, [s.relPath]: sec }));
+      el.addEventListener("loadedmetadata", () =>
+        record(Number.isFinite(el.duration) ? el.duration : 0),
+      );
+      el.addEventListener("error", () => record(0));
+      el.src = s.url;
+    }
+  }, [sources]);
+  return known;
+}
+
+/** The audio lane — the cast's real voices at exact timecodes.
+ *
+ * Each take is locked where it's placed (LTX lip-syncs to it and cannot
+ * overwrite it); everything between takes is left free for the model to score.
+ * Overlapping takes are mixed together rather than one replacing the other,
+ * which is how two characters end up talking over each other on purpose.
+ *
+ * What the model does with the free air was measured on the 07-25 breakroom
+ * runs and is not what "room tone" suggests: sub-second holes came back
+ * silent, and a 2.7s hole came back as *invented dialogue* — audio and moving
+ * mouth both. Hence the warning below rather than a promise of ambience. */
+function AudioLane({
+  sources,
+  lane,
+  setLane,
+  durationSec,
+  roomTone,
+  setRoomTone,
+}: {
+  sources: { relPath: string; name: string; url?: string }[];
+  lane: DirectorTake[];
+  setLane: (fn: (l: DirectorTake[]) => DirectorTake[]) => void;
+  durationSec: number;
+  roomTone: boolean;
+  setRoomTone: (v: boolean) => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const durations = useTakeDurations(sources);
+  const nameOf = (rel: string) => sources.find((s) => s.relPath === rel)?.name ?? rel.split("/").pop();
+
+  /* where each take actually lands, mirroring fitAudio() in the builder: a
+   * take is cut off at the end of the shot, and one placed past the end never
+   * plays at all */
+  const blocks = lane.map((t) => {
+    const full = durations[t.take];
+    const heard = full === undefined ? undefined : Math.max(0, full - t.trimStartSec);
+    const room = Math.max(0, durationSec - t.atSec);
+    return {
+      start: t.atSec,
+      length: heard === undefined ? undefined : Math.min(heard, room),
+      clipped: heard !== undefined && heard > room + 0.05,
+      lost: t.atSec >= durationSec,
+      unknown: heard === undefined || heard === 0,
+    };
+  });
+  const overlapping = blocks.some((b, i) =>
+    blocks.some(
+      (o, j) =>
+        j !== i &&
+        b.length !== undefined &&
+        o.length !== undefined &&
+        b.start < o.start + o.length &&
+        o.start < b.start + b.length,
+    ),
+  );
+  /* What LTX is left to score. Measured off the union of the takes, not their
+   * sum, so a deliberate talk-over doesn't read as double the dialogue — and
+   * the LONGEST single hole matters on its own, because that's the one the
+   * model improvises into (see the warning below). */
+  const { gap, longestGap } = (() => {
+    const taken = blocks
+      .filter((b) => !b.lost && b.length)
+      .map((b) => ({ from: b.start, to: b.start + b.length! }))
+      .sort((a, b) => a.from - b.from);
+    let covered = 0;
+    let end = 0;
+    let longest = 0;
+    for (const r of taken) {
+      if (r.from > end) longest = Math.max(longest, r.from - end);
+      covered += Math.max(0, r.to - Math.max(end, r.from));
+      end = Math.max(end, r.to);
+    }
+    longest = Math.max(longest, durationSec - end);
+    return { gap: Math.max(0, durationSec - covered), longestGap: longest };
+  })();
+
+  return (
+    <div className="relative mt-3 border-t hairline pt-3">
+      <div className="flex items-center justify-between">
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+          Audio lane
+        </h4>
+        <button
+          onClick={() => setPicking((p) => !p)}
+          className="inline-flex items-center gap-1 text-[10px] text-fog transition hover:text-gold"
+        >
+          <AudioLines size={10} /> Add take
+        </button>
+      </div>
+
+      {lane.length === 0 && !picking ? (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+          The shot scores itself. Add voice takes to lock dialogue to exact timecodes — each
+          character lip-syncs their own line, in one continuous render.
+        </p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {/* the shot ruler: gold where a take is locked, dark where LTX is free */}
+          <div className="relative h-2 w-full overflow-hidden rounded-full bg-cream/8">
+            {blocks.map((b, i) =>
+              b.lost ? null : (
+                <div
+                  key={i}
+                  title={nameOf(lane[i].take)}
+                  style={{
+                    left: `${(b.start / Math.max(durationSec, 0.1)) * 100}%`,
+                    width: b.length ? `${(b.length / Math.max(durationSec, 0.1)) * 100}%` : "2px",
+                  }}
+                  className={cx(
+                    "absolute inset-y-0 rounded-full",
+                    b.unknown ? "bg-gold/50" : i % 2 ? "bg-gold/60" : "bg-gold/90",
+                  )}
+                />
+              ),
+            )}
+          </div>
+
+          {lane.map((t, i) => (
+            <div
+              key={`${t.take}-${i}`}
+              className={cx(
+                "flex items-center gap-2 rounded-xl border bg-surface px-2.5 py-1.5",
+                blocks[i].lost ? "border-red-500/30" : "border-cream/10",
+              )}
+            >
+              <input
+                type="number"
+                min={0}
+                max={durationSec}
+                step={0.1}
+                value={t.atSec}
+                title="When this line starts"
+                onChange={(e) =>
+                  setLane((l) =>
+                    l.map((x, j) =>
+                      j === i ? { ...x, atSec: clampSec(Number(e.target.value), durationSec) } : x,
+                    ),
+                  )
+                }
+                className="w-10 shrink-0 bg-transparent text-[10px] tabular-nums text-gold focus:outline-none"
+              />
+              <span className="min-w-0 flex-1 truncate text-[11px] text-cream/85">
+                {nameOf(t.take)}
+              </span>
+              <span className="shrink-0 text-[9px] tabular-nums text-fog/60">
+                {blocks[i].length !== undefined ? fmtTime(blocks[i].length!) : "…"}
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={0.1}
+                value={t.trimStartSec}
+                title="Skip this far into the take before it plays"
+                onChange={(e) =>
+                  setLane((l) =>
+                    l.map((x, j) =>
+                      j === i
+                        ? { ...x, trimStartSec: Math.max(0, Number(e.target.value) || 0) }
+                        : x,
+                    ),
+                  )
+                }
+                // the spinner arrows eat half of a control this narrow
+                className="w-9 shrink-0 rounded-md border border-cream/10 bg-ink px-1 py-0.5 text-[10px] tabular-nums text-cream/70 outline-none [appearance:textfield] focus:border-gold/40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <button
+                onClick={() => setLane((l) => l.filter((_, j) => j !== i))}
+                className="shrink-0 text-fog/60 transition hover:text-red-400"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+
+          {/* room tone — what happens in the silence between the lines */}
+          <label className="flex cursor-pointer items-center gap-2 pt-0.5">
+            <input
+              type="checkbox"
+              checked={roomTone}
+              onChange={(e) => setRoomTone(e.target.checked)}
+              className="accent-gold"
+            />
+            <span className="text-[10px] text-fog">Score the gaps ({fmtTime(gap)})</span>
+          </label>
+
+          {blocks.some((b) => b.lost) ? (
+            <p className="text-[10px] leading-relaxed text-red-300">
+              A take starts after the shot ends — it never plays. Move it earlier or make the clip
+              longer.
+            </p>
+          ) : blocks.some((b) => b.clipped) ? (
+            <p className="text-[10px] leading-relaxed text-gold/75">
+              A take runs past the end of the shot and gets cut off mid-line. Lengthen the clip, or
+              trim the take's lead-in.
+            </p>
+          ) : overlapping ? (
+            <p className="text-[10px] leading-relaxed text-gold/75">
+              Two takes overlap — they'll be heard together. Fine for a talk-over, otherwise move
+              one along.
+            </p>
+          ) : roomTone && longestGap > IMPROV_GAP_SEC ? (
+            // measured 07-25: a 2.7s hole came back as invented speech with the
+            // mouth movement to match, while sub-second holes stayed silent
+            <p className="text-[10px] leading-relaxed text-gold/75">
+              {fmtTime(longestGap)} of open air with scoring on — LTX tends to improvise dialogue
+              into a gap this long, lip-sync and all. Turn scoring off and lay room tone on the
+              Timeline instead.
+            </p>
+          ) : (
+            <p className="text-[10px] leading-relaxed text-fog/70">
+              {roomTone
+                ? "Locked lines drive lip-sync. Short gaps between them come back near-silent, which is usually what a scene wants."
+                : "Gaps stay silent — nothing is generated between the lines."}
+            </p>
+          )}
+        </div>
+      )}
+
+      {picking && (
+        <div className="absolute inset-x-0 top-7 z-10 max-h-44 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
+          {sources.length === 0 && (
+            <p className="px-3 py-2 text-[11px] text-fog">
+              No voice takes yet — generate one in the Voice lab.
+            </p>
+          )}
+          {sources.map((a) => (
+            <button
+              key={a.relPath}
+              onClick={() => {
+                // land it after whatever's already down, so takes queue up as
+                // dialogue rather than stacking on top of each other at zero
+                const after = lane.reduce(
+                  (end, t) =>
+                    Math.max(end, t.atSec + Math.max(0, (durations[t.take] ?? 1) - t.trimStartSec)),
+                  0,
+                );
+                setLane((l) => [
+                  ...l,
+                  { take: a.relPath, atSec: clampSec(after, durationSec), trimStartSec: 0 },
+                ]);
+                setPicking(false);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5"
+            >
+              <span className="min-w-0 flex-1 truncate">{a.name}</span>
+              {durations[a.relPath] ? (
+                <span className="shrink-0 text-[9px] tabular-nums text-fog/60">
+                  {fmtTime(durations[a.relPath])}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- left panel: params ---------- */
 
 function ParamsPanel() {
@@ -110,10 +484,26 @@ function ParamsPanel() {
   const [motion, setMotion] = useState(lab.motionStrength);
   /** null = the default (newest library still); set by the Replace picker */
   const [frameRel, setFrameRel] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  /** null = closed. "start" retargets the start frame; a number retargets that
+   * Director keyframe — one picker, two jobs. */
+  const [picking, setPicking] = useState<"start" | number | null>(null);
+  const pickerOpen = picking !== null;
+  /** Shot Director: extra keyframes beyond the start frame, in seconds */
+  const [directorOn, setDirectorOn] = useState(false);
+  const [keyframes, setKeyframes] = useState<DirectorKeyframe[]>([]);
+  /** prompt beats — the shot's phrasing over time; empty = one prompt throughout */
+  const [beats, setBeats] = useState<DirectorBeat[]>([]);
+  /** how hard a beat boundary lands: 0.001 a cut, 0.5 a dissolve */
+  const [blend, setBlend] = useState(0.001);
   /** optional dialogue take — switches the render to ia2v lip-sync */
   const [audioRel, setAudioRel] = useState<string | null>(null);
   const [audioOpen, setAudioOpen] = useState(false);
+  /** Director audio lane: voice takes locked to timecodes. The simple path's
+   * single take is the one-segment case of this, so turning the Director on
+   * carries it onto the lane rather than dropping it. */
+  const [lane, setLane] = useState<DirectorTake[]>([]);
+  /** generate sound in the gaps between takes rather than leaving them silent */
+  const [roomTone, setRoomTone] = useState(true);
 
   // the dead-core fallback shape predates the live fields — narrow before use
   const chosen = frameRel ? lab.frames.find((f) => f.relPath === frameRel) : undefined;
@@ -128,6 +518,85 @@ function ParamsPanel() {
     ? (lab.audioSources.find((a) => a.relPath === audioRel)?.name ?? audioRel)
     : null;
   const durationSec = parseInt(duration) || 5;
+  // Seedance renders from a single frame — the timeline is an LTX feature.
+  // While the probe is still in flight (null) we leave it enabled rather than
+  // flickering the control off and back on.
+  const directorBlocked =
+    engineId !== "ltx2" || (lab.capabilities !== null && !lab.capabilities.director);
+  /** a new beat takes the time the existing ones leave over, or an even third
+   * of the shot when they already fill it */
+  const addBeat = () => {
+    setBeats((bs) => {
+      const left = durationSec - bs.reduce((s, b) => s + b.lengthSec, 0);
+      const lengthSec = Math.max(MIN_BEAT_SEC, left > 0.2 ? left : durationSec / 3);
+      return [...bs, { text: "", lengthSec: Math.round(lengthSec * 10) / 10, shot: "", move: "" }];
+    });
+  };
+  /** default a new keyframe to the newest still the user hasn't used yet */
+  const addKeyframe = (atSec: number) => {
+    const used = new Set([effectiveRel, ...keyframes.map((k) => k.image)]);
+    const next = lab.frames.find((f) => !used.has(f.relPath)) ?? lab.frames[0];
+    if (!next) return;
+    setKeyframes((ks) =>
+      [...ks, { image: next.relPath, atSec: clampSec(atSec, durationSec), strength: 1 }].sort(
+        (a, b) => a.atSec - b.atSec,
+      ),
+    );
+  };
+  /** Where each beat actually lands, mirroring fitZones() in the builder: beats
+   * tile in order, one that starts past the end never arrives, and the last
+   * surviving beat stretches to the boundary so the take is fully covered. */
+  const tiling = (() => {
+    let cursor = 0;
+    const rows = beats.map((b) => {
+      const start = cursor;
+      const length = Math.max(0, Math.min(b.lengthSec, durationSec - cursor));
+      cursor += length;
+      return { start, length, dead: length <= 0 };
+    });
+    const live = rows.filter((r) => !r.dead);
+    if (live.length && cursor < durationSec) live[live.length - 1].length += durationSec - cursor;
+    return {
+      rows,
+      dead: rows.length - live.length,
+      asked: beats.reduce((s, b) => s + b.lengthSec, 0),
+      short: live.length > 0 && cursor < durationSec,
+      flicker: live.some((r) => r.length < MIN_BEAT_SEC),
+    };
+  })();
+
+  /** the typed line plus whatever the camera pickers say, expanded through the
+   * bank here — the render path takes these prompts verbatim */
+  const promptZones = beats
+    .map((b) => ({
+      // a beat left blank still owns its slice of the take, falling back to the
+      // shot prompt — dropping it would slide every later beat earlier than
+      // the bar above says it lands
+      prompt:
+        composeZonePrompt({ prompt: b.text, shot: b.shot, move: b.move }, lab.cinematography) ||
+        prompt.trim(),
+      lengthSec: Math.max(0.1, b.lengthSec),
+      shot: b.shot,
+      move: b.move,
+    }))
+    .filter((z) => z.prompt.length > 0);
+
+  const director =
+    directorOn && !directorBlocked && effectiveRel
+      ? {
+          globalPrompt: prompt,
+          fps: 24,
+          // the start frame is always keyframe 0; the rest ride on top
+          keyframes: [
+            { image: effectiveRel, atSec: 0, strength: 1 },
+            ...keyframes.filter((k) => k.image !== effectiveRel || k.atSec > 0),
+          ],
+          promptZones,
+          audio: lane,
+          inpaintAudio: roomTone,
+          epsilon: blend,
+        }
+      : undefined;
 
   return (
     <aside className="flex w-[280px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
@@ -157,14 +626,14 @@ function ParamsPanel() {
           <div className="flex items-center justify-between">
             <PanelLabel>2 · Start frame (keyframe)</PanelLabel>
             <button
-              onClick={() => setPickerOpen(true)}
+              onClick={() => setPicking("start")}
               className="inline-flex items-center gap-1 text-[10px] text-fog transition hover:text-gold"
             >
               <Replace size={10} /> Replace
             </button>
           </div>
           <button
-            onClick={() => setPickerOpen(true)}
+            onClick={() => setPicking("start")}
             title="Choose a different start frame"
             className="relative mt-2 block h-28 w-full overflow-hidden rounded-xl border border-cream/10 text-left transition hover:border-gold/40"
           >
@@ -192,6 +661,13 @@ function ParamsPanel() {
         {/* 2b · dialogue audio (optional — ia2v lip-sync) */}
         <section>
           <PanelLabel hint>2b · Dialogue audio (optional)</PanelLabel>
+          {directorOn ? (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+              Dialogue is on the Director's audio lane below — where a line can sit at any
+              timecode, and two characters can each have their own.
+            </p>
+          ) : (
+          <>
           <div className="relative mt-2">
             {audioRel ? (
               <div className="flex items-center gap-2 rounded-xl border border-gold/30 bg-gold/6 px-3 py-2">
@@ -247,6 +723,298 @@ function ParamsPanel() {
               ? "Renders with LTX ia2v — the named speaker lip-syncs this audio."
               : "Attach a Voice-lab take to switch from i2v to ia2v lip-sync."}
           </p>
+          </>
+          )}
+        </section>
+
+        {/* 2c · Shot Director — keyframes beyond the start frame */}
+        <section>
+          <div className="flex items-center justify-between">
+            <PanelLabel hint>2c · Shot Director</PanelLabel>
+            <button
+              onClick={() => {
+                // the take attached above is dialogue at 0s — the lane's
+                // one-segment case, so carry it over instead of losing it
+                if (!directorOn && audioRel && lane.length === 0) {
+                  setLane([{ take: audioRel, atSec: 0, trimStartSec: 0 }]);
+                }
+                setDirectorOn((o) => !o);
+              }}
+              disabled={directorBlocked}
+              className={cx(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition",
+                directorBlocked
+                  ? "cursor-not-allowed bg-cream/5 text-fog/50"
+                  : directorOn
+                    ? "bg-gold/20 text-gold"
+                    : "bg-gold/12 text-gold hover:bg-gold/20",
+              )}
+            >
+              <Film size={10} /> {directorOn ? "On" : "Off"}
+            </button>
+          </div>
+          {directorBlocked ? (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+              {lab.capabilities?.note ??
+                "Needs a ComfyUI with the Director node pack — check Settings → Engines."}
+            </p>
+          ) : !directorOn ? (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+              Turn on to pin an end frame and mid-shot keyframes — LTX renders the move between
+              them as one continuous take instead of a cut.
+            </p>
+          ) : (
+            <div className="mt-2 space-y-1.5">
+              <div className="flex items-center gap-2 rounded-xl border border-cream/10 bg-surface px-2.5 py-1.5">
+                <span className="w-10 shrink-0 text-[10px] tabular-nums text-gold">0.0s</span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-cream/85">
+                  {frameName}
+                </span>
+                <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">
+                  start
+                </span>
+              </div>
+
+              {keyframes.map((k, i) => {
+                const still = lab.frames.find((f) => f.relPath === k.image);
+                return (
+                  <div
+                    key={`${k.image}-${i}`}
+                    className="flex items-center gap-2 rounded-xl border border-cream/10 bg-surface px-2.5 py-1.5"
+                  >
+                    <input
+                      type="number"
+                      min={0}
+                      max={durationSec}
+                      step={0.1}
+                      value={k.atSec}
+                      onChange={(e) =>
+                        setKeyframes((ks) =>
+                          ks.map((x, j) =>
+                            j === i
+                              ? { ...x, atSec: clampSec(Number(e.target.value), durationSec) }
+                              : x,
+                          ),
+                        )
+                      }
+                      className="w-10 shrink-0 bg-transparent text-[10px] tabular-nums text-gold focus:outline-none"
+                    />
+                    <button
+                      onClick={() => setPicking(i)}
+                      title="Choose a different still"
+                      className="min-w-0 flex-1 truncate text-left text-[11px] text-cream/85 transition hover:text-gold"
+                    >
+                      {still?.name ?? k.image.split("/").pop()}
+                    </button>
+                    <input
+                      type="range"
+                      min={0.3}
+                      max={1}
+                      step={0.05}
+                      value={k.strength}
+                      title={`Hold strength ${k.strength.toFixed(2)}`}
+                      onChange={(e) =>
+                        setKeyframes((ks) =>
+                          ks.map((x, j) => (j === i ? { ...x, strength: Number(e.target.value) } : x)),
+                        )
+                      }
+                      className="w-12 shrink-0 accent-gold"
+                    />
+                    <button
+                      onClick={() => setKeyframes((ks) => ks.filter((_, j) => j !== i))}
+                      className="shrink-0 text-fog/60 transition hover:text-red-400"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => addKeyframe(durationSec)}
+                  className="flex-1 rounded-xl border border-dashed border-cream/15 px-2 py-1.5 text-[10px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                >
+                  + End frame
+                </button>
+                <button
+                  onClick={() => addKeyframe(durationSec / 2)}
+                  className="flex-1 rounded-xl border border-dashed border-cream/15 px-2 py-1.5 text-[10px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                >
+                  + Keyframe
+                </button>
+              </div>
+              <p className="text-[10px] leading-relaxed text-fog/70">
+                {keyframes.length === 0
+                  ? "Add an end frame and LTX interpolates the whole transformation."
+                  : `${keyframes.length + 1} keyframes over ${fmtTime(durationSec)} — the slider is how hard each is held.`}
+              </p>
+
+              {/* prompt beats — the shot's phrasing changing inside one take */}
+              <div className="mt-3 border-t hairline pt-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+                    Prompt beats
+                  </h4>
+                  <button
+                    onClick={addBeat}
+                    className="inline-flex items-center gap-1 text-[10px] text-fog transition hover:text-gold"
+                  >
+                    <ListPlus size={10} /> Add beat
+                  </button>
+                </div>
+
+                {beats.length === 0 ? (
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+                    One prompt runs the whole take. Add beats to change what LTX is describing
+                    partway through — a wide that pushes in and lands on a reaction, in one
+                    continuous render.
+                  </p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {/* how the beats tile the shot */}
+                    <div className="flex h-1.5 w-full gap-px overflow-hidden rounded-full bg-cream/8">
+                      {tiling.rows.map((r, i) =>
+                        r.dead ? null : (
+                          <div
+                            key={i}
+                            style={{ width: `${(r.length / Math.max(durationSec, 0.1)) * 100}%` }}
+                            className={cx("h-full", i % 2 ? "bg-gold/45" : "bg-gold/80")}
+                          />
+                        ),
+                      )}
+                    </div>
+
+                    {beats.map((b, i) => (
+                      <div
+                        key={i}
+                        className={cx(
+                          "space-y-1.5 rounded-xl border bg-surface p-2",
+                          tiling.rows[i]?.dead ? "border-red-500/30" : "border-cream/10",
+                        )}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-9 shrink-0 text-[10px] tabular-nums text-gold">
+                            {fmtTime(tiling.rows[i]?.start ?? 0)}
+                          </span>
+                          <input
+                            value={b.text}
+                            onChange={(e) =>
+                              setBeats((bs) =>
+                                bs.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)),
+                              )
+                            }
+                            placeholder={`Beat ${i + 1} — what changes`}
+                            className="min-w-0 flex-1 rounded-md border border-cream/10 bg-ink px-2 py-1 text-[11px] text-cream outline-none placeholder:text-fog/60 focus:border-gold/40"
+                          />
+                          <button
+                            onClick={() => setBeats((bs) => bs.filter((_, j) => j !== i))}
+                            className="shrink-0 text-fog/60 transition hover:text-red-400"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <BankSelect
+                            value={b.shot}
+                            placeholder="Shot"
+                            // abbreviations are short — give the room to the move
+                            className="w-[68px] shrink-0"
+                            entries={lab.cinematography.shotSizes}
+                            onChange={(v) =>
+                              setBeats((bs) => bs.map((x, j) => (j === i ? { ...x, shot: v } : x)))
+                            }
+                          />
+                          <BankSelect
+                            value={b.move}
+                            placeholder="Camera move"
+                            entries={lab.cinematography.moves}
+                            onChange={(v) =>
+                              setBeats((bs) => bs.map((x, j) => (j === i ? { ...x, move: v } : x)))
+                            }
+                          />
+                          <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-cream/10 bg-ink px-1.5 py-1">
+                            <input
+                              type="number"
+                              min={MIN_BEAT_SEC}
+                              max={durationSec}
+                              step={0.5}
+                              value={b.lengthSec}
+                              onChange={(e) =>
+                                setBeats((bs) =>
+                                  bs.map((x, j) =>
+                                    j === i
+                                      ? {
+                                          ...x,
+                                          lengthSec: clampSec(Number(e.target.value), durationSec),
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                              className="w-7 bg-transparent text-[10px] tabular-nums text-gold outline-none"
+                            />
+                            <span className="text-[10px] text-fog/70">s</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* beat blend — how hard a boundary lands */}
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <span className="shrink-0 text-[10px] text-fog">Blend</span>
+                      <input
+                        type="range"
+                        min={0.001}
+                        max={0.5}
+                        step={0.001}
+                        value={blend}
+                        onChange={(e) => setBlend(Number(e.target.value))}
+                        className="min-w-0 flex-1 accent-gold"
+                      />
+                      <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-gold">
+                        {blend <= 0.01 ? "cut" : blend >= 0.25 ? "dissolve" : blend.toFixed(2)}
+                      </span>
+                    </div>
+
+                    {lab.cinematography.shotSizes.length === 0 && (
+                      <p className="text-[10px] leading-relaxed text-fog/70">
+                        Import the cinematography bank on this project's Bible screen and the
+                        pickers fill with the show's shot grammar.
+                      </p>
+                    )}
+                    {tiling.dead > 0 ? (
+                      <p className="text-[10px] leading-relaxed text-red-300">
+                        The beats ask for {fmtTime(tiling.asked)} of a {fmtTime(durationSec)} take —
+                        the last {tiling.dead} never arrive{tiling.dead === 1 ? "s" : ""}. Shorten
+                        them or make the clip longer.
+                      </p>
+                    ) : tiling.flicker ? (
+                      <p className="text-[10px] leading-relaxed text-gold/75">
+                        A beat under {MIN_BEAT_SEC.toFixed(1)}s is shorter than one latent frame —
+                        it will read as a flicker rather than a beat.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] leading-relaxed text-fog/70">
+                        {beats.length} beat{beats.length === 1 ? "" : "s"} across{" "}
+                        {fmtTime(durationSec)}
+                        {tiling.short ? " — the last one holds to the end." : "."}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <AudioLane
+                sources={lab.audioSources}
+                lane={lane}
+                setLane={setLane}
+                durationSec={durationSec}
+                roomTone={roomTone}
+                setRoomTone={setRoomTone}
+              />
+            </div>
+          )}
         </section>
 
         {/* 3 · engine */}
@@ -344,7 +1112,11 @@ function ParamsPanel() {
               resolution,
               motionStrength: motion,
               startFrame: effectiveRel,
-              audio: audioRel ?? undefined,
+              // the lane owns dialogue once the Director is on: leaving the
+              // simple field set would put a take back at 0s that the user may
+              // have just taken off the lane
+              audio: director ? undefined : (audioRel ?? undefined),
+              director,
             })
           }
           className={cx(
@@ -377,7 +1149,12 @@ function ParamsPanel() {
                 Retry
               </button>
             </div>
-            <p className="mt-1 text-[10px] leading-relaxed text-red-300">{f.error}</p>
+            {/* ComfyUI's rejection message lists every model file it knows —
+              * hundreds of lines. Unclamped it pushes the whole panel off
+              * screen, so it scrolls inside the card instead. */}
+            <p className="mt-1 max-h-20 overflow-y-auto text-[10px] leading-relaxed text-red-300">
+              {f.error}
+            </p>
           </div>
         ))}
       </div>
@@ -385,7 +1162,7 @@ function ParamsPanel() {
       {pickerOpen && (
         <div
           className="fixed inset-0 z-40 flex items-center justify-center bg-ink/85 backdrop-blur-sm"
-          onClick={() => setPickerOpen(false)}
+          onClick={() => setPicking(null)}
         >
           <div
             className="flex max-h-[70vh] w-[560px] flex-col rounded-2xl border border-cream/12 bg-raised p-5 shadow-2xl"
@@ -393,10 +1170,10 @@ function ParamsPanel() {
           >
             <div className="flex items-center justify-between">
               <h3 className="font-serif text-[18px] font-semibold text-cream">
-                Choose a start frame
+                {picking === "start" ? "Choose a start frame" : "Choose a keyframe still"}
               </h3>
               <button
-                onClick={() => setPickerOpen(false)}
+                onClick={() => setPicking(null)}
                 className="text-fog/60 transition hover:text-cream"
               >
                 <X size={16} />
@@ -410,8 +1187,13 @@ function ParamsPanel() {
                 <button
                   key={f.relPath}
                   onClick={() => {
-                    setFrameRel(f.relPath);
-                    setPickerOpen(false);
+                    if (picking === "start") setFrameRel(f.relPath);
+                    else if (typeof picking === "number") {
+                      setKeyframes((ks) =>
+                        ks.map((k, j) => (j === picking ? { ...k, image: f.relPath } : k)),
+                      );
+                    }
+                    setPicking(null);
                   }}
                   className={cx(
                     "group relative aspect-video overflow-hidden rounded-lg border transition",

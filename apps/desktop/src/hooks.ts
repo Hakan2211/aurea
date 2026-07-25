@@ -1111,6 +1111,11 @@ export function useVideoLab() {
     staleTime: 60_000,
   }).data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("video");
+  // the doc-26 camera bank, so a prompt beat can say "ws" and mean the clause
+  const cinematography = trpc.studio.bible.get.useQuery(
+    { project },
+    { enabled: !!project, staleTime: 60_000 },
+  ).data?.cinematography;
   const allAssets = trpc.library.list.useQuery().data?.assets;
   const images = allAssets?.filter((a) => a.kind === "image");
   const mutation = trpc.labs.video.generate.useMutation(invalidate);
@@ -1139,6 +1144,9 @@ export function useVideoLab() {
       /** null while the probe is in flight; the panel treats that as "unknown"
        * rather than "unsupported" so Director doesn't flicker off on load */
       capabilities: capabilities ?? null,
+      /** shot sizes and moves for the prompt-beat camera pickers; empty until
+       * the project's bible has the cinematography bank imported */
+      cinematography: cinematography ?? EMPTY_CINEMATOGRAPHY,
     };
     if (!catalog || !kindAssets) {
       return {
@@ -1230,7 +1238,7 @@ export function useVideoLab() {
       canGenerate: !!frame,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, capabilities, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
+  }, [catalog, capabilities, cinematography, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
 }
 
 /* ---------- studio: bible + production (LIVE) ---------- */
