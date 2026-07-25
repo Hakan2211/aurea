@@ -121,9 +121,19 @@ export interface DirectorGraphSpec {
   inpaintAudio: boolean;
   /** the shot has a motion reference on its timeline */
   hasMotion: boolean;
-  /** IC-LoRA driving motion transfer; "None" disables it */
+  /** IC-LoRA driving motion transfer; "None" disables it. Must be a name the
+   * running ComfyUI offers for LTXDirectorGuide.ic_lora_name — see
+   * resolveIcLora(), which is why this is a resolved string and not a kind. */
   icLora?: string;
+  /** weight the IC-LoRA is loaded at (1 = as trained). Distinct from the
+   * per-segment motion strength, which rides in timeline_data. */
   icLoraStrength?: number;
+  /** take the audio from the motion reference instead of the audio lane */
+  overrideAudio?: boolean;
+  /** the shot is a retake: an existing take with one window re-rendered. The
+   * guide nodes auto-detect it from timeline_data, but saying so explicitly
+   * keeps a hand-built timeline from silently rendering as a fresh shot. */
+  isRetake?: boolean;
   /** how a keyframe whose aspect doesn't match the shot is fitted. "crop"
    * fills the frame without distorting faces, which is almost always what a
    * shot wants; "stretch to fit" is there for deliberate effect. */
@@ -189,7 +199,9 @@ export function directorGraph(spec: DirectorGraphSpec): ComfyGraph {
     use_custom_audio: spec.hasCustomAudio,
     inpaint_audio: spec.inpaintAudio,
     use_custom_motion: spec.hasMotion,
-    override_audio: false,
+    // lifts the motion reference's own audio onto the shot — the node then
+    // reads the motion segments as the audio track and masks to match
+    override_audio: !!spec.overrideAudio,
   });
 
   node(ID.negative, "CLIPTextEncode", {
@@ -312,7 +324,7 @@ export function directorGraph(spec: DirectorGraphSpec): ComfyGraph {
       use_tiled_encode: false,
       tile_size: 256,
       tile_overlap: 64,
-      retake_mode: false, // auto-detected from timeline_data
+      retake_mode: !!spec.isRetake, // also auto-detected from timeline_data
     });
   }
 

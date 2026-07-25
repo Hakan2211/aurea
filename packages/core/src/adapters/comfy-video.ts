@@ -29,7 +29,7 @@ import {
   snapSize,
   type TimelineInput,
 } from "../comfy/director-timeline.js";
-import { DIRECTOR_NODES, resolveTuning } from "../comfy/capabilities.js";
+import { DIRECTOR_NODES, resolveIcLora, resolveTuning } from "../comfy/capabilities.js";
 import { probeMedia } from "./ffmpeg-export.js";
 import { jobRunDir } from "./proc.js";
 import type { JobResources } from "../scheduler.js";
@@ -40,13 +40,6 @@ const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
 /** the stock template's negative prompt — a Director shot with no explicit
  * one still wants LTX kept off game-render and caption territory */
 const DEFAULT_NEGATIVE = "pc game, console game, video game, cartoon, childish, ugly";
-
-/** the IC-LoRAs that carry motion onto a keyframe, by their conventional
- * filenames in an LTX install's loras/ltxv/ltx2 folder */
-const IC_LORA: Record<"union" | "motionTrack", string> = {
-  union: "ltxv/ltx2/ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
-  motionTrack: "ltxv/ltx2/ltx-2.3-22b-ic-lora-motion-track-control-ref0.5.safetensors",
-};
 
 /** The render tuning knobs fail inside ComfyUI, far from the toggle that
  * turned them on — SageAttention in particular needs a pip package the node
@@ -204,9 +197,11 @@ export class ComfyVideoAdapter implements EngineAdapter {
   }
 
   /* ---------- Shot Director ----------
-   * A timeline render: keyframes at times, prompt beats, voice takes locked
-   * to timecodes. Same LTX weights and sigma schedule as above — the whole
-   * difference is that the conditioning comes from an LTXDirector node. */
+   * A timeline render: keyframes at times, prompt beats, voice takes locked to
+   * timecodes, an optional motion reference driving the movement, or a retake
+   * that re-renders one window of a finished take in place. Same LTX weights
+   * and sigma schedule as above — the whole difference is that the conditioning
+   * comes from an LTXDirector node. */
   private async renderShot(
     job: Job,
     spec: DirectorSpec,
@@ -230,12 +225,25 @@ export class ComfyVideoAdapter implements EngineAdapter {
       throw new Error("A Director shot needs at least one keyframe (or a retake to fix)");
     }
 
+    /* A retake re-renders one window of an existing take in place: everything
+     * outside the window is the original's own pixels, re-encoded. So its
+     * timeline can't carry a fresh cast of keyframes or voice takes — the guide
+     * node returns before it reads them — and the shot's geometry is the
+     * source's, not the panel's. */
+    const retakeSource = spec.retake
+      ? await probeMedia(resolve(spec.retake.source, "take to fix"))
+      : null;
+    if (retakeSource && !retakeSource.hasVideo) {
+      throw new Error(`${spec.retake!.source} has no video track to retake`);
+    }
+
     /* The lab's single dialogue field predates the audio lane, and MCP callers
      * still reach for it — it's the one-segment case of the lane, so honour it
      * as a take at 0s rather than silently rendering the shot mute. An explicit
      * lane wins: a caller who placed takes has already said where they go. */
-    const takes =
-      spec.audio.length > 0
+    const takes = spec.retake
+      ? []
+      : spec.audio.length > 0
         ? spec.audio
         : payload.audio
           ? [{ take: payload.audio, atSec: 0, trimStartSec: 0 }]
@@ -247,11 +255,19 @@ export class ComfyVideoAdapter implements EngineAdapter {
       );
     }
 
-    const fps = spec.fps;
-    const durationFrames = snapFrames(secToFrames(payload.durationSec, fps) + 1);
+    /* Frame rate, length and size all come off the source for a retake. The
+     * window is authored in seconds but lands on frames of the ORIGINAL, so a
+     * 24fps assumption against a 30fps take would slide the fix; and the
+     * preserved pixels are resampled to whatever length we ask for, so the
+     * clip has to be its own length (LTX's 8n+1 rule rounds up by at most 8
+     * frames, a third of a second of imperceptible stretch on a 10s take). */
+    const fps = Math.round((retakeSource?.fps ?? spec.fps) * 100) / 100;
     const size = payload.resolution.match(/(\d+)\s*[×x]\s*(\d+)/);
-    const width = snapSize(size ? Number(size[1]) : 704);
-    const height = snapSize(size ? Number(size[2]) : 896);
+    const durationFrames = retakeSource
+      ? snapFrames(secToFrames(retakeSource.duration ?? payload.durationSec, fps))
+      : snapFrames(secToFrames(payload.durationSec, fps) + 1);
+    const width = snapSize(retakeSource?.width ?? (size ? Number(size[1]) : 704));
+    const height = snapSize(retakeSource?.height ?? (size ? Number(size[2]) : 896));
     const seed = payload.seed ?? Math.floor(Math.random() * 1_000_000_000);
 
     // probe every take up front: the timeline needs real lengths in frames,
@@ -277,21 +293,29 @@ export class ComfyVideoAdapter implements EngineAdapter {
         return client.uploadInput(`${job.id}-${tag}${path.extname(file)}`, fs.readFileSync(file));
       };
 
+      /* Everything a retake ignores is skipped here too, not merely dropped by
+       * the builder — no point uploading a keyframe or a motion reference the
+       * guide node will never look at. */
+      const keyframes = spec.retake ? [] : spec.keyframes;
+      const motion = spec.retake ? undefined : spec.motion;
+
       const timeline: TimelineInput = {
         globalPrompt: spec.globalPrompt.trim() || payload.prompt,
         fps,
         durationFrames,
         keyframes: await Promise.all(
-          spec.keyframes.map(async (k, i) => ({
+          keyframes.map(async (k, i) => ({
             file: await stage(k.image, `kf${i}`, "keyframe"),
             atFrame: secToFrames(k.atSec, fps),
             strength: k.strength,
           })),
         ),
-        promptZones: spec.promptZones.map((z) => ({
-          prompt: z.prompt,
-          lengthFrames: secToFrames(z.lengthSec, fps),
-        })),
+        promptZones: spec.retake
+          ? []
+          : spec.promptZones.map((z) => ({
+              prompt: z.prompt,
+              lengthFrames: secToFrames(z.lengthSec, fps),
+            })),
         audio: await Promise.all(
           takes.map(async (a, i) => ({
             file: await stage(a.take, `take${i}`, "voice take"),
@@ -304,14 +328,16 @@ export class ComfyVideoAdapter implements EngineAdapter {
             trimStartFrames: secToFrames(a.trimStartSec, fps),
           })),
         ),
-        motion: spec.motion
+        motion: motion
           ? [
               {
-                file: await stage(spec.motion.video, "motion", "motion reference"),
-                atFrame: secToFrames(spec.motion.atSec, fps),
-                lengthFrames: spec.motion.lengthSec
-                  ? secToFrames(spec.motion.lengthSec, fps)
+                file: await stage(motion.video, "motion", "motion reference"),
+                atFrame: secToFrames(motion.atSec, fps),
+                lengthFrames: motion.lengthSec
+                  ? secToFrames(motion.lengthSec, fps)
                   : durationFrames,
+                trimStartFrames: secToFrames(motion.trimStartSec, fps),
+                strength: motion.strength,
               },
             ]
           : undefined,
@@ -322,16 +348,24 @@ export class ComfyVideoAdapter implements EngineAdapter {
               lengthFrames: secToFrames(spec.retake.lengthSec, fps),
               prompt: spec.retake.prompt,
               strength: spec.retake.strength,
-              sourceDurationFrames: snapFrames(
-                secToFrames(
-                  (await probeMedia(resolve(spec.retake.source, "take to fix"))).duration ??
-                    payload.durationSec,
-                  fps,
-                ),
-              ),
+              // the node needs the source's own length to lay the base video
+              // out; durationFrames already IS that length, snapped
+              sourceDurationFrames: durationFrames,
             }
           : undefined,
       };
+
+      /* Motion transfer runs through an IC-LoRA, and the node takes its name
+       * from a combo list — ask the server for the exact spelling rather than
+       * composing a path it may reject (Windows separators). */
+      const icLora = motion ? await resolveIcLora(client, motion.icLora) : null;
+      if (motion && !icLora) {
+        throw new Error(
+          "Motion transfer needs an LTX IC-LoRA in your ComfyUI's loras folder " +
+            "(ltx-2.3-22b-ic-lora-motion-track-control or -union-control). " +
+            "Remove the motion reference to render the shot without it.",
+        );
+      }
 
       const graph = directorGraph({
         timeline: buildTimelineData(timeline),
@@ -343,10 +377,17 @@ export class ComfyVideoAdapter implements EngineAdapter {
         seed,
         epsilon: spec.epsilon,
         hasCustomAudio: takes.length > 0,
-        inpaintAudio: spec.inpaintAudio,
-        hasMotion: !!spec.motion,
-        icLora: spec.motion ? IC_LORA[spec.motion.icLora] : undefined,
-        icLoraStrength: spec.motion?.strength,
+        // a retake's audio comes from the take being fixed; inpainting frees
+        // just the window, so "off" keeps the original line under the new
+        // picture and "on" lets LTX score the window afresh
+        inpaintAudio: spec.retake ? spec.retake.regenerateAudio : spec.inpaintAudio,
+        hasMotion: !!motion,
+        icLora: icLora ?? undefined,
+        // the IC-LoRA is loaded as trained; how hard the reference bites is the
+        // per-segment motion strength inside timeline_data
+        icLoraStrength: 1,
+        overrideAudio: motion?.useItsAudio ?? false,
+        isRetake: !!spec.retake,
         models: this.ltxModelNames(managed),
         tuning: await resolveTuning(client, engines.videoTuning),
         filenamePrefix: "aurea/shot",
@@ -361,7 +402,17 @@ export class ComfyVideoAdapter implements EngineAdapter {
           onNode: (classType) => {
             if (LOADERS.has(classType)) report({ stage: "Loading LTX 2.3" });
             else if (classType === "LTXDirector") report({ stage: "Building the timeline" });
-            else if (classType === "LTXDirectorGuide") report({ stage: "Encoding keyframes" });
+            else if (classType === "LTXDirectorGuide") {
+              // the same node encodes guide stills, a motion reference, or the
+              // whole take a retake preserves — say which one is happening
+              report({
+                stage: spec.retake
+                  ? "Encoding the take to fix"
+                  : motion
+                    ? "Encoding keyframes and motion"
+                    : "Encoding keyframes",
+              });
+            }
             else if (classType === "SamplerCustomAdvanced") {
               pass += 1;
               report({ stage: pass > 1 ? "Rendering — refine pass" : "Rendering — base pass" });

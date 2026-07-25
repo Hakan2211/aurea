@@ -236,10 +236,17 @@ export const directorMotionSchema = z.object({
   /** library relPath of the video whose motion is transferred */
   video: z.string().min(1),
   atSec: z.number().min(0).default(0),
+  /** how much of the reference to use; omitted = to the end of the shot */
   lengthSec: z.number().min(0.1).optional(),
-  /** which IC-LoRA carries the motion */
+  /** skip this far into the reference before its motion starts driving */
+  trimStartSec: z.number().min(0).default(0),
+  /** which IC-LoRA carries the motion: "motionTrack" follows the reference's
+   * movement closely, "union" takes its staging more loosely */
   icLora: z.enum(["union", "motionTrack"]).default("motionTrack"),
-  strength: z.number().min(0).max(2).default(1),
+  /** 0..1 — how hard the reference's motion is imposed */
+  strength: z.number().min(0).max(1).default(1),
+  /** lift the reference's own audio onto the shot instead of the audio lane */
+  useItsAudio: z.boolean().default(false),
 });
 
 export const directorRetakeSchema = z.object({
@@ -249,6 +256,10 @@ export const directorRetakeSchema = z.object({
   lengthSec: z.number().min(0.1),
   prompt: z.string().min(1),
   strength: z.number().min(0).max(1).default(1),
+  /** Re-render the window's SOUND as well as its picture. Off by default: the
+   * original audio is what the rest of the take is cut to, and LTX asked for
+   * free air invents dialogue rather than matching it (measured 2026-07-25). */
+  regenerateAudio: z.boolean().default(false),
 });
 
 export const directorSpecSchema = z.object({

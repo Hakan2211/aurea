@@ -44,6 +44,8 @@ export interface VideoPlayer {
   position: string;
   total: string;
   durationSec: number;
+  /** playhead in seconds — what a "mark this bit" affordance works from */
+  positionSec: number;
   /** true once the browser refused unmuted autoplay — offer an unmute button */
   autoplayBlocked: boolean;
   toggle: () => void;
@@ -201,6 +203,7 @@ export function useVideoPlayer(src: string | undefined, autoPlay = true): VideoP
     position: fmt(time.position),
     total: fmt(time.duration),
     durationSec: time.duration,
+    positionSec: time.position,
     autoplayBlocked,
     toggle,
     play,

@@ -21,6 +21,7 @@ import {
   Play,
   RefreshCw,
   Replace,
+  Scissors,
   Settings2,
   Sparkles,
   Star,
@@ -30,6 +31,7 @@ import {
   Volume2,
   VolumeX,
   Wand2,
+  Waypoints,
   X,
 } from "lucide-react";
 import { composeZonePrompt } from "@aurea/shared";
@@ -128,6 +130,37 @@ interface DirectorTake {
   atSec: number;
   trimStartSec: number;
 }
+
+/** A motion reference: an existing clip whose movement drives this shot through
+ * an IC-LoRA. `atSec`/`lengthSec` are where its motion applies inside the shot,
+ * `trimStartSec` which part of the reference is used. */
+interface DirectorMotion {
+  video: string;
+  atSec: number;
+  lengthSec: number;
+  trimStartSec: number;
+  icLora: "union" | "motionTrack";
+  strength: number;
+  useItsAudio: boolean;
+}
+
+/** A retake in progress: a finished take with a window marked for re-render.
+ * Lives on the screen rather than the params panel because it's marked out on
+ * the preview player's scrub bar and rendered from the left panel. */
+interface RetakeDraft {
+  source: string;
+  label: string;
+  atSec: number;
+  lengthSec: number;
+  prompt: string;
+  strength: number;
+  regenerateAudio: boolean;
+}
+
+/** Shortest retake worth queuing. Under a latent frame (stride 8, so a third of
+ * a second at 24fps) the freed window rounds away to nothing and the render
+ * comes back as the original. */
+const MIN_RETAKE_SEC = 8 / 24;
 
 const fmtTime = (sec: number) => `${sec.toFixed(1)}s`;
 const clampSec = (sec: number, max: number) =>
@@ -473,9 +506,204 @@ function AudioLane({
   );
 }
 
+/** The motion lane — an existing clip's movement, transferred onto this shot.
+ *
+ * LTX reads the reference through an IC-LoRA rather than as a keyframe: the
+ * shot keeps its own cast and set (the keyframes above), and takes the
+ * reference's movement. Two weights are on disk and they behave differently —
+ * motion-track follows the reference's movement closely (a dance, a specific
+ * gesture), union-control takes its staging more loosely. */
+function MotionLane({
+  sources,
+  motion,
+  setMotion,
+  durationSec,
+  available,
+  note,
+}: {
+  sources: { relPath: string; name: string }[];
+  motion: DirectorMotion | null;
+  setMotion: (m: DirectorMotion | null) => void;
+  durationSec: number;
+  available: boolean;
+  note?: string;
+}) {
+  const [picking, setPicking] = useState(false);
+  const nameOf = (rel: string) =>
+    sources.find((s) => s.relPath === rel)?.name ?? rel.split("/").pop();
+  const patch = (p: Partial<DirectorMotion>) => motion && setMotion({ ...motion, ...p });
+
+  return (
+    <div className="relative mt-3 border-t hairline pt-3">
+      <div className="flex items-center justify-between">
+        <h4 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+          Motion reference
+        </h4>
+        {available && (
+          <button
+            onClick={() => (motion ? setMotion(null) : setPicking((p) => !p))}
+            className="inline-flex items-center gap-1 text-[10px] text-fog transition hover:text-gold"
+          >
+            {motion ? (
+              <>
+                <X size={10} /> Remove
+              </>
+            ) : (
+              <>
+                <Waypoints size={10} /> Add reference
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {!available ? (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+          {note ??
+            "Motion transfer needs an LTX IC-LoRA in your ComfyUI's loras folder — " +
+              "ltx-2.3-22b-ic-lora-motion-track-control or -union-control."}
+        </p>
+      ) : !motion ? (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+          Point at a clip and this shot borrows its movement — a dance, a gesture, a camera
+          push — while keeping its own cast and set.
+        </p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          <div className="flex items-center gap-2 rounded-xl border border-cream/10 bg-surface px-2.5 py-1.5">
+            <button
+              onClick={() => setPicking((p) => !p)}
+              title="Choose a different reference"
+              className="min-w-0 flex-1 truncate text-left text-[11px] text-cream/85 transition hover:text-gold"
+            >
+              {nameOf(motion.video)}
+            </button>
+            <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">ref</span>
+          </div>
+
+          <select
+            value={motion.icLora}
+            onChange={(e) => patch({ icLora: e.target.value as DirectorMotion["icLora"] })}
+            style={{ colorScheme: "dark" }}
+            className={cx(selectInput, "w-full")}
+          >
+            <option value="motionTrack">Track its movement (close)</option>
+            <option value="union">Follow its staging (loose)</option>
+          </select>
+
+          <div className="flex items-center gap-1.5">
+            {(
+              [
+                ["at", "atSec", "When its motion starts in the shot"],
+                ["len", "lengthSec", "How long it drives"],
+                ["skip", "trimStartSec", "Skip this far into the reference"],
+              ] as const
+            ).map(([label, key, title]) => (
+              <div
+                key={key}
+                title={title}
+                className="flex min-w-0 flex-1 items-center gap-1 rounded-md border border-cream/10 bg-ink px-1.5 py-1"
+              >
+                <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">
+                  {label}
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={key === "trimStartSec" ? undefined : durationSec}
+                  step={0.5}
+                  value={motion[key]}
+                  onChange={(e) =>
+                    patch({
+                      [key]:
+                        key === "trimStartSec"
+                          ? Math.max(0, Number(e.target.value) || 0)
+                          : clampSec(Number(e.target.value), durationSec),
+                    } as Partial<DirectorMotion>)
+                  }
+                  className="w-full min-w-0 bg-transparent text-[10px] tabular-nums text-gold outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 text-[10px] text-fog">Strength</span>
+            <input
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={motion.strength}
+              onChange={(e) => patch({ strength: Number(e.target.value) })}
+              className="min-w-0 flex-1 accent-gold"
+            />
+            <span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-gold">
+              {motion.strength.toFixed(2)}
+            </span>
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={motion.useItsAudio}
+              onChange={(e) => patch({ useItsAudio: e.target.checked })}
+              className="accent-gold"
+            />
+            <span className="text-[10px] text-fog">Take its audio too</span>
+          </label>
+          {motion.useItsAudio && (
+            <p className="text-[10px] leading-relaxed text-gold/75">
+              The reference's soundtrack replaces the audio lane for this shot.
+            </p>
+          )}
+        </div>
+      )}
+
+      {picking && available && (
+        <div className="absolute inset-x-0 top-7 z-10 max-h-44 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
+          {sources.length === 0 && (
+            <p className="px-3 py-2 text-[11px] text-fog">
+              No video in the library yet — render a take first.
+            </p>
+          )}
+          {sources.map((s) => (
+            <button
+              key={s.relPath}
+              onClick={() => {
+                // swapping the reference keeps the timings already dialled in
+                setMotion({
+                  atSec: 0,
+                  lengthSec: durationSec,
+                  trimStartSec: 0,
+                  icLora: "motionTrack",
+                  strength: 1,
+                  useItsAudio: false,
+                  ...(motion ?? {}),
+                  video: s.relPath,
+                });
+                setPicking(false);
+              }}
+              className="flex w-full items-center px-3 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5"
+            >
+              <span className="min-w-0 flex-1 truncate">{s.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- left panel: params ---------- */
 
-function ParamsPanel() {
+function ParamsPanel({
+  retake,
+  setRetake,
+}: {
+  retake: RetakeDraft | null;
+  setRetake: (r: RetakeDraft | null) => void;
+}) {
   const lab = useVideoLab();
   const [prompt, setPrompt] = useState(lab.prompt);
   const [engineId, setEngineId] = useState(lab.engines[0].id);
@@ -504,6 +732,8 @@ function ParamsPanel() {
   const [lane, setLane] = useState<DirectorTake[]>([]);
   /** generate sound in the gaps between takes rather than leaving them silent */
   const [roomTone, setRoomTone] = useState(true);
+  /** an existing clip's movement, transferred onto this shot */
+  const [motionRef, setMotionRef] = useState<DirectorMotion | null>(null);
 
   // the dead-core fallback shape predates the live fields — narrow before use
   const chosen = frameRel ? lab.frames.find((f) => f.relPath === frameRel) : undefined;
@@ -581,8 +811,35 @@ function ParamsPanel() {
     }))
     .filter((z) => z.prompt.length > 0);
 
-  const director =
-    directorOn && !directorBlocked && effectiveRel
+  /* A retake is its own kind of render: the source take is the picture
+   * everywhere outside the marked window, so keyframes, beats and the audio
+   * lane don't apply, and the shot's length, rate and size come off the source
+   * rather than the controls above. It doesn't need the Director toggle either
+   * — marking a window IS the request. */
+  const retakeReady =
+    retake !== null && !directorBlocked && retake.prompt.trim().length > 0
+      ? retake
+      : null;
+
+  const director = retakeReady
+    ? {
+        globalPrompt: prompt,
+        fps: 24,
+        keyframes: [],
+        promptZones: [],
+        audio: [],
+        retake: {
+          source: retakeReady.source,
+          atSec: retakeReady.atSec,
+          lengthSec: Math.max(MIN_RETAKE_SEC, retakeReady.lengthSec),
+          prompt: retakeReady.prompt.trim(),
+          strength: retakeReady.strength,
+          regenerateAudio: retakeReady.regenerateAudio,
+        },
+        inpaintAudio: retakeReady.regenerateAudio,
+        epsilon: blend,
+      }
+    : directorOn && !directorBlocked && effectiveRel
       ? {
           globalPrompt: prompt,
           fps: 24,
@@ -593,6 +850,7 @@ function ParamsPanel() {
           ],
           promptZones,
           audio: lane,
+          motion: motionRef ?? undefined,
           inpaintAudio: roomTone,
           epsilon: blend,
         }
@@ -661,7 +919,11 @@ function ParamsPanel() {
         {/* 2b · dialogue audio (optional — ia2v lip-sync) */}
         <section>
           <PanelLabel hint>2b · Dialogue audio (optional)</PanelLabel>
-          {directorOn ? (
+          {retake ? (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+              A retake keeps the sound of the take it's fixing — nothing to attach here.
+            </p>
+          ) : directorOn ? (
             <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
               Dialogue is on the Director's audio lane below — where a line can sit at any
               timecode, and two characters can each have their own.
@@ -731,33 +993,108 @@ function ParamsPanel() {
         <section>
           <div className="flex items-center justify-between">
             <PanelLabel hint>2c · Shot Director</PanelLabel>
-            <button
-              onClick={() => {
-                // the take attached above is dialogue at 0s — the lane's
-                // one-segment case, so carry it over instead of losing it
-                if (!directorOn && audioRel && lane.length === 0) {
-                  setLane([{ take: audioRel, atSec: 0, trimStartSec: 0 }]);
-                }
-                setDirectorOn((o) => !o);
-              }}
-              disabled={directorBlocked}
-              className={cx(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition",
-                directorBlocked
-                  ? "cursor-not-allowed bg-cream/5 text-fog/50"
-                  : directorOn
-                    ? "bg-gold/20 text-gold"
-                    : "bg-gold/12 text-gold hover:bg-gold/20",
-              )}
-            >
-              <Film size={10} /> {directorOn ? "On" : "Off"}
-            </button>
+            {retake ? (
+              /* the toggle would be a lie mid-retake — nothing on the timeline
+               * reaches this render either way */
+              <span className="inline-flex items-center gap-1 rounded-full bg-gold/20 px-2 py-0.5 text-[10px] font-medium text-gold">
+                <Scissors size={10} /> Retake
+              </span>
+            ) : (
+              <button
+                onClick={() => {
+                  // the take attached above is dialogue at 0s — the lane's
+                  // one-segment case, so carry it over instead of losing it
+                  if (!directorOn && audioRel && lane.length === 0) {
+                    setLane([{ take: audioRel, atSec: 0, trimStartSec: 0 }]);
+                  }
+                  setDirectorOn((o) => !o);
+                }}
+                disabled={directorBlocked}
+                className={cx(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition",
+                  directorBlocked
+                    ? "cursor-not-allowed bg-cream/5 text-fog/50"
+                    : directorOn
+                      ? "bg-gold/20 text-gold"
+                      : "bg-gold/12 text-gold hover:bg-gold/20",
+                )}
+              >
+                <Film size={10} /> {directorOn ? "On" : "Off"}
+              </button>
+            )}
           </div>
           {directorBlocked ? (
             <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
               {lab.capabilities?.note ??
                 "Needs a ComfyUI with the Director node pack — check Settings → Engines."}
             </p>
+          ) : retake ? (
+            /* a marked window takes the whole section over: nothing else on the
+             * timeline reaches a retake render */
+            <div className="mt-2 space-y-2">
+              <div className="rounded-xl border border-gold/30 bg-gold/6 px-2.5 py-2">
+                <div className="flex items-center gap-2">
+                  <Scissors size={11} className="shrink-0 text-gold/80" />
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-cream/90">
+                    {retake.label}
+                  </span>
+                  <button
+                    title="Cancel the retake"
+                    onClick={() => setRetake(null)}
+                    className="shrink-0 text-fog/60 transition hover:text-red-400"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="mt-1 text-[10px] tabular-nums text-gold">
+                  {fmtTime(retake.atSec)} → {fmtTime(retake.atSec + retake.lengthSec)} ·{" "}
+                  {fmtTime(retake.lengthSec)} re-rendered
+                </div>
+              </div>
+
+              <textarea
+                value={retake.prompt}
+                onChange={(e) => setRetake({ ...retake, prompt: e.target.value })}
+                rows={3}
+                placeholder="What should happen in that window instead…"
+                className="w-full resize-none rounded-xl border border-cream/10 bg-surface p-2.5 text-[11px] leading-relaxed text-cream placeholder:text-fog/60 focus:border-gold/40 focus:outline-none"
+              />
+
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-[10px] text-fog">Freedom</span>
+                <input
+                  type="range"
+                  min={0.3}
+                  max={1}
+                  step={0.05}
+                  value={retake.strength}
+                  title={`How far from the original the window may go (${retake.strength.toFixed(2)})`}
+                  onChange={(e) => setRetake({ ...retake, strength: Number(e.target.value) })}
+                  className="min-w-0 flex-1 accent-gold"
+                />
+                <span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-gold">
+                  {retake.strength.toFixed(2)}
+                </span>
+              </div>
+
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={retake.regenerateAudio}
+                  onChange={(e) => setRetake({ ...retake, regenerateAudio: e.target.checked })}
+                  className="accent-gold"
+                />
+                <span className="text-[10px] text-fog">Re-render the sound too</span>
+              </label>
+
+              <p className="text-[10px] leading-relaxed text-fog/70">
+                {retake.lengthSec < MIN_RETAKE_SEC
+                  ? "Mark at least a third of a second — a shorter window rounds away and the take comes back unchanged."
+                  : retake.regenerateAudio
+                    ? "LTX rewrites the window's audio as well — expect invented speech if the original had a line there."
+                    : "The original audio, length and framing are kept; only the picture inside the window is re-rendered."}
+              </p>
+            </div>
           ) : !directorOn ? (
             <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
               Turn on to pin an end frame and mid-shot keyframes — LTX renders the move between
@@ -1013,6 +1350,15 @@ function ParamsPanel() {
                 roomTone={roomTone}
                 setRoomTone={setRoomTone}
               />
+
+              <MotionLane
+                sources={lab.videoSources}
+                motion={motionRef}
+                setMotion={setMotionRef}
+                durationSec={durationSec}
+                // null = the probe hasn't answered yet; don't call it missing
+                available={lab.capabilities?.icLora !== false}
+              />
             </div>
           )}
         </section>
@@ -1069,6 +1415,12 @@ function ParamsPanel() {
               </div>
             </div>
           </div>
+          {retake && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-gold/75">
+              A retake follows the take it fixes — {retake.label} sets the length, frame rate and
+              size, so these two don't apply.
+            </p>
+          )}
           {engineId === "seedance" && durationSec > 7 && (
             <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
               Seedance only renders 5s or 10s — this queues as a 10-second clip.
@@ -1121,11 +1473,22 @@ function ParamsPanel() {
           }
           className={cx(
             "w-full justify-center py-3 text-[13px] uppercase tracking-widest",
-            (lab.busy || !canGenerate || !prompt.trim()) && "pointer-events-none opacity-50",
+            (lab.busy ||
+              !prompt.trim() ||
+              (retake ? !retakeReady || retake.lengthSec < MIN_RETAKE_SEC : !canGenerate)) &&
+              "pointer-events-none opacity-50",
           )}
         >
-          <Sparkles size={14} />{" "}
-          {lab.busy ? "Generating…" : canGenerate ? "Generate" : "Needs a start frame"}
+          {retake ? <Scissors size={14} /> : <Sparkles size={14} />}{" "}
+          {lab.busy
+            ? "Generating…"
+            : retake
+              ? retake.prompt.trim()
+                ? `Re-render ${fmtTime(retake.lengthSec)}`
+                : "Describe the fix"
+              : canGenerate
+                ? "Generate"
+                : "Needs a start frame"}
         </GoldButton>
         {lab.error && (
           <p className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-1.5 text-[10px] leading-relaxed text-red-300">
@@ -1311,8 +1674,9 @@ function TakeCard({
 /* ---------- transport controls ---------- */
 
 /** Click-and-drag scrub bar. Pointer capture keeps the drag alive when the
- * cursor leaves the 1px track, which is most of the time. */
-function Scrubber({ player }: { player: VideoPlayer }) {
+ * cursor leaves the 1px track, which is most of the time. `mark` shades a
+ * region of the clip — the window a retake will re-render. */
+function Scrubber({ player, mark }: { player: VideoPlayer; mark?: { from: number; to: number } }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
@@ -1364,6 +1728,17 @@ function Scrubber({ player }: { player: VideoPlayer }) {
       )}
     >
       <div className="relative h-1 rounded-full bg-cream/15">
+        {/* the retake window, drawn taller than the track so it reads as a
+          * region of the clip rather than as progress through it */}
+        {mark && mark.to > mark.from && (
+          <div
+            className="absolute -inset-y-1 rounded-sm border-x border-gold/70 bg-gold/25"
+            style={{
+              left: `${mark.from * 100}%`,
+              width: `${Math.max(0.5, (mark.to - mark.from) * 100)}%`,
+            }}
+          />
+        )}
         {/* hover ghost — where a click would land */}
         {hover != null && !dragging && (
           <div
@@ -1418,7 +1793,17 @@ function VolumeControl({ player }: { player: VideoPlayer }) {
   );
 }
 
-function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: string) => void }) {
+function PreviewPanel({
+  takeId,
+  onSelect,
+  retake,
+  setRetake,
+}: {
+  takeId: string;
+  onSelect: (id: string) => void;
+  retake: RetakeDraft | null;
+  setRetake: (r: RetakeDraft | null) => void;
+}) {
   const lab = useVideoLab();
   const navigate = useNavigate();
   const { isLiked, toggleLike } = useLikes();
@@ -1441,6 +1826,43 @@ function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: str
     if (document.fullscreenElement) void document.exitFullscreen();
     else void stageRef.current?.requestFullscreen().catch(() => {});
   }, []);
+
+  /* ---- retake marking ----
+   * The window is marked against THIS take, so the controls only appear while
+   * its source is the one on screen. Times come off the player rather than a
+   * number field: the point of marking on the scrub bar is that you find the
+   * bad two seconds by watching them. */
+  const marking = retake && take?.relPath === retake.source ? retake : null;
+  const canRetake = lab.capabilities?.director !== false;
+  const startRetake = () => {
+    if (!take?.relPath) return;
+    player.pause();
+    const from = player.positionSec;
+    const room = Math.max(0, (player.durationSec || 0) - from);
+    setRetake({
+      source: take.relPath,
+      label: take.label,
+      atSec: Number(from.toFixed(2)),
+      // two seconds is the usual "that bit's wrong", clipped to what's left
+      lengthSec: Number(Math.min(2, room || 2).toFixed(2)),
+      prompt: "",
+      strength: 1,
+      regenerateAudio: false,
+    });
+  };
+  /** the playhead becomes the in or out point, keeping in < out */
+  const markEdge = (edge: "in" | "out") => {
+    if (!marking) return;
+    const t = Number(player.positionSec.toFixed(2));
+    if (edge === "in") {
+      const end = marking.atSec + marking.lengthSec;
+      const atSec = Math.min(t, Math.max(0, end - MIN_RETAKE_SEC));
+      setRetake({ ...marking, atSec, lengthSec: Number((end - atSec).toFixed(2)) });
+    } else {
+      const lengthSec = Math.max(MIN_RETAKE_SEC, t - marking.atSec);
+      setRetake({ ...marking, lengthSec: Number(lengthSec.toFixed(2)) });
+    }
+  };
 
   /* transport shortcuts, scoped to the focused player so they never eat
    * keystrokes meant for the prompt box */
@@ -1497,6 +1919,21 @@ function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: str
                   className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
                 >
                   <ListPlus size={12} /> {timeline.sending ? "Sending…" : "Send to timeline"}
+                </button>
+                <button
+                  onClick={() => {
+                    setMenu(false);
+                    startRetake();
+                  }}
+                  disabled={!take?.relPath || !canRetake}
+                  title={
+                    canRetake
+                      ? "Mark a window and re-render just that bit"
+                      : (lab.capabilities?.note ?? "Needs a ComfyUI with the Director node pack")
+                  }
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+                >
+                  <Scissors size={12} /> Fix this bit
                 </button>
                 <button
                   onClick={() => {
@@ -1573,7 +2010,17 @@ function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: str
           <span className="shrink-0 text-[11px] tabular-nums text-cream/90">
             {player.position} <span className="text-fog">/ {player.total}</span>
           </span>
-          <Scrubber player={player} />
+          <Scrubber
+            player={player}
+            mark={
+              marking && player.durationSec > 0
+                ? {
+                    from: marking.atSec / player.durationSec,
+                    to: Math.min(1, (marking.atSec + marking.lengthSec) / player.durationSec),
+                  }
+                : undefined
+            }
+          />
           <VolumeControl player={player} />
           <button
             onClick={toggleFullscreen}
@@ -1584,6 +2031,47 @@ function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: str
           </button>
         </div>
       </div>
+
+      {/* retake range — marked here, rendered from the left panel */}
+      {marking && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-gold/30 bg-gold/6 px-3 py-2">
+          <Scissors size={12} className="shrink-0 text-gold/80" />
+          <span className="shrink-0 text-[11px] tabular-nums text-gold">
+            {fmtTime(marking.atSec)} → {fmtTime(marking.atSec + marking.lengthSec)}
+          </span>
+          <button
+            onClick={() => markEdge("in")}
+            title="Start the window at the playhead"
+            className="shrink-0 rounded-full border border-cream/15 px-2 py-0.5 text-[10px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+          >
+            Set in
+          </button>
+          <button
+            onClick={() => markEdge("out")}
+            title="End the window at the playhead"
+            className="shrink-0 rounded-full border border-cream/15 px-2 py-0.5 text-[10px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+          >
+            Set out
+          </button>
+          <button
+            onClick={() => player.seekFraction(marking.atSec / Math.max(player.durationSec, 0.1))}
+            title="Jump to the start of the window"
+            className="shrink-0 text-[10px] text-fog transition hover:text-gold"
+          >
+            Review
+          </button>
+          <span className="min-w-0 flex-1 truncate text-right text-[10px] text-fog/70">
+            {marking.prompt.trim() ? "Describe it and re-render on the left." : "Describe the fix on the left."}
+          </span>
+          <button
+            onClick={() => setRetake(null)}
+            title="Cancel the retake"
+            className="shrink-0 text-fog/60 transition hover:text-red-400"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       {/* takes */}
       <div className="pt-4">
@@ -1762,11 +2250,19 @@ function JobRail() {
 export function VideoLab() {
   const lab = useVideoLab();
   const [takeId, setTakeId] = useState((lab.takes.find((t) => t.selected) ?? lab.takes[0]).id);
+  /** a retake is marked on the preview player and rendered from the params
+   * panel, so the draft lives here, above both */
+  const [retake, setRetake] = useState<RetakeDraft | null>(null);
 
   return (
     <div className="flex h-full">
-      <ParamsPanel />
-      <PreviewPanel takeId={takeId} onSelect={setTakeId} />
+      <ParamsPanel retake={retake} setRetake={setRetake} />
+      <PreviewPanel
+        takeId={takeId}
+        onSelect={setTakeId}
+        retake={retake}
+        setRetake={setRetake}
+      />
       <JobRail />
     </div>
   );

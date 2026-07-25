@@ -29,7 +29,13 @@ function parse(inputs: ReturnType<typeof buildTimelineData>) {
   const data = JSON.parse(inputs.timeline_data) as {
     segments: ParsedSegment[];
     audioSegments: Array<{ audioFile: string; start: number; length: number; trimStart: number }>;
-    motionSegments: Array<{ videoFile: string; start: number; length: number }>;
+    motionSegments: Array<{
+      videoFile: string;
+      start: number;
+      length: number;
+      trimStart: number;
+      videoStrength: number;
+    }>;
     global_prompt: string;
     retakeMode: boolean;
   };
@@ -208,6 +214,33 @@ test("overlapping takes both survive — the node mixes them additively", () => 
   assert.equal(parse(out).audioSegments.length, 2);
 });
 
+test("a motion reference carries its own trim and strength", () => {
+  const out = buildTimelineData({
+    ...base,
+    keyframes: [{ file: "hero.png", atFrame: 0, strength: 1 }],
+    motion: [
+      { file: "aurea/dance.mp4", atFrame: 0, lengthFrames: 121, trimStartFrames: 12, strength: 0.8 },
+    ],
+  });
+  assert.deepEqual(parse(out).motionSegments, [
+    { videoFile: "aurea/dance.mp4", start: 0, length: 121, trimStart: 12, videoStrength: 0.8 },
+  ]);
+});
+
+test("motion strength defaults to the node's full-bite 1.0", () => {
+  const out = buildTimelineData({
+    ...base,
+    motion: [{ file: "aurea/dance.mp4", atFrame: 0, lengthFrames: 121 }],
+  });
+  assert.deepEqual(parse(out).motionSegments[0], {
+    videoFile: "aurea/dance.mp4",
+    start: 0,
+    length: 121,
+    trimStart: 0,
+    videoStrength: 1,
+  });
+});
+
 test("retake carries the source video and the window to re-render", () => {
   const out = buildTimelineData({
     ...base,
@@ -223,11 +256,77 @@ test("retake carries the source video and the window to re-render", () => {
   assert.equal(data.retakeMode, true);
   assert.equal(data.retakeStart, 48);
   assert.equal(data.retakeLength, 48);
+  assert.equal(data.retakeStrength, 1);
   assert.deepEqual(data.retakeVideo, {
     fileName: "take.mp4",
     imageFile: "aurea/take.mp4",
     videoDurationFrames: 121,
   });
+  // in retake mode the node reads its global prompt from retake_global_prompt,
+  // so leaving that empty would render the fix with no cast anchored
+  assert.equal(data.retake_global_prompt, "a warm kitchen");
+});
+
+test("a retake confines its prompt to the window and anchors the rest", () => {
+  // mirrors the pack's own editor: [anchor | the fix | anchor] with the guide
+  // strengths zeroed outside the window
+  const out = buildTimelineData({
+    ...base, // 121 frames
+    retake: {
+      file: "aurea/take.mp4",
+      atFrame: 48,
+      lengthFrames: 24,
+      prompt: "he blinks instead of flinching",
+      sourceDurationFrames: 121,
+      strength: 0.9,
+    },
+  });
+  const { zones, lengths } = parse(out);
+  assert.deepEqual(zones, ["a warm kitchen", "he blinks instead of flinching", "a warm kitchen"]);
+  assert.deepEqual(lengths, [48, 24, 49]);
+  assert.equal(
+    lengths.reduce((a, b) => a + b, 0),
+    121,
+  );
+  assert.equal(out.guide_strength, "0.00, 0.90, 0.00");
+});
+
+test("a retake at frame 0 has no leading zone to describe", () => {
+  const out = buildTimelineData({
+    ...base,
+    retake: {
+      file: "aurea/take.mp4",
+      atFrame: 0,
+      lengthFrames: 121,
+      prompt: "the whole thing, warmer",
+      sourceDurationFrames: 121,
+    },
+  });
+  const { zones, lengths } = parse(out);
+  assert.deepEqual(zones, ["the whole thing, warmer"]);
+  assert.deepEqual(lengths, [121]);
+});
+
+test("a retake drops keyframes, takes and motion the node would ignore", () => {
+  // the guide node returns before it reads any of them — a timeline claiming
+  // them would describe a render nobody gets
+  const out = buildTimelineData({
+    ...base,
+    keyframes: [{ file: "hero.png", atFrame: 0, strength: 1 }],
+    audio: [{ file: "aurea/line.wav", atFrame: 0, lengthFrames: 48 }],
+    motion: [{ file: "aurea/dance.mp4", atFrame: 0, lengthFrames: 121 }],
+    retake: {
+      file: "aurea/take.mp4",
+      atFrame: 24,
+      lengthFrames: 24,
+      prompt: "fix his hand",
+      sourceDurationFrames: 121,
+    },
+  });
+  const data = parse(out);
+  assert.deepEqual(data.segments, []);
+  assert.deepEqual(data.audioSegments, []);
+  assert.deepEqual(data.motionSegments, []);
 });
 
 test("no retake means retakeMode stays off", () => {

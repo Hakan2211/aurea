@@ -1141,6 +1141,13 @@ export function useVideoLab() {
         .filter((a) => a.kind === "audio")
         .slice(0, 30)
         .map((a) => ({ relPath: a.relPath, name: a.name, url: media ? media(a.url) : undefined })),
+      /** every video take in the library — what a motion reference is picked
+       * from. Wider than `takes` (which is this lab's newest eight) because the
+       * clip whose movement you want is often an old one, or an import. */
+      videoSources: (allAssets ?? [])
+        .filter((a) => a.kind === "video")
+        .slice(0, 40)
+        .map((a) => ({ relPath: a.relPath, name: a.name, url: media ? media(a.url) : undefined })),
       failures: labFailures(jobsData, "video"),
       retry: (id: string) => retryJob({ id }),
       /** a rejected enqueue — surfaced under the Generate button */

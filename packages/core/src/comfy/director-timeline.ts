@@ -57,6 +57,10 @@ export interface TimelineMotionSegment {
   file: string;
   atFrame: number;
   lengthFrames: number;
+  /** skip this many frames into the reference before its motion is used */
+  trimStartFrames?: number;
+  /** 0..1 — how hard the reference's motion is imposed on the shot */
+  strength?: number;
 }
 
 export interface TimelineRetake {
@@ -103,6 +107,7 @@ interface ImageSegment {
 
 export function buildTimelineData(input: TimelineInput): TimelineNodeInputs {
   const duration = Math.max(1, Math.round(input.durationFrames));
+  if (input.retake) return retakeInputs(input, input.retake, duration);
 
   /* --- image guides ---------------------------------------------------
    * The node models a guide as a block [start, start+length) and pins the
@@ -146,13 +151,8 @@ export function buildTimelineData(input: TimelineInput): TimelineNodeInputs {
     global_prompt: input.globalPrompt,
     segments,
     audioSegments: fitAudio(input.audio ?? [], duration),
-    motionSegments: (input.motion ?? []).map((m) => ({
-      videoFile: m.file,
-      start: Math.max(0, Math.round(m.atFrame)),
-      length: Math.max(1, Math.round(m.lengthFrames)),
-      trimStart: 0,
-    })),
-    ...retakeFields(input.retake),
+    motionSegments: motionSegments(input.motion ?? []),
+    retakeMode: false,
   };
 
   return {
@@ -211,20 +211,76 @@ function fitAudio(audio: TimelineAudioSegment[], duration: number) {
   return fitted;
 }
 
-function retakeFields(retake: TimelineRetake | undefined) {
-  if (!retake) return { retakeMode: false };
+/** A motion reference drives the shot through an IC-LoRA guide. `videoStrength`
+ * is how hard that guide bites (the node skips a segment at 0 and defaults to
+ * 1); `videoAttentionStrength` is deliberately left off so the pack's own 0.65
+ * default applies — the reference workflow doesn't touch it either. */
+function motionSegments(motion: TimelineMotionSegment[]) {
+  return motion.map((m) => ({
+    videoFile: m.file,
+    start: Math.max(0, Math.round(m.atFrame)),
+    length: Math.max(1, Math.round(m.lengthFrames)),
+    trimStart: Math.max(0, Math.round(m.trimStartFrames ?? 0)),
+    videoStrength: round3(clamp(m.strength ?? 1, 0, 1)),
+  }));
+}
+
+/* --- retake ---------------------------------------------------------
+ * Retake is a different render, not an extra field on this one: the node
+ * re-encodes the whole source video into the latent, frees ONLY the marked
+ * window, and generates that window in place. So the pixels outside the window
+ * are the original take's, and the shot has to be authored at the source's own
+ * length, rate and size for them to line up (the adapter does that).
+ *
+ * The three flat strings are what the pack's timeline editor writes in retake
+ * mode — read out of js/ltx_director.js, since python never looks at
+ * `retakePrompt` itself. It tiles the clip as
+ *
+ *   [ global prompt | the fix | global prompt ]  with strengths [0, s, 0]
+ *
+ * which is what confines the new description to the window while the rest of
+ * the take stays on the shot's own anchor. Keyframes, voice takes and motion
+ * references are dropped rather than passed through: the guide node returns
+ * before it reads any of them, and a timeline that claims them would describe a
+ * render nobody gets. */
+function retakeInputs(
+  input: TimelineInput,
+  retake: TimelineRetake,
+  duration: number,
+): TimelineNodeInputs {
+  const start = clamp(Math.round(retake.atFrame), 0, Math.max(0, duration - 1));
+  const length = clamp(Math.round(retake.lengthFrames), 1, duration - start);
+  const strength = round3(clamp(retake.strength ?? 1, 0, 1));
+  const anchor = input.globalPrompt.trim() || "video";
+  const fix = retake.prompt.replace(/\|/g, "/").trim() || anchor;
+
+  const zones: Array<[string, number, number]> = [];
+  if (start > 0) zones.push([anchor, start, 0]);
+  zones.push([fix, length, strength]);
+  if (start + length < duration) zones.push([anchor, duration - start - length, 0]);
+
   return {
-    retakeMode: true,
-    retakeStart: Math.max(0, Math.round(retake.atFrame)),
-    retakeLength: Math.max(1, Math.round(retake.lengthFrames)),
-    retakePrompt: retake.prompt,
-    retakeStrength: retake.strength ?? 1,
-    retake_global_prompt: "",
-    retakeVideo: {
-      fileName: retake.file.split("/").pop() ?? retake.file,
-      imageFile: retake.file,
-      videoDurationFrames: Math.max(1, Math.round(retake.sourceDurationFrames)),
-    },
+    timeline_data: JSON.stringify({
+      global_prompt: input.globalPrompt,
+      // in retake mode the node reads its global prompt from THIS field
+      retake_global_prompt: input.globalPrompt,
+      segments: [],
+      audioSegments: [],
+      motionSegments: [],
+      retakeMode: true,
+      retakeStart: start,
+      retakeLength: length,
+      retakePrompt: fix,
+      retakeStrength: strength,
+      retakeVideo: {
+        fileName: retake.file.split("/").pop() ?? retake.file,
+        imageFile: retake.file,
+        videoDurationFrames: Math.max(1, Math.round(retake.sourceDurationFrames)),
+      },
+    }),
+    local_prompts: zones.map(([p]) => p.replace(/\|/g, "/")).join("|"),
+    segment_lengths: zones.map(([, l]) => l).join(", "),
+    guide_strength: zones.map(([, , s]) => s.toFixed(2)).join(", "),
   };
 }
 

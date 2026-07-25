@@ -33,13 +33,37 @@ export interface MediaProbe {
   duration: number | null;
   hasAudio: boolean;
   hasVideo: boolean;
+  /** picture geometry and rate of the first video stream, null when there
+   * isn't one. A Director retake needs all three: it re-renders a window of an
+   * existing mp4 in place, so its own render has to match the source's frame
+   * count, frame rate and dimensions exactly or the preserved regions land
+   * scaled and out of step. */
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+}
+
+/** "30000/1001" → 29.97; ffprobe reports r_frame_rate as a rational */
+function parseRate(rate: string | undefined): number | null {
+  if (!rate) return null;
+  const [num, den] = rate.split("/").map(Number);
+  const fps = den ? num / den : num;
+  return Number.isFinite(fps) && fps > 0 ? fps : null;
 }
 
 export function probeMedia(file: string): Promise<MediaProbe> {
   return new Promise((resolve, reject) => {
     execFile(
       "ffprobe",
-      ["-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", file],
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration:stream=codec_type,width,height,r_frame_rate",
+        "-of",
+        "json",
+        file,
+      ],
       { windowsHide: true },
       (err, stdout) => {
         if (err) {
@@ -49,13 +73,22 @@ export function probeMedia(file: string): Promise<MediaProbe> {
         try {
           const info = JSON.parse(stdout) as {
             format?: { duration?: string };
-            streams?: Array<{ codec_type?: string }>;
+            streams?: Array<{
+              codec_type?: string;
+              width?: number;
+              height?: number;
+              r_frame_rate?: string;
+            }>;
           };
           const duration = Number(info.format?.duration);
+          const video = info.streams?.find((s) => s.codec_type === "video");
           resolve({
             duration: Number.isFinite(duration) && duration > 0 ? duration : null,
             hasAudio: !!info.streams?.some((s) => s.codec_type === "audio"),
-            hasVideo: !!info.streams?.some((s) => s.codec_type === "video"),
+            hasVideo: !!video,
+            width: video?.width ?? null,
+            height: video?.height ?? null,
+            fps: parseRate(video?.r_frame_rate),
           });
         } catch (parseErr) {
           reject(parseErr instanceof Error ? parseErr : new Error(String(parseErr)));
@@ -127,7 +160,12 @@ export class FfmpegExportAdapter implements EngineAdapter {
       const probes = new Map<string, MediaProbe>();
       for (const rel of sources) {
         const file = resolve(rel);
-        probes.set(rel, isImageFile(file) ? { duration: null, hasAudio: false, hasVideo: true } : await probeMedia(file));
+        probes.set(
+          rel,
+          isImageFile(file)
+            ? { duration: null, hasAudio: false, hasVideo: true, width: null, height: null, fps: null }
+            : await probeMedia(file),
+        );
       }
       if (canceled) throw new Error("Canceled by user");
 

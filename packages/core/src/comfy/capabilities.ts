@@ -49,6 +49,29 @@ const MSR_LORA = /licon.*msr|msr.*licon/i;
 /** the IC-LoRAs that carry motion onto a keyframe */
 const IC_LORA = /ic-lora.*(union-control|motion-track)/i;
 
+/** which behaviour each IC-LoRA carries: `union` control follows the reference
+ * loosely (a whole scene's staging), `motionTrack` tracks its movement closely
+ * (a dance, a specific gesture) */
+export type IcLoraKind = "union" | "motionTrack";
+const IC_LORA_MARKER: Record<IcLoraKind, RegExp> = {
+  union: /union-control/i,
+  motionTrack: /motion-track/i,
+};
+
+/** The exact name this ComfyUI wants for an IC-LoRA, or null if it hasn't got
+ * one. Asking the node rather than composing a path matters: the options come
+ * from a directory walk, so on Windows they arrive with BACKSLASH separators
+ * ("ltxv\ltx2\…") and ComfyUI validates a combo input against that list
+ * verbatim — a forward-slash guess is rejected before the render starts. */
+export async function resolveIcLora(
+  client: { comboOptions(classType: string, input: string): Promise<string[]> },
+  kind: IcLoraKind,
+): Promise<string | null> {
+  const options = await client.comboOptions("LTXDirectorGuide", "ic_lora_name");
+  const marker = IC_LORA_MARKER[kind];
+  return options.find((o) => IC_LORA.test(o) && marker.test(o)) ?? null;
+}
+
 export interface VideoCapabilities {
   mode: "managed" | "external";
   /** a ComfyUI answered the probe — everything below is meaningless if false */
