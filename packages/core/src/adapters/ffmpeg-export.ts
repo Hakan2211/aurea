@@ -186,6 +186,8 @@ export class FfmpegExportAdapter implements EngineAdapter {
       let ai = 0;
       for (const track of tl.tracks) {
         if (track.muted) continue;
+        const gain = track.gain ?? 1;
+        if (gain <= 0) continue;
         for (const clip of track.clips) {
           if (!probes.get(clip.asset)?.hasAudio) continue;
           const idx = indexFor(clip, false);
@@ -195,6 +197,7 @@ export class FfmpegExportAdapter implements EngineAdapter {
             `atrim=start=${n(clip.in)}:end=${n(clip.in + clip.duration)}`,
             "asetpts=PTS-STARTPTS",
             "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo",
+            gain !== 1 ? `volume=${n(gain)}` : null,
             fade > 0 ? `afade=t=in:st=0:d=${n(fade)}` : null,
             `adelay=${Math.round(clip.start * 1000)}:all=1`,
           ]

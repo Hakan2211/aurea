@@ -73,3 +73,48 @@ export function useAudioPlayer(): AudioPlayer {
     toggle,
   };
 }
+
+/* ---------- duration probe ---------- */
+
+const fmtClock = (sec: number) =>
+  `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+
+/** metadata probes are cheap but not free — remember every answer for the session */
+const durationCache = new Map<string, number>();
+
+/** "m:ss" length of a media URL, probed from its metadata ("" while unknown).
+ * The library scan carries no duration, so cards probe client-side. */
+export function useMediaDuration(url: string | undefined): string {
+  const [sec, setSec] = useState<number | null>(() =>
+    url ? (durationCache.get(url) ?? null) : null,
+  );
+  useEffect(() => {
+    if (!url) {
+      setSec(null);
+      return;
+    }
+    const cached = durationCache.get(url);
+    if (cached !== undefined) {
+      setSec(cached);
+      return;
+    }
+    let alive = true;
+    const el = document.createElement("audio");
+    el.preload = "metadata";
+    el.onloadedmetadata = () => {
+      if (Number.isFinite(el.duration) && el.duration > 0) {
+        durationCache.set(url, el.duration);
+        if (alive) setSec(el.duration);
+      }
+      el.src = "";
+    };
+    el.onerror = () => {
+      el.src = "";
+    };
+    el.src = url;
+    return () => {
+      alive = false;
+    };
+  }, [url]);
+  return sec != null && Number.isFinite(sec) ? fmtClock(sec) : "";
+}

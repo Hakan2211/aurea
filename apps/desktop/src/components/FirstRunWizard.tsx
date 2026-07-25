@@ -107,6 +107,11 @@ function EnginesStep({ settings }: { settings: Settings }) {
       value: settings.engines.qwenTtsPython,
     },
     {
+      label: "DramaBox TTS",
+      note: "expressive acting venv",
+      value: settings.engines.dramaboxPython,
+    },
+    {
       label: "ACE-Step 1.5",
       note: "music generation",
       value: settings.engines.acestepDir,

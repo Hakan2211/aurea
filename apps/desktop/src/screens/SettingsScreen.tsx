@@ -9,8 +9,10 @@ import {
   ExternalLink,
   Eye,
   Folder,
+  FolderOpen,
   HardDriveDownload,
   Keyboard,
+  Link2,
   MoreVertical,
   Pause,
   Play,
@@ -23,7 +25,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import type { ModelEntry } from "@aurea/shared";
-import { useModels, useSettings } from "@/hooks";
+import { useModels, useRootPreview, useSettings } from "@/hooks";
 import type { Provider } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Progress, cx } from "@/components/ui";
 import { RuntimeCard } from "@/components/RuntimeCard";
@@ -199,8 +201,17 @@ function ProviderAuth({ provider }: { provider: Provider }) {
 }
 
 function ProvidersSection() {
-  const { providers, defaultProvider, setDefaultProvider, falApiKey, setFalApiKey } = useSettings();
+  const {
+    providers,
+    defaultProvider,
+    setDefaultProvider,
+    falApiKey,
+    setFalApiKey,
+    replicateApiToken,
+    setReplicateApiToken,
+  } = useSettings();
   const [falDraft, setFalDraft] = useState<string | null>(null);
+  const [replicateDraft, setReplicateDraft] = useState<string | null>(null);
   const active = defaultProvider;
   const setActive = (id: string) =>
     setDefaultProvider(id as Parameters<typeof setDefaultProvider>[0]);
@@ -267,6 +278,28 @@ function ProvidersSection() {
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           spellCheck={false}
           placeholder="key id:key secret"
+          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+        />
+      </div>
+      <div className="rounded-2xl border hairline bg-surface/50 p-4">
+        <div className="text-[13px] font-medium text-cream">Replicate API token</div>
+        <div className="mt-0.5 text-[10px] text-fog">
+          Unlocks RVC v2 voice training and conversion in the Voice Lab — the highest-quality
+          cloned-singing path. Runs bill to your Replicate account; the estimated cost shows on every
+          job card before it spends.
+        </div>
+        <input
+          type="password"
+          value={replicateDraft ?? replicateApiToken}
+          onChange={(e) => setReplicateDraft(e.target.value)}
+          onBlur={() => {
+            if (replicateDraft !== null && replicateDraft !== replicateApiToken)
+              setReplicateApiToken(replicateDraft);
+            setReplicateDraft(null);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          spellCheck={false}
+          placeholder="r8_…"
           className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
         />
       </div>
@@ -366,6 +399,19 @@ function ModelActions({ m }: { m: ModelEntry }) {
       </div>
     );
 
+  // found in one of the user's own folders — usable, but not ours to manage
+  if (s.state === "linked")
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <Chip tone="gold" className="shrink-0 text-[10px]">
+          <Link2 size={10} /> Linked
+        </Chip>
+        <span className="min-w-0 truncate text-[10px] text-fog" title={s.linkedRoot ?? ""}>
+          {s.linkedRoot}
+        </span>
+      </div>
+    );
+
   // absent / error — offer download (resume when partial bytes exist)
   const resume = s.bytes > 0;
   if (m.license.gated && !s.licenseAccepted && !confirmLicense)
@@ -387,14 +433,96 @@ function ModelActions({ m }: { m: ModelEntry }) {
   );
 }
 
+/** Point the studio at a model library the user already owns. Most people
+ * arriving here have tens of gigabytes of these exact public files sitting in
+ * a ComfyUI install; re-downloading them is the fastest way to lose someone
+ * before they render a frame. */
+function LinkedFoldersCard() {
+  const { modelRoots, linkRoot, unlinkRoot, removeError } = useModels();
+  const [draft, setDraft] = useState("");
+  const preview = useRootPreview(draft);
+  const alreadyLinked = modelRoots.includes(draft.replace(/[\\/]+$/, ""));
+
+  return (
+    <div className="rounded-2xl border hairline bg-surface/50 p-4">
+      <div className="flex items-baseline gap-2">
+        <Link2 size={13} className="translate-y-0.5 text-gold" />
+        <h3 className="text-[13px] font-medium text-cream">Linked folders</h3>
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-fog">
+        Already have a ComfyUI model library? Point Aurea at it and those weights count as
+        installed — no second download. Linked files are mounted read-only: never verified, never
+        modified, never deleted. Expects the conventional layout
+        (<span className="text-cream/70">unet/, diffusion_models/, text_encoders/, vae/, loras/</span>).
+      </p>
+
+      {modelRoots.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {modelRoots.map((root) => (
+            <div
+              key={root}
+              className="flex items-center gap-2 rounded-xl border border-cream/10 bg-surface px-3 py-2"
+            >
+              <FolderOpen size={12} className="shrink-0 text-fog" />
+              <span className="min-w-0 flex-1 truncate text-[11px] text-cream/85">{root}</span>
+              <button
+                onClick={() => void unlinkRoot(root)}
+                title="Unlink (your files are not touched)"
+                className="shrink-0 text-fog/60 transition hover:text-[#e07a6b]"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 flex gap-1.5">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="D:\models"
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded-xl border border-cream/10 bg-surface px-3 py-2 text-[12px] text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
+        />
+        <GoldButton
+          disabled={preview.found.length === 0 || alreadyLinked}
+          onClick={() => {
+            void linkRoot(draft.replace(/[\\/]+$/, ""));
+            setDraft("");
+          }}
+        >
+          <Link2 size={12} /> Link folder
+        </GoldButton>
+      </div>
+
+      {draft.trim().length > 2 && (
+        <p className="mt-2 text-[11px] text-fog">
+          {preview.checking
+            ? "Scanning…"
+            : alreadyLinked
+              ? "Already linked."
+              : preview.found.length === 0
+                ? "No registry models found here — check the path and that it holds the category subfolders."
+                : `Found ${preview.found.length} model${preview.found.length === 1 ? "" : "s"} · ${fmtSize(
+                    preview.found.reduce((n, m) => n + m.sizeBytes, 0),
+                  )} you won't need to download — ${preview.found.map((m) => m.name).join(", ")}`}
+        </p>
+      )}
+      {removeError && <p className="mt-2 text-[11px] text-[#e07a6b]">{removeError}</p>}
+    </div>
+  );
+}
+
 function ModelsSection() {
   const { models, live } = useModels();
   return (
     <div className="space-y-5">
       <SectionHeader
         title="Models"
-        sub="Downloadable weights for the local engines. Files land in your data root, resume if interrupted, and are checksum-verified."
+        sub="Weights for the local engines — downloaded into your data root (resumable, checksum-verified) or linked from a library you already have."
       />
+      {live && <LinkedFoldersCard />}
       {!live ? (
         <div className="rounded-2xl border hairline bg-surface/50 p-8 text-center text-[12px] text-fog">
           The studio core isn't reachable — model management needs a running studiod.

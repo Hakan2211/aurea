@@ -74,18 +74,27 @@ function buildClients(coords: Coords): Clients {
 /** One subscriber per stream for the whole app — screens read the cache. */
 function LiveSync() {
   const utils = trpc.useUtils();
-  const finishedCount = useRef(-1);
+  const finishedKey = useRef<string | null>(null);
 
   trpc.jobs.onSnapshot.useSubscription(undefined, {
     onData: (jobs) => {
       utils.jobs.list.setData(undefined, jobs);
-      // a job finishing may have imported an asset — rescan library + project metas
-      const finished = jobs.filter((j) => j.status === "completed" || j.status === "failed").length;
-      if (finishedCount.current !== -1 && finished !== finishedCount.current) {
+      // a job finishing may have imported an asset — rescan library + project
+      // metas. Keyed on the finished-job id set, not a count: at the history
+      // cap a completion evicts an old finished job and the count stays flat.
+      const key = jobs
+        .filter((j) => j.status === "completed" || j.status === "failed")
+        .map((j) => j.id)
+        .sort()
+        .join("|");
+      if (finishedKey.current !== null && key !== finishedKey.current) {
         void utils.library.invalidate();
         void utils.projects.invalidate();
+        // catalogs carry job-derived capability flags (e.g. a voice's trained
+        // RVC model appears when its training job finishes)
+        void utils.labs.invalidate();
       }
-      finishedCount.current = finished;
+      finishedKey.current = key;
     },
   });
 

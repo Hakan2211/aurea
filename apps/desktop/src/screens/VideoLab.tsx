@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AudioLines,
   Check,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
   Copy,
   FileText,
   HelpCircle,
@@ -20,6 +22,7 @@ import {
   Timer,
   Volume2,
   Wand2,
+  X,
 } from "lucide-react";
 import { useJobs, useVideoLab } from "@/hooks";
 import type { VideoStage, VideoTake } from "@/data/sample";
@@ -92,14 +95,30 @@ function Select({
 
 function ParamsPanel() {
   const lab = useVideoLab();
-  // the dead-core fallback shape predates the live fields — narrow before use
-  const canGenerate = "canGenerate" in lab ? lab.canGenerate : false;
-  const startFrameUrl = "url" in lab.startFrame ? lab.startFrame.url : undefined;
   const [prompt, setPrompt] = useState(lab.prompt);
   const [engineId, setEngineId] = useState(lab.engines[0].id);
   const [duration, setDuration] = useState(lab.duration);
   const [resolution, setResolution] = useState(lab.resolution);
   const [motion, setMotion] = useState(lab.motionStrength);
+  /** null = the default (newest library still); set by the Replace picker */
+  const [frameRel, setFrameRel] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /** optional dialogue take — switches the render to ia2v lip-sync */
+  const [audioRel, setAudioRel] = useState<string | null>(null);
+  const [audioOpen, setAudioOpen] = useState(false);
+
+  // the dead-core fallback shape predates the live fields — narrow before use
+  const chosen = frameRel ? lab.frames.find((f) => f.relPath === frameRel) : undefined;
+  const defaultRel = "relPath" in lab.startFrame ? lab.startFrame.relPath : undefined;
+  const frameName = chosen?.name ?? lab.startFrame.name;
+  const frameMeta = chosen?.meta ?? lab.startFrame.meta;
+  const frameSwatch = chosen?.swatch ?? lab.startFrame.swatch;
+  const startFrameUrl = chosen?.url ?? ("url" in lab.startFrame ? lab.startFrame.url : undefined);
+  const effectiveRel = chosen?.relPath ?? defaultRel;
+  const canGenerate = "canGenerate" in lab ? !!effectiveRel : false;
+  const audioName = audioRel
+    ? (lab.audioSources.find((a) => a.relPath === audioRel)?.name ?? audioRel)
+    : null;
 
   return (
     <aside className="flex w-[280px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
@@ -128,12 +147,19 @@ function ParamsPanel() {
         <section>
           <div className="flex items-center justify-between">
             <PanelLabel>2 · Start frame (keyframe)</PanelLabel>
-            <button className="inline-flex items-center gap-1 text-[10px] text-fog transition hover:text-gold">
+            <button
+              onClick={() => setPickerOpen(true)}
+              className="inline-flex items-center gap-1 text-[10px] text-fog transition hover:text-gold"
+            >
               <Replace size={10} /> Replace
             </button>
           </div>
-          <div className="relative mt-2 h-28 overflow-hidden rounded-xl border border-cream/10">
-            <div className={cx("absolute inset-0", lab.startFrame.swatch)} />
+          <button
+            onClick={() => setPickerOpen(true)}
+            title="Choose a different start frame"
+            className="relative mt-2 block h-28 w-full overflow-hidden rounded-xl border border-cream/10 text-left transition hover:border-gold/40"
+          >
+            <div className={cx("absolute inset-0", frameSwatch)} />
             {startFrameUrl ? (
               <img
                 src={startFrameUrl}
@@ -145,10 +171,73 @@ function ParamsPanel() {
               <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
             )}
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/80 to-transparent px-2.5 pb-2 pt-5">
-              <div className="truncate text-[11px] text-cream/90">{lab.startFrame.name}</div>
-              <div className="text-[10px] text-fog">{lab.startFrame.meta}</div>
+              <div className="truncate text-[11px] text-cream/90">{frameName}</div>
+              <div className="text-[10px] text-fog">
+                {frameMeta}
+                {!frameRel && " · newest still (default)"}
+              </div>
             </div>
+          </button>
+        </section>
+
+        {/* 2b · dialogue audio (optional — ia2v lip-sync) */}
+        <section>
+          <PanelLabel hint>2b · Dialogue audio (optional)</PanelLabel>
+          <div className="relative mt-2">
+            {audioRel ? (
+              <div className="flex items-center gap-2 rounded-xl border border-gold/30 bg-gold/6 px-3 py-2">
+                <AudioLines size={13} className="shrink-0 text-gold/80" />
+                <span className="min-w-0 flex-1 truncate text-[11px] text-cream/90">
+                  {audioName}
+                </span>
+                <button
+                  title="Remove audio — back to plain i2v"
+                  onClick={() => setAudioRel(null)}
+                  className="shrink-0 text-fog/60 transition hover:text-red-400"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAudioOpen((o) => !o)}
+                className="flex w-full items-center gap-2 rounded-xl border border-dashed border-cream/15 px-3 py-2 text-[11px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+              >
+                <AudioLines size={13} />
+                <span className="flex-1 text-left">Attach a voice take…</span>
+                <ChevronDown
+                  size={11}
+                  className={cx("text-fog transition-transform", audioOpen && "rotate-180")}
+                />
+              </button>
+            )}
+            {audioOpen && !audioRel && (
+              <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-44 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
+                {lab.audioSources.length === 0 && (
+                  <p className="px-3 py-2 text-[11px] text-fog">
+                    No voice takes yet — generate one in the Voice lab.
+                  </p>
+                )}
+                {lab.audioSources.map((a) => (
+                  <button
+                    key={a.relPath}
+                    onClick={() => {
+                      setAudioRel(a.relPath);
+                      setAudioOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5"
+                  >
+                    <span className="flex-1 truncate">{a.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+          <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+            {audioRel
+              ? "Renders with LTX ia2v — the named speaker lip-syncs this audio."
+              : "Attach a Voice-lab take to switch from i2v to ia2v lip-sync."}
+          </p>
         </section>
 
         {/* 3 · engine */}
@@ -223,7 +312,7 @@ function ParamsPanel() {
         </section>
       </div>
 
-      <div className="p-4 pt-2">
+      <div className="space-y-2 p-4 pt-2">
         <GoldButton
           onClick={() =>
             lab.generate({
@@ -232,6 +321,8 @@ function ParamsPanel() {
               durationSec: parseInt(duration) || 5,
               resolution,
               motionStrength: motion,
+              startFrame: effectiveRel,
+              audio: audioRel ?? undefined,
             })
           }
           className={cx(
@@ -242,7 +333,94 @@ function ParamsPanel() {
           <Sparkles size={14} />{" "}
           {lab.busy ? "Generating…" : canGenerate ? "Generate" : "Needs a start frame"}
         </GoldButton>
+        {lab.error && (
+          <p className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-1.5 text-[10px] leading-relaxed text-red-300">
+            {lab.error}
+          </p>
+        )}
+        {lab.failures.slice(0, 1).map((f) => (
+          <div
+            key={f.id}
+            className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-1.5"
+          >
+            <div className="flex items-center gap-1.5">
+              <CircleAlert size={11} className="shrink-0 text-red-400" />
+              <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-cream/90">
+                {f.title} · {f.engine}
+              </span>
+              <button
+                onClick={() => lab.retry(f.id)}
+                className="shrink-0 text-[10px] text-gold hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-red-300">{f.error}</p>
+          </div>
+        ))}
       </div>
+
+      {pickerOpen && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-ink/85 backdrop-blur-sm"
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            className="flex max-h-[70vh] w-[560px] flex-col rounded-2xl border border-cream/12 bg-raised p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-serif text-[18px] font-semibold text-cream">
+                Choose a start frame
+              </h3>
+              <button
+                onClick={() => setPickerOpen(false)}
+                className="text-fog/60 transition hover:text-cream"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-fog">
+              Any library still works — generate new ones in the Image lab.
+            </p>
+            <div className="mt-4 grid min-h-0 flex-1 auto-rows-min grid-cols-3 gap-2 overflow-y-auto">
+              {lab.frames.map((f) => (
+                <button
+                  key={f.relPath}
+                  onClick={() => {
+                    setFrameRel(f.relPath);
+                    setPickerOpen(false);
+                  }}
+                  className={cx(
+                    "group relative aspect-video overflow-hidden rounded-lg border transition",
+                    f.relPath === effectiveRel
+                      ? "border-gold/60"
+                      : "border-cream/8 hover:border-gold/40",
+                  )}
+                >
+                  <div className={cx("absolute inset-0", f.swatch)} />
+                  {f.url && (
+                    <img
+                      src={f.url}
+                      alt=""
+                      draggable={false}
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  )}
+                  <span className="absolute inset-x-1 bottom-1 truncate text-left text-[9px] text-cream/80">
+                    {f.name}
+                  </span>
+                </button>
+              ))}
+              {lab.frames.length === 0 && (
+                <p className="col-span-3 py-6 text-center text-[11px] text-fog">
+                  No stills in the library yet.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

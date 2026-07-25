@@ -71,9 +71,10 @@ export class ComfyVideoAdapter implements EngineAdapter {
       if (!fs.existsSync(image)) throw new Error(`start frame not found: ${payload.startFrame}`);
       const audio = payload.audio ? path.join(storage.dataRoot, payload.audio) : undefined;
       if (audio && !fs.existsSync(audio)) throw new Error(`audio not found: ${payload.audio}`);
-      if (managed && this.models.list().find((m) => m.id === "ltx-23-22b-fp8")?.status.state !== "installed") {
+      if (managed && !this.models.ready("ltx-23-22b-fp8")) {
         throw new Error(
-          "LTX 2.3 weights are not installed — Settings → Models → LTX 2.3 22B (fp8), or switch the video engine to external",
+          "LTX 2.3 weights are not installed — Settings → Models → LTX 2.3 22B (fp8), " +
+            "link a folder that already has them, or switch the video engine to external",
         );
       }
 
@@ -102,7 +103,9 @@ export class ComfyVideoAdapter implements EngineAdapter {
           width,
           height,
           seed,
-          models: managed ? LTX23_MANAGED : null,
+          // our flat store only when the copy is ours; a linked root (or an
+          // external ComfyUI) carries the template's conventional names
+          models: this.models.managedCopy("ltx-23-22b-fp8") ? LTX23_MANAGED : null,
         });
         if (!audio) {
           // repatch the placeholder LoadAudio to the staged silence

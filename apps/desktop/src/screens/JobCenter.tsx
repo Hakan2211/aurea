@@ -281,6 +281,11 @@ export function JobCenter() {
   const { jobs, vram } = useJobs();
   const { system } = useSystem();
   const inQueue = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
+  // the stream lists finished jobs oldest-first; the queue reads better with
+  // active work on top and the most recent history right under it
+  const active = jobs.filter((j) => j.status === "running" || j.status === "queued");
+  const history = jobs.filter((j) => j.status !== "running" && j.status !== "queued").reverse();
+  const shown = [...active, ...history];
 
   return (
     <div className="flex h-full">
@@ -317,7 +322,7 @@ export function JobCenter() {
         </div>
 
         <div className="flex-1 space-y-2 overflow-y-auto px-6 pb-4 pt-1">
-          {jobs.map((j) => (
+          {shown.map((j) => (
             <JobTableRow key={j.id} job={j} />
           ))}
         </div>

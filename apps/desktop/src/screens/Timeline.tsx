@@ -47,6 +47,14 @@ const TRACK_FOR_KIND: Record<string, TimelineTrack["kind"]> = {
   music: "music",
 };
 
+/** the shot rail, split by media kind so voices/music don't bury the takes */
+const POOL_GROUPS: Array<{ label: string; kind: string }> = [
+  { label: "Video takes", kind: "video" },
+  { label: "Images", kind: "image" },
+  { label: "Voices", kind: "audio" },
+  { label: "Music", kind: "music" },
+];
+
 const uid = () => Math.random().toString(36).slice(2, 10);
 const snap = (v: number) => Math.max(0, Math.round(v / SNAP) * SNAP);
 const fmt = (sec: number) =>
@@ -86,10 +94,24 @@ export function TimelineScreen() {
   const raf = useRef(0);
   const playClock = useRef({ started: 0, base: 0 });
   const videoRef = useRef<HTMLVideoElement>(null);
+  /** latest removeSelected, so the global key handler needs no re-binding */
+  const removeSelectedRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (initial && !tl) setTl(initial);
   }, [initial, tl]);
+
+  // Delete/Backspace removes the selected clip (unless typing in a field)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      removeSelectedRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /** every edit funnels through here — updates local state, debounces the save */
   const apply = (next: Timeline) => {
@@ -121,20 +143,27 @@ export function TimelineScreen() {
   /* ---- preview: the TOPMOST video clip under the playhead — later video
    * tracks composite on top (Video 2 = inserts over the base), so search
    * tracks last-to-first, matching the export's overlay order ---- */
-  const activeClip = tl?.tracks
-    .filter((t) => t.kind === "video")
-    .reverse()
-    .map((t) => t.clips.find((c) => playhead >= c.start && playhead < c.start + c.duration))
-    .find(Boolean);
+  const activeVideo = (() => {
+    if (!tl) return undefined;
+    for (const track of [...tl.tracks].reverse()) {
+      if (track.kind !== "video") continue;
+      const clip = track.clips.find((c) => playhead >= c.start && playhead < c.start + c.duration);
+      if (clip) return { clip, track };
+    }
+    return undefined;
+  })();
+  const activeClip = activeVideo?.clip;
   const activeAsset = activeClip ? resolve(activeClip.asset) : undefined;
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !activeClip) return;
+    // the take's own sound honours its track's mute + volume, like the export
+    el.volume = Math.min(1, Math.max(0, activeVideo?.track.muted ? 0 : (activeVideo?.track.gain ?? 1)));
     const target = playhead - activeClip.start + activeClip.in;
     if (Math.abs(el.currentTime - target) > 0.35) el.currentTime = target;
     if (playing && el.paused) void el.play().catch(() => {});
     if (!playing && !el.paused) el.pause();
-  }, [activeClip, playing, playhead]);
+  }, [activeClip, activeVideo, playing, playhead]);
 
   if (!tl) {
     return (
@@ -207,7 +236,7 @@ export function TimelineScreen() {
     // array order still means "later composites on top"
     const at = tl.tracks.reduce((m, t, i) => (t.kind === "video" ? i : m), -1) + 1;
     const tracks = [...tl.tracks];
-    tracks.splice(at, 0, { id: uid(), kind: "video", name: `Video ${count + 1}`, muted: false, clips: [] });
+    tracks.splice(at, 0, { id: uid(), kind: "video", name: `Video ${count + 1}`, muted: false, gain: 1, clips: [] });
     apply({ ...tl, tracks });
   };
 
@@ -228,6 +257,7 @@ export function TimelineScreen() {
     });
     setSelected(null);
   };
+  removeSelectedRef.current = removeSelected;
 
   const razor = () => {
     if (!selected) return;
@@ -269,31 +299,44 @@ export function TimelineScreen() {
           <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-fog">
             Shots & takes
           </div>
-          <div className="grid flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto px-3 pb-3">
-            {pool.map((a) => {
-              const Icon = kindIcon[a.kind];
+          <div className="flex-1 overflow-y-auto px-3 pb-3">
+            {POOL_GROUPS.map(({ label, kind }) => {
+              const items = pool.filter((a) => a.kind === kind);
+              if (items.length === 0) return null;
               return (
-                <button
-                  key={a.relPath}
-                  title={`Add ${a.name} to the timeline`}
-                  onClick={() => void addToTimeline(a)}
-                  className="group relative aspect-video overflow-hidden rounded-lg border border-cream/5 bg-surface transition hover:border-gold/40"
-                >
-                  {a.url && a.kind === "image" && (
-                    <img src={a.url} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                  )}
-                  {a.url && a.kind === "video" && (
-                    <video src={a.url} preload="metadata" muted className="absolute inset-0 h-full w-full object-cover" />
-                  )}
-                  <Icon size={12} className="absolute left-1.5 top-1.5 text-cream/70" />
-                  <span className="absolute inset-x-1 bottom-1 truncate text-left text-[9px] text-cream/75">
-                    {a.name}
-                  </span>
-                </button>
+                <div key={kind}>
+                  <div className="px-1 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-fog/60">
+                    {label} · {items.length}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {items.map((a) => {
+                      const Icon = kindIcon[a.kind];
+                      return (
+                        <button
+                          key={a.relPath}
+                          title={`Add ${a.name} to the timeline`}
+                          onClick={() => void addToTimeline(a)}
+                          className="group relative aspect-video overflow-hidden rounded-lg border border-cream/5 bg-surface transition hover:border-gold/40"
+                        >
+                          {a.url && a.kind === "image" && (
+                            <img src={a.url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                          )}
+                          {a.url && a.kind === "video" && (
+                            <video src={a.url} preload="metadata" muted className="absolute inset-0 h-full w-full object-cover" />
+                          )}
+                          <Icon size={12} className="absolute left-1.5 top-1.5 text-cream/70" />
+                          <span className="absolute inset-x-1 bottom-1 truncate text-left text-[9px] text-cream/75">
+                            {a.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
             {pool.length === 0 && (
-              <p className="col-span-2 px-1 text-[11px] text-fog">
+              <p className="px-1 pt-2 text-[11px] text-fog">
                 Generate takes in the labs — they land here.
               </p>
             )}
@@ -320,6 +363,26 @@ export function TimelineScreen() {
               {fmt(playhead)} / {fmt(end)}
             </span>
           </div>
+
+          {/* voice/music playback under the playhead — preview matches export */}
+          {tl.tracks
+            .filter((t) => t.kind !== "video")
+            .map((t) => {
+              const clip = t.clips.find(
+                (c) => playhead >= c.start && playhead < c.start + c.duration,
+              );
+              const asset = clip ? resolve(clip.asset) : undefined;
+              return (
+                <AudioClipPlayer
+                  key={t.id}
+                  url={asset?.url}
+                  offset={clip ? playhead - clip.start + clip.in : 0}
+                  playing={playing && !!clip}
+                  muted={t.muted}
+                  gain={t.gain ?? 1}
+                />
+              );
+            })}
 
           {/* transport + clip inspector */}
           <div className="flex items-center gap-2 px-4 pb-3">
@@ -440,39 +503,59 @@ export function TimelineScreen() {
                 <div
                   key={track.id}
                   style={{ height: TRACK_H }}
-                  className="group flex items-center justify-between border-b border-cream/5 px-3"
+                  className="group flex flex-col justify-center border-b border-cream/5 px-3"
                 >
-                  <span
-                    title={extra && track.kind === "video" ? "Clips here appear over the tracks above" : undefined}
-                    className="min-w-0 truncate text-[11px] font-medium capitalize text-cream/85"
-                  >
-                    {track.name}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    {extra && track.clips.length === 0 && (
-                      <button
-                        onClick={() => removeTrack(track.id)}
-                        title="Remove empty track"
-                        className="text-fog/0 transition group-hover:text-fog hover:text-ember!"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                    <button
-                      onClick={() =>
-                        apply({
-                          ...tl,
-                          tracks: tl.tracks.map((t) =>
-                            t.id === track.id ? { ...t, muted: !t.muted } : t,
-                          ),
-                        })
-                      }
-                      title={track.muted ? "Unmute" : "Mute"}
-                      className={cx("transition", track.muted ? "text-ember" : "text-fog hover:text-cream")}
+                  <div className="flex items-center justify-between">
+                    <span
+                      title={extra && track.kind === "video" ? "Clips here appear over the tracks above" : undefined}
+                      className="min-w-0 truncate text-[11px] font-medium capitalize text-cream/85"
                     >
-                      {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-                    </button>
-                  </span>
+                      {track.name}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {extra && track.clips.length === 0 && (
+                        <button
+                          onClick={() => removeTrack(track.id)}
+                          title="Remove empty track"
+                          className="text-fog/0 transition group-hover:text-fog hover:text-ember!"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() =>
+                          apply({
+                            ...tl,
+                            tracks: tl.tracks.map((t) =>
+                              t.id === track.id ? { ...t, muted: !t.muted } : t,
+                            ),
+                          })
+                        }
+                        title={track.muted ? "Unmute" : "Mute"}
+                        className={cx("transition", track.muted ? "text-ember" : "text-fog hover:text-cream")}
+                      >
+                        {track.muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                      </button>
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={0.05}
+                    value={track.gain ?? 1}
+                    disabled={track.muted}
+                    title={`Volume ${Math.round((track.gain ?? 1) * 100)}% — preview and export`}
+                    onChange={(e) =>
+                      apply({
+                        ...tl,
+                        tracks: tl.tracks.map((t) =>
+                          t.id === track.id ? { ...t, gain: Number(e.target.value) } : t,
+                        ),
+                      })
+                    }
+                    className="mt-1.5 h-1 w-full accent-gold disabled:opacity-30"
+                  />
                 </div>
               );
             })}
@@ -533,6 +616,35 @@ export function TimelineScreen() {
       </div>
     </div>
   );
+}
+
+/** Hidden <audio> element for one voice/music track — kept in lockstep with
+ * the transport clock the same way the preview <video> is. Unmounts (and so
+ * stops) the moment no clip of its track sits under the playhead. */
+function AudioClipPlayer({
+  url,
+  offset,
+  playing,
+  muted,
+  gain,
+}: {
+  url: string | undefined;
+  offset: number;
+  playing: boolean;
+  muted: boolean;
+  gain: number;
+}) {
+  const ref = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.volume = Math.min(1, Math.max(0, muted ? 0 : gain));
+    if (Math.abs(el.currentTime - offset) > 0.35) el.currentTime = Math.max(0, offset);
+    if (playing && el.paused) void el.play().catch(() => {});
+    if (!playing && !el.paused) el.pause();
+  });
+  if (!url) return null;
+  return <audio ref={ref} src={url} preload="auto" />;
 }
 
 function TrackLane({
