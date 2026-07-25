@@ -4,6 +4,7 @@
  * token is the boundary. Clients get it from the Electron bridge or the
  * port file (~/.aurea/studiod.json). */
 
+import fs from "node:fs";
 import http from "node:http";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
@@ -26,11 +27,15 @@ import { ComfyService } from "./comfy/service.js";
 import { VideofastAdapter } from "./adapters/videofast.js";
 import { ComfyImageAdapter } from "./adapters/comfy-image.js";
 import { TtsAdapter } from "./adapters/tts.js";
+import { DramaboxAdapter } from "./adapters/dramabox.js";
 import { MusicAdapter } from "./adapters/music.js";
+import { SeedVcAdapter } from "./adapters/seedvc.js";
+import { ReplicateRvcAdapter, rvcModelPath } from "./adapters/replicate-rvc.js";
+import { labEnqueue } from "./labs.js";
 import { ComfyVideoAdapter } from "./adapters/comfy-video.js";
 import { SeedanceAdapter } from "./adapters/seedance.js";
 import { FfmpegExportAdapter } from "./adapters/ffmpeg-export.js";
-import { serveMedia } from "./media.js";
+import { serveFile, serveMedia } from "./media.js";
 import { appRouter } from "./router.js";
 import type { Context } from "./trpc.js";
 import { clearPortFile, writePortFile } from "./portfile.js";
@@ -79,7 +84,10 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new VideofastAdapter(settings),
       new ComfyImageAdapter(settings, comfy, runtime, models),
       new TtsAdapter(settings, runtime, models),
+      new DramaboxAdapter(settings),
       new MusicAdapter(settings, runtime, models),
+      new ReplicateRvcAdapter(settings),
+      new SeedVcAdapter(settings, runtime),
       new ComfyVideoAdapter(settings, comfy, models),
       new SeedanceAdapter(settings),
       new FfmpegExportAdapter(settings),
@@ -97,6 +105,46 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
           studio.attachKeyframes(projectId, board.shotId, rels);
         } catch {
           // the shot was deleted while the render ran — the stills stay in the library
+        }
+      }
+      // sung vocals in a cloned voice: chain a singing-conversion job on the
+      // freshly imported track (the "convert after render" pass). A trained
+      // RVC model + Replicate token wins over local Seed-VC — that per-voice
+      // trained path is audibly better.
+      if (
+        job.payload?.type === "music" &&
+        job.payload.arrangement === "vocals" &&
+        job.payload.singVoice &&
+        job.project &&
+        imported.primary
+      ) {
+        const projectId = job.project.replace(/^\//, "").split("/")[0];
+        const dataRoot = settings.get().storage.dataRoot;
+        const rvc =
+          !!settings.get().providers.replicateApiToken &&
+          fs.existsSync(rvcModelPath(dataRoot, job.payload.singVoice));
+        if (rvc || runtime.componentReady("seedvc")) {
+          const source = path.relative(dataRoot, imported.primary).split(path.sep).join("/");
+          engine.enqueue(
+            labEnqueue(
+              {
+                type: "voiceConvert",
+                context: "music",
+                engine: rvc ? "rvc" : undefined,
+                source,
+                voice: job.payload.singVoice,
+                mode: "sing",
+                diffusionSteps: 30,
+                semitoneShift: 0,
+                // measure the song vs the chosen voice and octave-correct the
+                // vocals into its register — works for any voice, either direction
+                pitchMode: "auto",
+                lengthAdjust: 1,
+                cfgRate: 0.7,
+              },
+              projectId,
+            ),
+          );
         }
       }
       return imported.primary;
@@ -140,6 +188,19 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     // library file streaming for <img>/<video> (token in query string)
     if (req.url?.startsWith("/media/")) {
       serveMedia(req, res, settings.get().storage.dataRoot, token);
+      return;
+    }
+    // voice-roster reference clips (may live outside dataRoot — videofast refs)
+    if (req.url?.startsWith("/voiceref/")) {
+      const id = decodeURIComponent(
+        new URL(req.url, "http://localhost").pathname.slice("/voiceref/".length),
+      );
+      const file = /^[a-z0-9][a-z0-9-]*$/.test(id) ? labs.voiceRefPath(id) : null;
+      if (!file) {
+        res.writeHead(404).end();
+        return;
+      }
+      serveFile(req, res, file, token);
       return;
     }
     trpcHandler(req, res);

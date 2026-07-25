@@ -215,6 +215,12 @@ export interface Voice {
   swatch: string;
   /** where the reference clip lives — only "studio" voices are deletable */
   source?: "studio" | "videofast";
+  /** playable /voiceref/ preview URL for the reference clip (cloned voices) */
+  sampleUrl?: string;
+  /** a trained Replicate RVC v2 model exists for this voice */
+  rvcTrained?: boolean;
+  /** an RVC training job is running for this voice */
+  rvcTraining?: boolean;
 }
 
 export interface VoiceTake {
@@ -227,6 +233,8 @@ export interface VoiceTake {
   selected?: boolean;
   /** playable media URL once the take is a real asset */
   url?: string;
+  /** library relPath once the take is a real asset — enables delete */
+  relPath?: string;
   /** still synthesizing (running/queued job) */
   generating?: boolean;
 }
@@ -831,10 +839,16 @@ export interface ImageTile {
   id: string;
   swatch: string;
   /** present while the tile is still rendering */
-  generating?: { progress: number };
+  generating?: { progress: number; label?: string };
   liked?: boolean;
   /** real thumbnail URL once the tile is a real asset */
   url?: string;
+  /** dataRoot-relative path of the file behind the tile — what download,
+   * delete and use-as-reference all address. Absent while still generating. */
+  relPath?: string;
+  name?: string;
+  /** produced by an upscale job (provenance sidecar) — tile shows a pill */
+  upscaled?: boolean;
 }
 
 export interface ImageHistoryEntry {

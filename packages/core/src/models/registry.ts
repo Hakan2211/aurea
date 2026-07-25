@@ -416,6 +416,26 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: false,
   }),
   withSize({
+    id: "qwen-edit-upscale2k-lora",
+    name: "Qwen Image Edit — Upscale2K LoRA",
+    use: "image",
+    engine: "ComfyUI · Image lab upscale (refine)",
+    description:
+      "Diffusion upscaler LoRA that re-renders a still at ~2K with invented detail. Published " +
+      "against Qwen-Image-Edit-2511; runs on the 2509 GGUF stack this studio already installs " +
+      "(same DiT architecture) — rides on top of Qwen Image Edit 2509 (GGUF), which it needs.",
+    files: [
+      {
+        name: "loras/qwen_image_edit_2511_upscale.safetensors",
+        url: "https://huggingface.co/starsfriday/Qwen-Image-Edit-2511-Upscale2K/resolve/main/qwen_image_edit_2511_upscale.safetensors",
+        sizeBytes: 590057176,
+        sha256: "2be84dd96690311cebfa86bf5c5a3a656bd6ca4da6181dcbeea794a227bd2a74",
+      },
+    ],
+    license: APACHE,
+    essential: false,
+  }),
+  withSize({
     id: "realesrgan-x4plus",
     name: "Real-ESRGAN x4+",
     use: "utility",

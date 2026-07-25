@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { Job, LibraryKind, Project } from "@aurea/shared";
+import type { AssetMeta, Job, LibraryKind, Project } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 
 export const ASSET_KINDS = ["image", "video", "audio", "music", "model3d"] as const;
@@ -47,6 +47,23 @@ const slugify = (name: string) =>
 
 const fmtDay = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+/** provenance recorded next to an imported output — what the scanner can't
+ * recover from the file alone (job history is capped, so it can't be asked) */
+function assetMetaFor(job: Job): AssetMeta | null {
+  const p = job.payload;
+  if (!p) return null;
+  switch (p.type) {
+    case "imageUpscale":
+      return { origin: p.type, source: p.source };
+    case "music":
+      return { origin: p.type, arrangement: p.arrangement };
+    case "voiceConvert":
+      return { origin: p.type, source: p.source, ...(p.mode === "sing" ? { arrangement: "vocals" as const } : {}) };
+    default:
+      return null;
+  }
+}
 
 /** files under dir, recursive, ignoring dotfiles; depth-capped for safety */
 function countFiles(dir: string, depth = 5): number {
@@ -137,7 +154,23 @@ export class ProjectStore {
       // the job kind decides the shelf (a music wav is music, not voice);
       // the extension only speaks for files the kind can't explain
       const dest = this.importFile(id, JOB_KIND_DIR[job.kind], job.output, base);
+      this.writeMeta(dest, job);
       return { primary: dest, files: [dest] };
+    }
+
+    // decks keep their render-order filenames together under assets/image/decks/<slug>/
+    if (job.payload?.type === "imageDeck") {
+      const sub = `decks/${slugify(job.payload.deckName)}`;
+      const files: string[] = [];
+      for (const entry of fs.readdirSync(job.output, { withFileTypes: true }).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      )) {
+        if (!entry.isFile() || !entry.name.endsWith(".png")) continue;
+        files.push(
+          this.importFile(id, "image", path.join(job.output, entry.name), path.basename(entry.name, ".png"), sub),
+        );
+      }
+      return { primary: files[0], files };
     }
 
     let primary: string | undefined;
@@ -153,6 +186,7 @@ export class ProjectStore {
         : `${base}-${slugify(path.basename(entry.name, path.extname(entry.name)))}`;
       const dest = this.importFile(id, kind, path.join(job.output, entry.name), name);
       if (kind === JOB_KIND_DIR[job.kind]) {
+        this.writeMeta(dest, job);
         files.push(dest);
         if (!primary) primary = dest;
       }
@@ -160,8 +194,62 @@ export class ProjectStore {
     return { primary, files };
   }
 
-  private importFile(projectId: string, kind: LibraryKind, source: string, base: string): string {
-    const destDir = path.join(this.dir(projectId), "assets", kind);
+  /** Write in-memory bytes (renderer uploads: image refs, convert sources)
+   * into the project's assets tree with the usual collision-numbering.
+   * Returns the dataRoot-relative path — the shape job payload refs expect. */
+  importBuffer(projectId: string, kind: LibraryKind, name: string, ext: string, data: Buffer): string {
+    return this.writeInto(path.join(this.dir(projectId), "assets", kind), projectId, name, ext, data);
+  }
+
+  /** Stage a renderer upload that is an *input*, not a take — an Image-lab
+   * reference, a voice-conversion source. These land in <project>/refs/, which
+   * the library scanner deliberately does not walk: an uploaded reference is
+   * not something the studio generated, and showing it in the asset roll made
+   * "edit with refs" look like it instantly handed the picture back. */
+  importRef(projectId: string, name: string, ext: string, data: Buffer): string {
+    return this.writeInto(path.join(this.dir(projectId), "refs"), projectId, name, ext, data);
+  }
+
+  private writeInto(
+    destDir: string,
+    projectId: string,
+    name: string,
+    ext: string,
+    data: Buffer,
+  ): string {
+    if (!this.read(projectId)) throw new Error(`unknown project "${projectId}"`);
+    fs.mkdirSync(destDir, { recursive: true });
+    const base = slugify(name);
+    let dest = path.join(destDir, `${base}.${ext}`);
+    for (let n = 2; fs.existsSync(dest); n++) dest = path.join(destDir, `${base}-${n}.${ext}`);
+    fs.writeFileSync(dest, data);
+    // forward slashes — matches the library scanner's rel-path convention
+    return path.relative(this.settings.get().storage.dataRoot, dest).split(path.sep).join("/");
+  }
+
+  /** dotfile sidecar next to the imported output; the scanner reads it back
+   * into LibraryAsset.meta and skips it as an asset (dotfiles are ignored) */
+  private writeMeta(dest: string, job: Job): void {
+    const meta = assetMetaFor(job);
+    if (!meta) return;
+    try {
+      fs.writeFileSync(
+        path.join(path.dirname(dest), `.${path.basename(dest)}.meta.json`),
+        JSON.stringify(meta),
+      );
+    } catch {
+      // provenance is best-effort — the asset itself already landed
+    }
+  }
+
+  private importFile(
+    projectId: string,
+    kind: LibraryKind,
+    source: string,
+    base: string,
+    subdir?: string,
+  ): string {
+    const destDir = path.join(this.dir(projectId), "assets", kind, ...(subdir ? [subdir] : []));
     fs.mkdirSync(destDir, { recursive: true });
     const ext = path.extname(source);
     let dest = path.join(destDir, `${base}${ext}`);

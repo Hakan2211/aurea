@@ -43,6 +43,12 @@ export const imagePayloadSchema = z.object({
   /** style preset name folded into the prompt by the adapter */
   preset: z.string().optional(),
   seed: z.number().int().optional(),
+  /** explicit output size — overrides the aspect bucket when both are set */
+  width: z.number().int().min(512).max(2048).multipleOf(16).optional(),
+  height: z.number().int().min(512).max(2048).multipleOf(16).optional(),
+  /** sampler overrides; absent → per-model proven defaults in graphs.ts */
+  steps: z.number().int().min(1).max(50).optional(),
+  cfg: z.number().min(0).max(15).optional(),
   /** images per run — each lands as its own asset */
   count: z.number().int().min(1).max(4).default(1),
   /** dataRoot-relative reference images (qwen-edit): subject first, then
@@ -52,24 +58,138 @@ export const imagePayloadSchema = z.object({
   board: z.object({ shotId: z.string().min(1) }).optional(),
 });
 
+/** bulk deck — one job renders every prompt of a themed set into
+ * assets/image/decks/<deck-slug>/ (t2i models only; refs decks are a later rung) */
+export const imageDeckPayloadSchema = z.object({
+  type: z.literal("imageDeck"),
+  deckName: z.string().min(1).max(60),
+  prompts: z.array(z.string().min(1)).min(1).max(100),
+  model: z.string().default("z-image"),
+  aspect: imageAspectSchema.default("3:2"),
+  preset: z.string().optional(),
+  /** base seed — image i renders with seed + i, so decks reproduce exactly */
+  seed: z.number().int().optional(),
+  width: z.number().int().min(512).max(2048).multipleOf(16).optional(),
+  height: z.number().int().min(512).max(2048).multipleOf(16).optional(),
+  steps: z.number().int().min(1).max(50).optional(),
+  cfg: z.number().min(0).max(15).optional(),
+});
+
+/** Enlarge an existing still. Two rungs, because they answer different needs:
+ *
+ *   fast   — Real-ESRGAN x4+ through ImageUpscaleWithModel. Seconds, no
+ *            diffusion, no hallucinated detail. The safe default.
+ *   refine — Qwen-Image-Edit re-renders the picture at ~2K with the
+ *            Upscale2K LoRA on the model. Minutes, and it *invents* detail
+ *            (skin, fabric, text) — better looking, less faithful.
+ */
+export const imageUpscalePayloadSchema = z.object({
+  type: z.literal("imageUpscale"),
+  /** dataRoot-relative path of the still to enlarge */
+  source: z.string().min(1),
+  mode: z.enum(["fast", "refine"]).default("fast"),
+  /** refine only: long-edge target, snapped into the /16 grid by the adapter */
+  targetLongEdge: z.number().int().min(1024).max(4096).default(2048),
+  steps: z.number().int().min(1).max(50).optional(),
+  cfg: z.number().min(0).max(15).optional(),
+  seed: z.number().int().optional(),
+});
+
 export const ttsPayloadSchema = z.object({
   type: z.literal("tts"),
   text: z.string().min(1),
   /** character/voice id from the voice-lab roster */
   voice: z.string().min(1),
+  /** "chatterbox" | "qwen" | "dramabox" */
   engine: z.string().default("chatterbox"),
   pace: z.number().min(0.5).max(1.5).default(1),
   emotion: z.number().min(0).max(1).default(0.65),
+  // DramaBox-only knobs (engine === "dramabox"); other engines ignore them.
+  // All optional with no schema default so pre-existing jobs.json entries
+  // reparse unchanged and the engine's own defaults stay authoritative.
+  /** fixed timbre seed (engine default 42) */
+  seed: z.number().int().optional(),
+  /** classifier-free guidance — higher = more text-faithful (default 2.5) */
+  cfgScale: z.number().min(1).max(10).optional(),
+  /** spatiotemporal-guidance scale (default 1.5) */
+  stgScale: z.number().min(0).max(5).optional(),
+  /** time budget — <1 = faster/tighter delivery (default 0.9) */
+  durationMultiplier: z.number().min(0.5).max(2).optional(),
+  /** explicit output seconds; absent/0 = auto-estimated from the prompt */
+  genDuration: z.number().min(0).max(300).optional(),
+  /** seconds of voice-ref conditioning window (default 10) */
+  refDuration: z.number().min(3).max(30).optional(),
+  /** Perth watermark on the output (default off for own content) */
+  watermark: z.boolean().optional(),
+  /** speaker-timbre description override ("a refined posh British male voice …") */
+  design: z.string().max(400).optional(),
 });
 
 export const musicPayloadSchema = z.object({
   type: z.literal("music"),
   description: z.string().min(1),
   styles: z.array(z.string()).default([]),
-  durationSec: z.number().int().min(5).max(180).default(30),
+  durationSec: z.number().int().min(5).max(420).default(30),
   arrangement: z.enum(["instrumental", "vocals"]).default("instrumental"),
   /** cloned character voice for sung vocals (arrangement === "vocals") */
   singVoice: z.string().optional(),
+  /** own lyrics ("[verse]"/"[chorus]" section tags welcome); absent + vocals →
+   * the 5Hz LM writes them */
+  lyrics: z.string().max(4096).optional(),
+  /** absent = the model estimates tempo */
+  bpm: z.number().int().min(30).max(300).optional(),
+  /** absent = random each run (engine seed -1) */
+  seed: z.number().int().optional(),
+  /** ACE-Step language code ("en", "de", …); "unknown" lets the model decide */
+  language: z.string().max(8).default("unknown"),
+  /** musical key, e.g. "C Major" / "Am"; blank = auto */
+  keyscale: z.string().max(20).optional(),
+  timesignature: z.enum(["2", "3", "4", "6"]).optional(),
+  /** diffusion steps (turbo default 8) and timestep shift (default 3.0) */
+  steps: z.number().int().min(1).max(100).optional(),
+  shift: z.number().min(0.5).max(10).optional(),
+  /** best-effort two-singer treatment — folded into the caption; ACE-Step has
+   * no first-class duet parameter */
+  duet: z.boolean().default(false),
+});
+
+/** Seed-VC voice conversion — re-voice existing audio (speech or singing)
+ * into a cloned voice from the roster. kind rides on "tts" (voice shelf)
+ * unless context says otherwise. */
+export const voiceConvertPayloadSchema = z.object({
+  type: z.literal("voiceConvert"),
+  /** dataRoot-relative source audio (library relPath or an uploaded clip) */
+  source: z.string().min(1),
+  /** target cloned-voice id from the voice roster */
+  voice: z.string().min(1),
+  /** "music" = sing-conversion chained off a Music-lab track — routes the
+   * output to the music shelf and the Music lab's job views; absent = Voice lab */
+  context: z.enum(["music"]).optional(),
+  /** conversion engine — absent = Seed-VC (local); "rvc" = Replicate RVC v2
+   * cloud with this voice's trained model (needs the Replicate token + a
+   * finished rvcTrain job) */
+  engine: z.enum(["seedvc", "rvc"]).optional(),
+  /** sing enables F0 conditioning (singing voice conversion) */
+  mode: z.enum(["speak", "sing"]).default("speak"),
+  /** diffusion steps — 25 speech / 30–50 singing */
+  diffusionSteps: z.number().int().min(4).max(100).default(25),
+  /** singing only: transpose in semitones (e.g. -12 male→female source gap) */
+  semitoneShift: z.number().int().min(-24).max(24).default(0),
+  /** singing only (RVC): octave correction of the vocals so the melody lands in
+   * the target voice's natural register. "auto" measures source vs voice-ref
+   * pitch and picks the nearest octave — works for any voice, male or female. */
+  pitchMode: z.enum(["auto", "none", "octave-down", "octave-up"]).default("auto"),
+  lengthAdjust: z.number().min(0.5).max(2).default(1),
+  cfgRate: z.number().min(0).max(1).default(0.7),
+});
+
+/** Train an RVC v2 model for a cloned voice on Replicate (paid, ~15 min).
+ * The finished model zip lands in <dataRoot>/voices/rvc/<voice>.zip and from
+ * then on unlocks voiceConvert engine "rvc" — the songlar-quality path. */
+export const rvcTrainPayloadSchema = z.object({
+  type: z.literal("rvcTrain"),
+  /** cloned-voice id from the roster (its reference clip is the dataset) */
+  voice: z.string().min(1),
 });
 
 export const videoPayloadSchema = z.object({
@@ -90,7 +210,11 @@ export const videoPayloadSchema = z.object({
 export const jobPayloadSchema = z.discriminatedUnion("type", [
   videofastPayloadSchema,
   imagePayloadSchema,
+  imageDeckPayloadSchema,
+  imageUpscalePayloadSchema,
   ttsPayloadSchema,
+  voiceConvertPayloadSchema,
+  rvcTrainPayloadSchema,
   musicPayloadSchema,
   videoPayloadSchema,
   // declared below (timeline section) — z.lazy keeps the forward reference legal
@@ -148,11 +272,52 @@ const projectField = { project: z.string().min(1) };
 export const imageGenerateSchema = imagePayloadSchema.omit({ type: true }).extend(projectField);
 export type ImageGenerate = z.input<typeof imageGenerateSchema>;
 
+export const imageDeckGenerateSchema = imageDeckPayloadSchema
+  .omit({ type: true })
+  .extend(projectField);
+export type ImageDeckGenerate = z.input<typeof imageDeckGenerateSchema>;
+
+export const imageUpscaleGenerateSchema = imageUpscalePayloadSchema
+  .omit({ type: true })
+  .extend(projectField);
+export type ImageUpscaleGenerate = z.input<typeof imageUpscaleGenerateSchema>;
+
+/** upload a reference image into the project's refs/ staging folder (returns
+ * its dataRoot-relative path, ready for imagePayloadSchema.refs). Staged refs
+ * live OUTSIDE assets/ on purpose — an uploaded source is an input, not a
+ * generated take, and must never show up in the library or the lab's roll. */
+export const imageRefAddSchema = z.object({
+  ...projectField,
+  name: z.string().min(1).max(80),
+  /** PNG bytes, base64 (renderer re-encodes any picked file to PNG) */
+  pngBase64: z.string().min(1),
+});
+export type ImageRefAdd = z.input<typeof imageRefAddSchema>;
+
 export const ttsGenerateSchema = ttsPayloadSchema.omit({ type: true }).extend(projectField);
 export type TtsGenerate = z.input<typeof ttsGenerateSchema>;
 
 export const musicGenerateSchema = musicPayloadSchema.omit({ type: true }).extend(projectField);
 export type MusicGenerate = z.input<typeof musicGenerateSchema>;
+
+export const voiceConvertGenerateSchema = voiceConvertPayloadSchema
+  .omit({ type: true })
+  .extend(projectField);
+export type VoiceConvertGenerate = z.input<typeof voiceConvertGenerateSchema>;
+
+export const rvcTrainGenerateSchema = rvcTrainPayloadSchema
+  .omit({ type: true })
+  .extend(projectField);
+export type RvcTrainGenerate = z.input<typeof rvcTrainGenerateSchema>;
+
+/** upload a conversion source clip (already wav-encoded by the renderer) into
+ * the project's assets; returns its dataRoot-relative path */
+export const voiceSourceAddSchema = z.object({
+  ...projectField,
+  name: z.string().min(1).max(80),
+  wavBase64: z.string().min(1),
+});
+export type VoiceSourceAdd = z.input<typeof voiceSourceAddSchema>;
 
 export const videoGenerateSchema = videoPayloadSchema.omit({ type: true }).extend(projectField);
 export type VideoGenerate = z.input<typeof videoGenerateSchema>;
@@ -210,6 +375,11 @@ export const settingsSchema = z.object({
   storage: z.object({
     /** projects/assets/cache root; storage telemetry measures this volume */
     dataRoot: z.string().min(1),
+    /** Model libraries the user already owns, in conventional ComfyUI layout
+     * (unet/, diffusion_models/, text_encoders/, vae/, loras/, …). Mounted
+     * read-only: weights found here count as installed, are never verified,
+     * and are never deleted. First root wins on a filename collision. */
+    modelRoots: z.array(z.string().min(1)).default([]),
   }),
   paths: z.object({
     /** videofast repo root — drives the first engine adapter; null until detected/set */
@@ -244,6 +414,10 @@ export const settingsSchema = z.object({
       chatterboxPython: z.string().nullable().default(null),
       /** python.exe of the Qwen3-TTS venv (narrator voices) */
       qwenTtsPython: z.string().nullable().default(null),
+      /** python.exe of the DramaBox venv (expressive acted character voices) */
+      dramaboxPython: z.string().nullable().default(null),
+      /** DramaBox repo checkout (src/inference_server.py lives here) */
+      dramaboxRepo: z.string().nullable().default(null),
       /** ACE-Step 1.5 checkout (its .venv/Scripts/python.exe runs music gen) */
       acestepDir: z.string().nullable().default(null),
     })
@@ -255,6 +429,8 @@ export const settingsSchema = z.object({
     openrouterApiKey: z.string().default(""),
     /** fal.ai key — unlocks the Seedance cloud video engine (paid per clip) */
     falApiKey: z.string().default(""),
+    /** Replicate token — unlocks RVC v2 voice training + conversion (paid per run) */
+    replicateApiToken: z.string().default(""),
     ollamaBaseUrl: z.string().default("http://localhost:11434"),
     ollamaModel: z.string().default("llama3.1:8b-instruct-q4_K_M"),
   }),
@@ -342,6 +518,9 @@ export const timelineTrackSchema = z.object({
   kind: timelineTrackKindSchema,
   name: z.string(),
   muted: z.boolean().default(false),
+  /** track volume, 0..2 (1 = unity) — applied in the preview player and the
+   * ffmpeg export mix; lets music/voice sit under the video takes */
+  gain: z.number().min(0).max(2).default(1),
   clips: z.array(timelineClipSchema).default([]),
 });
 export type TimelineTrack = z.infer<typeof timelineTrackSchema>;
@@ -405,6 +584,17 @@ export const timelineRemoveClipSchema = z.object({
 
 export const timelineExportSchema = z.object({ project: z.string().min(1) });
 
+/** Provenance sidecar (.{filename}.meta.json) written next to a file when a
+ * job's output is imported. Best-effort: assets without one are fine. */
+export const assetMetaSchema = z.object({
+  /** payload type of the job that produced the file ("imageUpscale", "music", "voiceConvert") */
+  origin: z.string().optional(),
+  arrangement: z.enum(["instrumental", "vocals"]).optional(),
+  /** dataRoot-relative source the job transformed (upscale/convert) */
+  source: z.string().optional(),
+});
+export type AssetMeta = z.infer<typeof assetMetaSchema>;
+
 /** One real file inside a project's assets/ tree, as scanned by studiod. */
 export const libraryAssetSchema = z.object({
   /** stable identity — the dataRoot-relative path */
@@ -421,8 +611,18 @@ export const libraryAssetSchema = z.object({
   createdAt: z.string(),
   /** lowercase extension without the dot */
   ext: z.string(),
+  meta: assetMetaSchema.optional(),
 });
 export type LibraryAsset = z.infer<typeof libraryAssetSchema>;
+
+/** Delete files from disk for good. Paths are dataRoot-relative (a
+ * LibraryAsset.relPath, or a staged ref from labs.image.addRef); the core
+ * confines them to <dataRoot>/projects/ before unlinking. Batched because the
+ * grid deletes a whole selection in one gesture. */
+export const libraryRemoveSchema = z.object({
+  relPaths: z.array(z.string().min(1)).min(1).max(500),
+});
+export type LibraryRemove = z.input<typeof libraryRemoveSchema>;
 
 /* ---------- production (Studio data spine) ---------- */
 /* The V2 Studio hierarchy — Production → Season → Episode → Scene → Shot —
@@ -960,6 +1160,9 @@ export const modelStateSchema = z.enum([
   "downloading",
   "verifying",
   "installed",
+  /** satisfied by a file in one of storage.modelRoots — the user's own copy,
+   * mounted read-only. Runs like "installed"; never verified, never deleted. */
+  "linked",
   "error",
 ]);
 export type ModelState = z.infer<typeof modelStateSchema>;
@@ -977,6 +1180,8 @@ export const modelStatusSchema = z.object({
   file: z.string().nullable(),
   error: z.string().nullable(),
   licenseAccepted: z.boolean(),
+  /** which of storage.modelRoots satisfied this model (state "linked") */
+  linkedRoot: z.string().nullable().default(null),
 });
 export type ModelStatus = z.infer<typeof modelStatusSchema>;
 
@@ -995,7 +1200,14 @@ export const modelDownloadSchema = z.object({
  * headless ComfyUI checkout with its own venv, one venv per Python engine
  * ("chatterbox" and "acestep" so far), and pinned ComfyUI custom-node packs
  * ("gguf" = ComfyUI-GGUF quantized loaders). */
-export const runtimeComponentIdSchema = z.enum(["python", "comfy", "gguf", "chatterbox", "acestep"]);
+export const runtimeComponentIdSchema = z.enum([
+  "python",
+  "comfy",
+  "gguf",
+  "chatterbox",
+  "acestep",
+  "seedvc",
+]);
 export type RuntimeComponentId = z.infer<typeof runtimeComponentIdSchema>;
 
 export const runtimeComponentStateSchema = z.enum(["absent", "installing", "ready", "error"]);

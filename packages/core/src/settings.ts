@@ -43,7 +43,7 @@ export function detectVideofastDir(): string | null {
  * the videofast operator docs (each engine owns one venv); first hit wins. */
 export function detectEnginePaths(): Pick<
   Settings["engines"],
-  "chatterboxPython" | "qwenTtsPython" | "acestepDir"
+  "chatterboxPython" | "qwenTtsPython" | "dramaboxPython" | "dramaboxRepo" | "acestepDir"
 > {
   const first = (candidates: string[], probe: (c: string) => string = (c) => c) =>
     candidates.find((c) => fs.existsSync(probe(c))) ?? null;
@@ -52,6 +52,10 @@ export function detectEnginePaths(): Pick<
     qwenTtsPython: first([
       path.join(homedir(), "localai", "envs", "qwen-tts", "Scripts", "python.exe"),
     ]),
+    dramaboxPython: first(["D:/ttsenvs/DramaBox/.venv/Scripts/python.exe"]),
+    dramaboxRepo: first(["D:/ttsenvs/DramaBox"], (c) =>
+      path.join(c, "src", "inference_server.py"),
+    ),
     acestepDir: first(
       [path.join(homedir(), "acestep1.5", "ACE-Step-1.5"), "D:/acestep1.5/ACE-Step-1.5"],
       (c) => path.join(c, ".venv", "Scripts", "python.exe"),
@@ -127,7 +131,13 @@ export class SettingsStore extends EventEmitter {
       }
       // engine paths added after this settings file was written: detect once
       const detected = detectEnginePaths();
-      for (const key of ["chatterboxPython", "qwenTtsPython", "acestepDir"] as const) {
+      for (const key of [
+        "chatterboxPython",
+        "qwenTtsPython",
+        "dramaboxPython",
+        "dramaboxRepo",
+        "acestepDir",
+      ] as const) {
         if (settings.engines[key] === null && detected[key] !== null) {
           settings.engines[key] = detected[key];
           dirty = true;

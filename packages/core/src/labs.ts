@@ -11,6 +11,7 @@ import type { SettingsStore } from "./settings.js";
 import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
 import { seedanceEstimate } from "./adapters/seedance.js";
+import { RVC_CONVERT_ESTIMATE, RVC_TRAIN_ESTIMATE, rvcModelPath } from "./adapters/replicate-rvc.js";
 
 export interface LabEngine {
   id: string;
@@ -26,6 +27,8 @@ export interface LabVoice {
   engine: string;
   /** where the reference clip lives — only "studio" voices are deletable */
   source?: "studio" | "videofast";
+  /** a trained RVC v2 model exists for this voice (voices/rvc/<id>.zip) */
+  rvcTrained?: boolean;
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -48,14 +51,17 @@ export class Labs {
 
   imageCatalog() {
     const managed = this.settings.get().engines.comfyMode === "managed";
-    const installed = (id: string) =>
-      this.models.list().find((m) => m.id === id)?.status.state === "installed";
+    // "ready" spans a copy we downloaded and one linked from the user's own
+    // model library — the picker must not say "not installed" about weights
+    // that are sitting right there
+    const installed = (id: string) => this.models.ready(id);
     return {
       models: [
         {
           id: "z-image",
           label: "z-image-turbo · local",
           note: managed ? "fast drafts · managed engine" : "fast drafts",
+          role: "generate",
           // managed: needs the runtime + weights; external: the user's ComfyUI has its own
           available: managed
             ? this.runtime.componentReady("comfy") && installed("z-image-turbo")
@@ -65,6 +71,7 @@ export class Labs {
           id: "krea2",
           label: "Krea 2 · local",
           note: managed ? "photoreal · managed engine" : "photoreal · free",
+          role: "generate",
           // managed additionally needs the GGUF loader nodes + the Q8 weights
           available: managed
             ? this.runtime.componentReady("comfy") &&
@@ -72,17 +79,44 @@ export class Labs {
               installed("krea2-turbo-gguf")
             : true,
         },
-      ] satisfies LabEngine[],
+        {
+          id: "qwen-edit",
+          label: "Qwen Edit 2509 · local",
+          note: managed ? "reference editing · managed engine" : "reference editing",
+          role: "edit",
+          // same GGUF loader stack as krea2, plus the Q5 edit weights
+          available: managed
+            ? this.runtime.componentReady("comfy") &&
+              this.runtime.componentReady("gguf") &&
+              installed("qwen-image-edit-2509-gguf")
+            : true,
+        },
+      ] satisfies (LabEngine & { role?: "generate" | "edit" })[],
       aspects: ["1:1", "3:2", "16:9", "4:3", "9:16"],
       presets: ["Cinematic", "Photographic", "Concept Art", "Minimal", "Moody", "Vintage", "Fantasy"],
       promptMax: 1000,
+      refsMax: 3,
+      countMax: 4,
+      advanced: {
+        sizeMin: 512,
+        sizeMax: 2048,
+        sizeStep: 16,
+        stepsMax: 50,
+        cfgMax: 15,
+        /** per-model proven defaults (graphs.ts) shown as placeholders */
+        defaults: {
+          "z-image": { steps: 8, cfg: 1.0 },
+          krea2: { steps: 8, cfg: 1.0 },
+          "qwen-edit": { steps: 20, cfg: 4.0 },
+        } as Record<string, { steps: number; cfg: number }>,
+      },
     };
   }
 
   /** cloned roster = every frozen reference clip in <dataRoot>/voices plus
    * videofast's char_refs (studio's own folder wins on id collisions) */
   voiceCatalog() {
-    const { storage, engines } = this.settings.get();
+    const { storage, engines, providers } = this.settings.get();
     const vf = this.vf();
     const voices: LabVoice[] = [];
     const refDirs: Array<[string, NonNullable<LabVoice["source"]>]> = [
@@ -95,7 +129,14 @@ export class Labs {
         if (!entry.endsWith(".wav")) continue;
         const id = entry.slice(0, -4).toLowerCase();
         if (voices.some((v) => v.id === id)) continue;
-        voices.push({ id, name: voiceName(id), kind: "cloned", engine: "Chatterbox", source });
+        voices.push({
+          id,
+          name: voiceName(id),
+          kind: "cloned",
+          engine: "Chatterbox",
+          source,
+          rvcTrained: fs.existsSync(rvcModelPath(storage.dataRoot, id)),
+        });
       }
     }
     voices.push(
@@ -105,7 +146,7 @@ export class Labs {
     const managed = engines.ttsMode === "managed";
     const chatterboxReady = managed
       ? this.runtime.componentReady("chatterbox") &&
-        this.models.list().find((m) => m.id === "chatterbox-tts")?.status.state === "installed"
+        this.models.ready("chatterbox-tts")
       : !!engines.chatterboxPython;
     return {
       engines: [
@@ -121,9 +162,31 @@ export class Labs {
           note: "narration",
           available: !!engines.qwenTtsPython,
         },
+        {
+          id: "dramabox",
+          label: "DramaBox · local",
+          note: "expressive acting · stage directions",
+          available:
+            !!engines.dramaboxPython &&
+            fs.existsSync(engines.dramaboxPython) &&
+            !!engines.dramaboxRepo &&
+            voices.some((v) => v.kind === "cloned"),
+        },
       ] satisfies LabEngine[],
       voices,
       scriptMax: 5000,
+      /** Seed-VC voice/singing conversion (managed engine only) */
+      convert: {
+        available: this.runtime.componentReady("seedvc"),
+        // singing needs the deeper end of the schedule — 30 was audibly rough
+        stepsDefault: { speak: 25, sing: 50 },
+      },
+      /** Replicate RVC v2 — per-voice trained cloud conversion (paid) */
+      rvc: {
+        available: !!providers.replicateApiToken,
+        trainEstimate: RVC_TRAIN_ESTIMATE,
+        convertEstimate: RVC_CONVERT_ESTIMATE,
+      },
     };
   }
 
@@ -134,7 +197,10 @@ export class Labs {
   routeTtsEngine(voice: string, requested: string): string {
     const entry = this.voiceCatalog().voices.find((v) => v.id === voice.toLowerCase());
     if (!entry) return requested; // unknown voice — the adapter reports it cleanly
-    return entry.kind === "preset" ? "qwen" : "chatterbox";
+    if (entry.kind === "preset") return "qwen";
+    // cloned voices: DramaBox is an explicit opt-in; anything else normalizes
+    // to chatterbox (the "engine left on its default" fix)
+    return requested === "dramabox" ? "dramabox" : "chatterbox";
   }
 
   /** clone a voice: freeze the (already wav-encoded) sample as
@@ -166,6 +232,22 @@ export class Labs {
     return { id, name: voiceName(id), kind: "cloned", engine: "Chatterbox", source: "studio" };
   }
 
+  /** absolute path of a roster voice's reference clip — what the /voiceref/
+   * preview route streams (cloned voices only; presets have no clip) */
+  voiceRefPath(id: string): string | null {
+    const v = this.voiceCatalog().voices.find(
+      (x) => x.id === id.toLowerCase() && x.kind === "cloned",
+    );
+    if (!v) return null;
+    const file =
+      v.source === "studio"
+        ? path.join(this.settings.get().storage.dataRoot, "voices", `${v.id}.wav`)
+        : this.vf()
+          ? path.join(this.vf()!, "assets", "vo", "char_refs", `${v.id}.wav`)
+          : null;
+    return file && fs.existsSync(file) ? file : null;
+  }
+
   /** delete a studio voice's reference clip; videofast char_refs and presets
    * aren't ours to delete */
   removeVoice(id: string): void {
@@ -181,7 +263,7 @@ export class Labs {
     const managed = engines.musicMode === "managed";
     const acestepReady = managed
       ? this.runtime.componentReady("acestep") &&
-        this.models.list().find((m) => m.id === "acestep-v15")?.status.state === "installed"
+        this.models.ready("acestep-v15")
       : !!engines.acestepDir;
     return {
       engine: {
@@ -195,8 +277,24 @@ export class Labs {
         "Synthwave", "Jazz combo", "Cinematic", "Disco",
       ],
       durationMin: 5,
-      durationMax: 180,
+      durationMax: 420,
       descriptionMax: 500,
+      lyricsMax: 4096,
+      bpmRange: [30, 300] as [number, number],
+      timesignatures: ["2", "3", "4", "6"],
+      /** ACE-Step VALID_LANGUAGES (acestep/constants.py); "unknown" = model decides */
+      languages: [
+        "unknown", "ar", "az", "bg", "bn", "ca", "cs", "da", "de", "el", "en",
+        "es", "fa", "fi", "fr", "he", "hi", "hr", "ht", "hu", "id",
+        "is", "it", "ja", "ko", "la", "lt", "ms", "ne", "nl", "no",
+        "pa", "pl", "pt", "ro", "ru", "sa", "sk", "sr", "sv", "sw",
+        "ta", "te", "th", "tl", "tr", "uk", "ur", "vi", "yue", "zh",
+      ],
+      stepsDefault: 8,
+      shiftDefault: 3.0,
+      /** language/keyscale/timesignature reach the engine in managed mode only —
+       * the external CLI has no flags for them */
+      metadataManagedOnly: !managed,
       singVoices: cloned.map((v) => ({ id: v.id, label: v.name })),
     };
   }
@@ -208,7 +306,7 @@ export class Labs {
     // managed needs the runtime's ComfyUI plus the model-manager weight set
     const available = managed
       ? this.runtime.componentReady("comfy") &&
-        this.models.list().find((m) => m.id === "ltx-23-22b-fp8")?.status.state === "installed"
+        this.models.ready("ltx-23-22b-fp8")
       : true;
     return {
       engines: [
@@ -264,13 +362,75 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
               : "Krea 2",
         detail: `${payload.aspect} · ${payload.count} image${payload.count === 1 ? "" : "s"}${payload.preset ? ` · ${payload.preset}` : ""}`,
       };
+    case "imageDeck":
+      return {
+        ...base,
+        // decks are bulk work — don't starve interactive lab jobs
+        priority: "batch",
+        title: payload.deckName,
+        kind: "image",
+        engine: payload.model === "z-image" ? "z-image-turbo" : "Krea 2",
+        detail: `deck · ${payload.prompts.length} image${payload.prompts.length === 1 ? "" : "s"} · ${payload.aspect}${payload.preset ? ` · ${payload.preset}` : ""}`,
+      };
+    case "imageUpscale": {
+      const stem = payload.source.split("/").pop() ?? payload.source;
+      const refine = payload.mode === "refine";
+      return {
+        ...base,
+        title: `Upscale — ${stem.replace(/\.[^.]+$/, "")}`,
+        kind: "image",
+        engine: refine ? "Qwen Edit · Upscale2K" : "Real-ESRGAN x4+",
+        detail: refine ? `refine · ~${payload.targetLongEdge}px long edge` : "fast · 4× · no new detail",
+      };
+    }
     case "tts":
       return {
         ...base,
         title: title(payload.text),
         kind: "tts",
-        engine: payload.engine === "qwen" ? "Qwen3-TTS" : "Chatterbox",
-        detail: `${cap(payload.voice)} · emotion ${payload.emotion.toFixed(2)}`,
+        engine:
+          payload.engine === "qwen"
+            ? "Qwen3-TTS"
+            : payload.engine === "dramabox"
+              ? "DramaBox"
+              : "Chatterbox",
+        detail:
+          payload.engine === "dramabox"
+            ? `${cap(payload.voice)} · seed ${payload.seed ?? 42} · cfg ${payload.cfgScale ?? 2.5}`
+            : `${cap(payload.voice)} · emotion ${payload.emotion.toFixed(2)}`,
+      };
+    case "voiceConvert":
+      return {
+        ...base,
+        title: `Convert to ${cap(payload.voice)}`,
+        // chained music conversions ship a song — file it on the music shelf
+        kind: payload.context === "music" ? "music" : "tts",
+        engine: payload.engine === "rvc" ? "RVC v2 · Replicate" : "Seed-VC",
+        detail:
+          payload.engine === "rvc"
+            ? `${payload.mode === "sing" ? "singing" : "speech"}${
+                payload.mode === "sing"
+                  ? {
+                      auto: " · pitch auto-match",
+                      none: "",
+                      "octave-down": " · octave down",
+                      "octave-up": " · octave up",
+                    }[payload.pitchMode ?? "auto"]
+                  : ""
+              } · trained voice model · cloud ${RVC_CONVERT_ESTIMATE}`
+            : `${payload.mode === "sing" ? "singing" : "speech"} · ${payload.diffusionSteps} steps${
+                payload.mode === "sing" && payload.semitoneShift !== 0
+                  ? ` · ${payload.semitoneShift > 0 ? "+" : ""}${payload.semitoneShift} st`
+                  : ""
+              }`,
+      };
+    case "rvcTrain":
+      return {
+        ...base,
+        title: `Train RVC voice — ${cap(payload.voice)}`,
+        kind: "tts",
+        engine: "RVC v2 · Replicate",
+        detail: `48k · v2 · 50 epochs · cloud ${RVC_TRAIN_ESTIMATE}`,
       };
     case "music":
       return {
@@ -278,7 +438,15 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
         title: title(payload.description),
         kind: "music",
         engine: "ACE-Step",
-        detail: `${payload.durationSec}s · ${payload.arrangement}${payload.styles.length ? ` · ${payload.styles.join(", ")}` : ""}`,
+        detail: [
+          `${payload.durationSec}s`,
+          payload.duet ? "duet" : payload.arrangement,
+          payload.bpm !== undefined ? `${payload.bpm} bpm` : "",
+          payload.seed !== undefined ? `seed ${payload.seed}` : "",
+          payload.styles.join(", "),
+        ]
+          .filter(Boolean)
+          .join(" · "),
       };
     case "video": {
       const seedance = payload.engine === "seedance";

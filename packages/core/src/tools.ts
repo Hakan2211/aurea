@@ -11,6 +11,7 @@ import {
   bibleCharacterSchema,
   bibleLocationSchema,
   episodePatchSchema,
+  imageDeckGenerateSchema,
   imageGenerateSchema,
   jobStatusSchema,
   libraryKindSchema,
@@ -283,11 +284,29 @@ export function buildTools(api: StudiodApi): AureaTool[] {
     }),
 
     defineTool({
+      name: "generate_image_deck",
+      title: "Generate image deck",
+      description:
+        "Enqueue a themed bulk image set as ONE batch job (t2i models: z-image fast, krea2 photoreal). " +
+        "You author the prompts yourself — one per image, up to 100 — and every render lands together in " +
+        "assets/image/decks/<deck-slug>/. Shared aspect/preset/seed apply to the whole deck (image i uses " +
+        "seed+i, so a fixed seed reproduces the deck exactly). Returns the job — wait_for_job for the folder.",
+      schema: withProjectDefault(imageDeckGenerateSchema.omit({ project: true })),
+      handler: async ({ project, ...payload }) => {
+        await requireProject(project);
+        return json(await api.labs.image.generateDeck.mutate({ ...payload, project }));
+      },
+    }),
+
+    defineTool({
       name: "generate_speech",
       title: "Generate speech",
       description:
-        "Enqueue local TTS (Chatterbox cloned character voices / Qwen3-TTS narrators). Returns the job — " +
-        "wait_for_job for the wav. Check lab_catalog('voice') for the voice roster.",
+        "Enqueue local TTS (Chatterbox cloned character voices / Qwen3-TTS narrators / DramaBox " +
+        "expressive acting — engine 'dramabox' performs stage-direction tags like [laughs] or " +
+        "(nervously) instead of reading them; its optional knobs are seed, cfgScale, stgScale, " +
+        "durationMultiplier (<1 = tighter), genDuration, refDuration, watermark, design). Returns " +
+        "the job — wait_for_job for the wav. Check lab_catalog('voice') for the voice roster.",
       schema: withProjectDefault(ttsGenerateSchema.omit({ project: true })),
       handler: async ({ project, ...payload }) => {
         await requireProject(project);
@@ -299,8 +318,9 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       name: "generate_music",
       title: "Generate music",
       description:
-        "Enqueue local music generation (ACE-Step; instrumental or sung vocals in a cloned character " +
-        "voice). Returns the job — wait_for_job for the audio. Check lab_catalog('music') for styles.",
+        "Enqueue local music generation (ACE-Step; instrumental or sung vocals — omit singVoice to " +
+        "keep ACE-Step's own singing, set it to chain a cloned-voice conversion pass). Returns the " +
+        "job — wait_for_job for the audio. Check lab_catalog('music') for styles.",
       schema: withProjectDefault(musicGenerateSchema.omit({ project: true })),
       handler: async ({ project, ...payload }) => {
         await requireProject(project);

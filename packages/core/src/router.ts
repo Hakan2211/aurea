@@ -6,7 +6,11 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   enqueueJobSchema,
+  imageDeckGenerateSchema,
   imageGenerateSchema,
+  imageRefAddSchema,
+  imageUpscaleGenerateSchema,
+  libraryRemoveSchema,
   musicGenerateSchema,
   projectCreateSchema,
   projectRenameSchema,
@@ -42,7 +46,10 @@ import {
   ttsGenerateSchema,
   videoGenerateSchema,
   voiceAddSchema,
+  voiceConvertGenerateSchema,
+  rvcTrainGenerateSchema,
   voiceRemoveSchema,
+  voiceSourceAddSchema,
   type DirectorState,
   type Job,
   type JobPayload,
@@ -53,7 +60,7 @@ import {
 } from "@aurea/shared";
 import { describeExport, sequenceEnd } from "./adapters/ffmpeg-export.js";
 import { labEnqueue } from "./labs.js";
-import { scanLibrary } from "./library.js";
+import { removeAssets, scanLibrary } from "./library.js";
 import { procedure, router, type Context } from "./trpc.js";
 
 const jobId = z.object({ id: z.string() });
@@ -125,6 +132,12 @@ export const appRouter = router({
     list: procedure.query(({ ctx }) => ({
       assets: scanLibrary(ctx.settings.get().storage.dataRoot, ctx.projects),
     })),
+
+    /** delete files from disk for good — the folder IS the database, so there
+     * is no trash to move them to and no row to soft-delete */
+    remove: procedure.input(libraryRemoveSchema).mutation(({ ctx, input }) => ({
+      removed: removeAssets(ctx.settings.get().storage.dataRoot, input.relPaths),
+    })),
   }),
 
   labs: router({
@@ -133,6 +146,32 @@ export const appRouter = router({
       generate: procedure.input(imageGenerateSchema).mutation(({ ctx, input }) => {
         const { project, ...payload } = input;
         return generate(ctx, { type: "image", ...payload }, project);
+      }),
+      /** bulk themed deck — one batch job renders every prompt into
+       * assets/image/decks/<deck-slug>/ */
+      generateDeck: procedure.input(imageDeckGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "imageDeck", ...payload }, project);
+      }),
+      /** enlarge an existing still — "fast" is a Real-ESRGAN 4× pass,
+       * "refine" re-renders it at ~2K through qwen-edit + the Upscale2K LoRA */
+      upscale: procedure.input(imageUpscaleGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "imageUpscale", ...payload }, project);
+      }),
+      /** stage an uploaded reference image as a project asset; returns its
+       * dataRoot-relative path (what imagePayloadSchema.refs wants) */
+      addRef: procedure.input(imageRefAddSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        const bytes = Buffer.from(input.pngBase64, "base64");
+        // PNG magic — the renderer re-encodes every picked file to PNG
+        if (bytes.length < 64 || bytes.readUInt32BE(0) !== 0x89504e47) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "reference must be a PNG image" });
+        }
+        if (bytes.length > 32 * 1024 * 1024) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "reference too large (32 MB max)" });
+        }
+        return { ref: ctx.projects.importRef(input.project, input.name, "png", bytes) };
       }),
     }),
     voice: router({
@@ -157,6 +196,34 @@ export const appRouter = router({
         } catch (err) {
           throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
         }
+      }),
+      /** Seed-VC: re-voice existing audio (speech or singing) into a cloned voice */
+      convert: procedure.input(voiceConvertGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "voiceConvert", ...payload }, project);
+      }),
+      /** train a per-voice RVC v2 model on Replicate (paid, ~15 min) —
+       * unlocks the "rvc" conversion engine for that voice */
+      trainRvc: procedure.input(rvcTrainGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "rvcTrain", ...payload }, project);
+      }),
+      /** stage an uploaded conversion source as a project voice asset; returns
+       * its dataRoot-relative path (what voiceConvertPayloadSchema.source wants) */
+      addSource: procedure.input(voiceSourceAddSchema).mutation(({ ctx, input }) => {
+        requireProject(ctx, input.project);
+        const bytes = Buffer.from(input.wavBase64, "base64");
+        if (
+          bytes.length < 1024 ||
+          bytes.toString("ascii", 0, 4) !== "RIFF" ||
+          bytes.toString("ascii", 8, 12) !== "WAVE"
+        ) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "source must be a WAV file" });
+        }
+        if (bytes.length > 128 * 1024 * 1024) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "source too large (128 MB max)" });
+        }
+        return { source: ctx.projects.importBuffer(input.project, "audio", input.name, "wav", bytes) };
       }),
     }),
     music: router({
@@ -487,8 +554,46 @@ export const appRouter = router({
     /** stop an in-flight download — partial files stay for a later resume */
     cancel: procedure.input(jobId).mutation(({ ctx, input }) => ctx.models.cancel(input.id)),
 
-    /** delete a model's files from disk */
-    remove: procedure.input(jobId).mutation(({ ctx, input }) => ctx.models.remove(input.id)),
+    /** delete a model's files from disk (refuses for linked models — those
+     * files belong to the user, not to us) */
+    remove: procedure.input(jobId).mutation(({ ctx, input }) => {
+      try {
+        return ctx.models.remove(input.id);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
+    }),
+
+    /** What would linking this folder give us? Answers "we found 6 models,
+     * 23 GB you don't need to download" before anything is saved. */
+    previewRoot: procedure
+      .input(z.object({ root: z.string().min(1) }))
+      .query(({ ctx, input }) => ({ models: ctx.models.previewRoot(input.root) })),
+
+    /** Add/remove a linked model root. Rewrites extra_model_paths.yaml so the
+     * managed ComfyUI picks the folder up on its next start. */
+    linkRoot: procedure
+      .input(z.object({ root: z.string().min(1) }))
+      .mutation(({ ctx, input }) => {
+        const roots = ctx.settings.get().storage.modelRoots;
+        const root = input.root.replace(/[\\/]+$/, "");
+        if (!roots.includes(root)) {
+          ctx.settings.update({ storage: { modelRoots: [...roots, root] } });
+          ctx.runtime.writeExtraModelPaths();
+          ctx.models.refresh();
+        }
+        return ctx.models.list();
+      }),
+
+    unlinkRoot: procedure
+      .input(z.object({ root: z.string().min(1) }))
+      .mutation(({ ctx, input }) => {
+        const roots = ctx.settings.get().storage.modelRoots.filter((r) => r !== input.root);
+        ctx.settings.update({ storage: { modelRoots: roots } });
+        ctx.runtime.writeExtraModelPaths();
+        ctx.models.refresh();
+        return ctx.models.list();
+      }),
 
     /** registry snapshots — throttled to ~2/s while a download streams */
     onUpdate: procedure.subscription(async function* ({ ctx, signal }) {

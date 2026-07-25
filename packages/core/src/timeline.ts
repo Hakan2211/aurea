@@ -93,6 +93,7 @@ export class TimelineStore {
         kind,
         name: kindTracks.length === 0 ? base : `${base} ${kindTracks.length + 1}`,
         muted: false,
+        gain: 1,
         clips: [],
       };
       // insert after the last track of the kind (lanes stay grouped; array

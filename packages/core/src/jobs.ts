@@ -184,7 +184,9 @@ export class JobEngine extends EventEmitter {
     const finished = this.snapshot().filter(
       (j) => j.status === "completed" || j.status === "failed",
     );
-    const keep = new Set(finished.slice(0, HISTORY_CAP).map((j) => j.id));
+    // snapshot lists finished oldest-first — keep the newest slice, or a full
+    // history silently evicts every job that finishes after the cap is hit
+    const keep = new Set(finished.slice(-HISTORY_CAP).map((j) => j.id));
     const jobs = this.snapshot().filter(
       (j) => j.status === "running" || j.status === "queued" || keep.has(j.id),
     );

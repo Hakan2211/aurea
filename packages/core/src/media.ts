@@ -42,6 +42,31 @@ export function serveMedia(
     return;
   }
 
+  streamFile(req, res, file);
+}
+
+/** Stream one already-resolved file with the same token check as /media/.
+ * For server-chosen paths (voice reference clips) that may live outside
+ * dataRoot — never pass user-supplied paths here. */
+export function serveFile(
+  req: IncomingMessage,
+  res: ServerResponse,
+  file: string,
+  token: string,
+): void {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  if (url.searchParams.get("token") !== token) {
+    res.writeHead(401).end();
+    return;
+  }
+  if (!fs.existsSync(file)) {
+    res.writeHead(404).end();
+    return;
+  }
+  streamFile(req, res, file);
+}
+
+function streamFile(req: IncomingMessage, res: ServerResponse, file: string): void {
   const stat = fs.statSync(file);
   if (!stat.isFile()) {
     res.writeHead(404).end();

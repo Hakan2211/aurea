@@ -7,7 +7,9 @@ import type {
   DirectorAttachment,
   DirectorToolCall,
   Episode,
+  ImageDeckGenerate,
   ImageGenerate,
+  VoiceConvertGenerate,
   Job,
   JobPayload,
   LibraryAsset as CoreAsset,
@@ -242,11 +244,16 @@ export function useTimeline() {
     onSuccess: () => void utils.jobs.invalidate(),
   });
   const { mutateAsync: exportAsync } = exportMutation;
-  // the latest export job for this project, straight off the live jobs stream
+  // the latest export job for this project, straight off the live jobs stream;
+  // an active run wins, otherwise the newest finished one (the stream lists
+  // finished jobs oldest-first, so a bare find() would resurface the first
+  // export forever)
   const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
-  const exportJob = jobsData?.find(
+  const exportJobs = jobsData?.filter(
     (j) => j.payload?.type === "export" && j.payload.project === project,
   );
+  const exportJob =
+    exportJobs?.find((j) => j.status === "running" || j.status === "queued") ?? exportJobs?.at(-1);
 
   const assetByRel = useMemo(() => {
     const map = new Map<string, { url?: string; kind: LibraryKind; name: string }>();
@@ -321,13 +328,43 @@ export function useModels() {
   };
   const { mutate: download } = trpc.models.download.useMutation(refresh);
   const { mutate: cancel } = trpc.models.cancel.useMutation(refresh);
-  const { mutate: remove } = trpc.models.remove.useMutation(refresh);
+  const removeMutation = trpc.models.remove.useMutation(refresh);
+  const { mutate: remove } = removeMutation;
+  // linking reshapes availability everywhere, so settle the whole cache
+  const relink = {
+    onSuccess: () => {
+      void utils.models.list.invalidate();
+      void utils.labs.invalidate();
+      void utils.settings.invalidate();
+    },
+  };
+  const { mutateAsync: linkRoot } = trpc.models.linkRoot.useMutation(relink);
+  const { mutateAsync: unlinkRoot } = trpc.models.unlinkRoot.useMutation(relink);
+  const settings = trpc.settings.get.useQuery().data;
   return {
     models: (query.data ?? []) as ModelEntry[],
     live: !!query.data,
     download: (id: string, acceptLicense = false) => download({ id, acceptLicense }),
     cancel: (id: string) => cancel({ id }),
     remove: (id: string) => remove({ id }),
+    removeError: removeMutation.error?.message ?? null,
+    /** folders the user pointed us at; weights inside them read as installed */
+    modelRoots: settings?.storage.modelRoots ?? [],
+    linkRoot: (root: string) => linkRoot({ root }),
+    unlinkRoot: (root: string) => unlinkRoot({ root }),
+  };
+}
+
+/** What a candidate folder would give us, before anything is saved. */
+export function useRootPreview(root: string) {
+  const query = trpc.models.previewRoot.useQuery(
+    { root },
+    { enabled: root.trim().length > 2, staleTime: 0 },
+  );
+  return {
+    found: query.data?.models ?? [],
+    checking: query.isFetching,
+    checked: !!query.data,
   };
 }
 
@@ -395,11 +432,39 @@ function relTime(iso: string): string {
 
 type LabJob<T extends JobPayload["type"]> = Job & { payload: Extract<JobPayload, { type: T }> };
 
-const labJobs = <T extends JobPayload["type"]>(all: Job[] | undefined, type: T) =>
+/** last path segment, tolerant of Windows separators in job.output */
+const pathBasename = (p?: string) => p?.split(/[\\/]/).pop();
+
+const labJobs = <T extends JobPayload["type"]>(all: Job[] | undefined, ...types: T[]) =>
   (all ?? []).filter(
     (j): j is LabJob<T> =>
-      j.payload?.type === type && (j.status === "running" || j.status === "queued"),
+      types.includes(j.payload?.type as T) && (j.status === "running" || j.status === "queued"),
   );
+
+/** A lab job that died. These carry the message that actually explains a
+ * "nothing happened" — missing weights, a rejected graph, a cancel — and used
+ * to be visible only in the Job Center, three screens away from the person
+ * who pressed Generate. */
+export interface LabFailure {
+  id: string;
+  title: string;
+  engine: string;
+  error: string;
+}
+
+const labFailures = (all: Job[] | undefined, ...types: JobPayload["type"][]): LabFailure[] =>
+  (all ?? [])
+    .filter((j) => types.includes(j.payload?.type as JobPayload["type"]) && j.status === "failed")
+    // the jobs stream lists finished oldest-first — the failure that explains
+    // "my render just vanished" is at the END, not the front
+    .slice(-3)
+    .reverse()
+    .map((j) => ({
+      id: j.id,
+      title: j.title,
+      engine: j.engine,
+      error: j.error ?? "failed without a reason",
+    }));
 
 /** the project new lab takes land in — the switcher's active (first) project */
 function useActiveProjectId(): string {
@@ -424,31 +489,163 @@ function useLabData(kind: LibraryKind) {
   };
 }
 
+const IMAGE_ADVANCED_FALLBACK = {
+  sizeMin: 512,
+  sizeMax: 2048,
+  sizeStep: 16,
+  stepsMax: 50,
+  cfgMax: 15,
+  defaults: {} as Record<string, { steps: number; cfg: number }>,
+};
+
+/** how many finished stills the lab canvas holds before it stops scrolling */
+const IMAGE_ROLL_MAX = 24;
+
 export function useImageLab() {
   const catalog = trpc.labs.image.catalog.useQuery().data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("image");
   const mutation = trpc.labs.image.generate.useMutation(invalidate);
   const { mutate } = mutation;
+  const addRefMutation = trpc.labs.image.addRef.useMutation();
+  const { mutateAsync: addRefAsync } = addRefMutation;
+  const deckMutation = trpc.labs.image.generateDeck.useMutation(invalidate);
+  const { mutate: mutateDeck } = deckMutation;
+  const upscaleMutation = trpc.labs.image.upscale.useMutation(invalidate);
+  const { mutate: mutateUpscale } = upscaleMutation;
+  const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
+  const remove = useRemoveAssets();
+  // upscale jobs this session has watched run — lets a just-completed job keep
+  // its placeholder tile until the library refetch actually delivers the file
+  // (session-scoped, so stale history can never spawn phantom tiles)
+  const seenUpscales = useRef(new Set<string>());
 
   return useMemo(() => {
     const generate = (input: Omit<ImageGenerate, "project">) => mutate({ ...input, project });
-    if (!catalog || !kindAssets) return { ...imageLab, generate, busy: false };
+    const generateDeck = (input: Omit<ImageDeckGenerate, "project">) =>
+      mutateDeck({ ...input, project });
+    /** stage an uploaded reference; resolves to its dataRoot-relative path */
+    const addRef = async (name: string, pngBase64: string) =>
+      (await addRefAsync({ project, name, pngBase64 })).ref;
+    /** enlarge an existing still in place — "fast" = Real-ESRGAN 4×,
+     * "refine" = qwen-edit + Upscale2K LoRA re-render */
+    const upscale = (source: string, mode: "fast" | "refine" = "fast") =>
+      mutateUpscale({ source, mode, project });
+    /** a failed enqueue used to vanish silently — surface it under the button */
+    const error =
+      mutation.error?.message ??
+      deckMutation.error?.message ??
+      upscaleMutation.error?.message ??
+      remove.error?.message ??
+      null;
+    const extras = {
+      addRef,
+      addingRef: addRefMutation.isPending,
+      generateDeck,
+      upscale,
+      remove: remove.remove,
+      removing: remove.removing,
+      error,
+      /** jobs that died on the engine — surfaced in the lab, not just the
+       * Job Center, because the message is the answer to "why nothing?" */
+      failures: [] as LabFailure[],
+      retry: (id: string) => retryJob({ id }),
+      /** the enqueue round-trip itself — distinct from busy (= work on the
+       * GPU). Only this blocks the button; the engine has a queue, so a
+       * running deck must not stop you from queueing the next run. */
+      sending: mutation.isPending || deckMutation.isPending || upscaleMutation.isPending,
+      /** relPaths of stills with an upscale run in flight — tiles badge these */
+      upscaling: [] as string[],
+      decks: [] as DeckProgress[],
+      refsMax: 3,
+      countMax: 4,
+      deckMax: 100,
+      advancedCfg: IMAGE_ADVANCED_FALLBACK,
+    };
+    if (!catalog || !kindAssets) return { ...imageLab, ...extras, generate, busy: false };
+    extras.refsMax = catalog.refsMax ?? 3;
+    extras.countMax = catalog.countMax ?? 4;
+    extras.advancedCfg = catalog.advanced ?? IMAGE_ADVANCED_FALLBACK;
 
-    const active = labJobs(jobsData, "image");
+    extras.failures = labFailures(jobsData, "image", "imageDeck", "imageUpscale");
+
+    const active = labJobs(jobsData, "image", "imageDeck", "imageUpscale");
+    // a deck is one job rendering N prompts — it gets its own progress card
+    // rather than N phantom tiles, so a 40-prompt run doesn't bury the roll
+    extras.decks = active
+      .filter((j) => j.payload.type === "imageDeck")
+      .map((j) => {
+        const total = j.payload.type === "imageDeck" ? j.payload.prompts.length : 0;
+        return {
+          id: j.id,
+          name: j.payload.type === "imageDeck" ? j.payload.deckName : j.title,
+          total,
+          // progress runs 0..100 across the whole deck; floor keeps "3 of 40"
+          // from claiming an image that is still sampling
+          done: Math.min(total, Math.floor((j.progress / 100) * total)),
+          progress: j.progress,
+          stage: j.stage ?? (j.status === "queued" ? "Queued" : "Working"),
+          queued: j.status === "queued",
+        };
+      });
+
+    extras.upscaling = active
+      .filter((j) => j.payload.type === "imageUpscale")
+      .map((j) => (j.payload.type === "imageUpscale" ? j.payload.source : ""))
+      .filter(Boolean);
+
+    // completion drops a job out of `active` instantly, but the library
+    // refetch that carries its output is still in flight — without a bridge
+    // the placeholder blinks out and "nothing" appears. Hold the tile at 100%
+    // until the file shows up in the roll (or the job failed).
+    for (const j of active) if (j.payload.type === "imageUpscale") seenUpscales.current.add(j.id);
+    const settling = (jobsData ?? []).filter((j) => {
+      if (j.payload?.type !== "imageUpscale" || !seenUpscales.current.has(j.id)) return false;
+      if (j.status === "failed") {
+        seenUpscales.current.delete(j.id);
+        return false;
+      }
+      if (j.status !== "completed") return false;
+      const name = pathBasename(j.output);
+      if (name && kindAssets.some((a) => a.name === name)) {
+        seenUpscales.current.delete(j.id);
+        return false;
+      }
+      return true;
+    });
+
     const tiles: ImageTile[] = [
-      ...active.flatMap((j) =>
-        Array.from({ length: j.payload.count }, (_, i) => ({
-          id: `${j.id}:${i}`,
-          swatch: labSwatch(`${j.id}${i}`),
-          generating: { progress: j.progress },
+      // an in-flight upscale used to render nothing — "Upscale" looked dead.
+      // It gets a labeled progress tile like any other render.
+      ...active
+        .filter((j) => j.payload.type === "imageUpscale")
+        .map((j) => ({
+          id: j.id,
+          swatch: labSwatch(j.id),
+          generating: { progress: j.progress, label: j.title },
         })),
-      ),
+      ...settling.map((j) => ({
+        id: j.id,
+        swatch: labSwatch(j.id),
+        generating: { progress: 100, label: "Saving…" },
+      })),
+      ...active
+        .filter((j) => j.payload.type === "image")
+        .flatMap((j) =>
+          Array.from({ length: j.payload.type === "image" ? j.payload.count : 1 }, (_, i) => ({
+            id: `${j.id}:${i}`,
+            swatch: labSwatch(`${j.id}${i}`),
+            generating: { progress: j.progress },
+          })),
+        ),
       ...kindAssets.map((a) => ({
         id: a.id,
         swatch: labSwatch(a.id),
         url: media ? media(a.url) : undefined,
+        relPath: a.relPath,
+        name: a.name,
+        upscaled: a.meta?.origin === "imageUpscale",
       })),
-    ].slice(0, 4);
+    ].slice(0, IMAGE_ROLL_MAX);
 
     // history = the image roll grouped by day, newest first
     const byDay = new Map<string, CoreAsset[]>();
@@ -468,22 +665,120 @@ export function useImageLab() {
 
     return {
       ...imageLab,
-      models: catalog.models.map(({ available, ...m }) =>
-        available ? m : { ...m, note: "not installed" },
-      ),
+      ...extras,
+      models: catalog.models.map((m) => (m.available ? m : { ...m, note: "not installed" })),
       aspects: catalog.aspects,
       presets: catalog.presets,
       batch: tiles,
       history,
       generate,
-      busy: mutation.isPending || active.length > 0,
+      busy: mutation.isPending || deckMutation.isPending || active.length > 0,
     };
-  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending]);
+  }, [
+    catalog,
+    kindAssets,
+    jobsData,
+    media,
+    project,
+    mutate,
+    mutateDeck,
+    mutation.isPending,
+    mutation.error,
+    deckMutation.isPending,
+    deckMutation.error,
+    mutateUpscale,
+    retryJob,
+    upscaleMutation.isPending,
+    upscaleMutation.error,
+    addRefAsync,
+    addRefMutation.isPending,
+    remove,
+  ]);
+}
+
+/** a deck job in flight — one card, not one tile per prompt */
+export interface DeckProgress {
+  id: string;
+  name: string;
+  /** prompts in the deck */
+  total: number;
+  /** images finished so far, derived from job progress */
+  done: number;
+  progress: number;
+  stage: string;
+  queued: boolean;
+}
+
+/** Delete files from disk for good (assets + staged refs), then refetch the
+ * library so every screen showing them drops them at once. */
+export function useRemoveAssets() {
+  const utils = trpc.useUtils();
+  const mutation = trpc.library.remove.useMutation({
+    onSuccess: () => void utils.library.invalidate(),
+  });
+  const { mutateAsync } = mutation;
+  return useMemo(
+    () => ({
+      remove: (relPaths: string | string[]) =>
+        mutateAsync({ relPaths: typeof relPaths === "string" ? [relPaths] : relPaths }),
+      removing: mutation.isPending,
+      error: mutation.error,
+    }),
+    [mutateAsync, mutation.isPending, mutation.error],
+  );
+}
+
+/** Likes are a renderer-side bookmark: nothing on disk changes, so they live
+ * in localStorage keyed by the asset's dataRoot-relative path. Swap for a real
+ * store the day the library grows metadata. */
+const LIKES_KEY = "aurea.likes";
+
+export function useLikes() {
+  const [liked, setLiked] = useState<Set<string>>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LIKES_KEY) ?? "[]");
+      return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+  return useMemo(
+    () => ({
+      isLiked: (relPath?: string) => !!relPath && liked.has(relPath),
+      toggleLike: (relPath?: string) => {
+        if (!relPath) return;
+        setLiked((prev) => {
+          const next = new Set(prev);
+          if (!next.delete(relPath)) next.add(relPath);
+          localStorage.setItem(LIKES_KEY, JSON.stringify([...next]));
+          return next;
+        });
+      },
+    }),
+    [liked],
+  );
+}
+
+/** Save a media-route file to disk. Electron shows its native Save dialog for
+ * anchor-triggered downloads; fetching to a blob first keeps the studiod token
+ * out of the saved filename and lets us name the file properly. */
+export async function downloadAsset(url: string, filename: string): Promise<void> {
+  const blob = await (await fetch(url)).blob();
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // revoke once the download has had a chance to start
+  setTimeout(() => URL.revokeObjectURL(href), 30_000);
 }
 
 export function useVoiceLab() {
   const catalog = trpc.labs.voice.catalog.useQuery().data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("audio");
+  const allAssets = trpc.library.list.useQuery().data?.assets;
   const mutation = trpc.labs.voice.generate.useMutation(invalidate);
   const { mutate } = mutation;
   const utils = trpc.useUtils();
@@ -493,15 +788,61 @@ export function useVoiceLab() {
   const removeMutation = trpc.labs.voice.remove.useMutation(refreshVoices);
   const { mutateAsync: addAsync } = addMutation;
   const { mutateAsync: removeAsync } = removeMutation;
+  const convertMutation = trpc.labs.voice.convert.useMutation(invalidate);
+  const { mutate: mutateConvert } = convertMutation;
+  const addSourceMutation = trpc.labs.voice.addSource.useMutation();
+  const { mutateAsync: addSourceAsync } = addSourceMutation;
+  const trainRvcMutation = trpc.labs.voice.trainRvc.useMutation(invalidate);
+  const { mutate: mutateTrainRvc } = trainRvcMutation;
+  const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
+  const removeAssets = useRemoveAssets();
 
   return useMemo(() => {
     const generate = (input: Omit<TtsGenerate, "project">) => mutate({ ...input, project });
     const addVoice = (name: string, wavBase64: string) => addAsync({ name, wavBase64 });
     const removeVoice = (id: string) => removeAsync({ id });
     const cloning = { addVoice, removeVoice, adding: addMutation.isPending };
-    if (!catalog || !kindAssets) return { ...voiceLab, ...cloning, generate, busy: false };
+    /** delete a generated take (a real library file) from disk */
+    const takeOps = {
+      removeTake: removeAssets.remove,
+      removingTake: removeAssets.removing,
+      failures: [] as LabFailure[],
+      retry: (id: string) => retryJob({ id }),
+    };
+    const convert = (input: Omit<VoiceConvertGenerate, "project">) =>
+      mutateConvert({ ...input, project });
+    /** upload a conversion source; resolves to its dataRoot-relative path */
+    const addSource = async (name: string, wavBase64: string) =>
+      (await addSourceAsync({ project, name, wavBase64 })).source;
+    const conversion = {
+      convert,
+      addSource,
+      addingSource: addSourceMutation.isPending,
+      convertAvailable: catalog?.convert?.available ?? false,
+      convertStepsDefault: catalog?.convert?.stepsDefault ?? { speak: 25, sing: 30 },
+      /** Replicate RVC v2 — token present; per-voice readiness is Voice.rvcTrained */
+      rvcAvailable: catalog?.rvc?.available ?? false,
+      rvcTrainEstimate: catalog?.rvc?.trainEstimate ?? "≈ $1 · ~15 min",
+      rvcConvertEstimate: catalog?.rvc?.convertEstimate ?? "≈ $0.10",
+      /** kick off cloud training of this voice's RVC model (paid) */
+      trainRvc: (voiceId: string) => mutateTrainRvc({ voice: voiceId, project }),
+      /** recent audio/music library assets usable as conversion sources */
+      convertSources: (allAssets ?? [])
+        .filter((a) => a.kind === "audio" || a.kind === "music")
+        .slice(0, 30)
+        .map((a) => ({ relPath: a.relPath, name: a.name, kind: a.kind })),
+    };
+    if (!catalog || !kindAssets) {
+      return { ...voiceLab, ...cloning, ...takeOps, ...conversion, generate, busy: false };
+    }
 
-    const active = labJobs(jobsData, "tts");
+    // conversions chained off a Music-lab track (context "music") belong to
+    // the Music lab — here only the Voice lab's own work shows
+    const voiceJobs = (jobsData ?? []).filter(
+      (j) => !(j.payload?.type === "voiceConvert" && j.payload.context === "music"),
+    );
+    takeOps.failures = labFailures(voiceJobs, "tts", "voiceConvert", "rvcTrain");
+    const active = labJobs(voiceJobs, "tts", "voiceConvert", "rvcTrain");
     const takes: VoiceTake[] = [
       ...active.map((j) => ({
         id: j.id,
@@ -518,6 +859,7 @@ export function useVoiceLab() {
         rating: 0,
         waveSeed: waveSeed(a.id),
         url: media ? media(a.url) : undefined,
+        relPath: a.relPath,
         selected: i === 0,
       })),
     ].slice(0, 14);
@@ -525,17 +867,48 @@ export function useVoiceLab() {
     return {
       ...voiceLab,
       ...cloning,
+      ...takeOps,
+      ...conversion,
       engines: catalog.engines.map(({ available, ...e }) =>
         available ? e : { ...e, note: "not installed" },
       ),
-      voices: catalog.voices.map((v) => ({ ...v, swatch: labSwatch(v.id) })),
+      voices: catalog.voices.map((v) => ({
+        ...v,
+        swatch: labSwatch(v.id),
+        // cloned voices carry a playable reference clip — /voiceref/ streams it
+        sampleUrl: v.kind === "cloned" && media ? media(`/voiceref/${v.id}`) : undefined,
+        rvcTrained: v.rvcTrained ?? false,
+        // training in flight for this voice — the row shows a spinner state
+        rvcTraining: active.some(
+          (j) => j.payload.type === "rvcTrain" && j.payload.voice === v.id,
+        ),
+      })),
       scriptMax: catalog.scriptMax,
       takes,
       playback: { position: "00:00.0", total: "", played: 0 },
       generate,
-      busy: mutation.isPending || active.length > 0,
+      busy: mutation.isPending || convertMutation.isPending || active.length > 0,
     };
-  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending, addAsync, removeAsync, addMutation.isPending]);
+  }, [
+    catalog,
+    kindAssets,
+    allAssets,
+    jobsData,
+    media,
+    project,
+    mutate,
+    mutateConvert,
+    mutation.isPending,
+    convertMutation.isPending,
+    addAsync,
+    removeAsync,
+    addMutation.isPending,
+    addSourceAsync,
+    addSourceMutation.isPending,
+    mutateTrainRvc,
+    retryJob,
+    removeAssets,
+  ]);
 }
 
 const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
@@ -545,22 +918,57 @@ export function useMusicLab() {
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("music");
   const mutation = trpc.labs.music.generate.useMutation(invalidate);
   const { mutate } = mutation;
+  const { mutate: cancelJob } = trpc.jobs.cancel.useMutation(invalidate);
+  const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
+  const removeAssets = useRemoveAssets();
 
   return useMemo(() => {
     const generate = (input: Omit<MusicGenerate, "project">) => mutate({ ...input, project });
-    if (!catalog || !kindAssets) return { ...musicLab, generate, busy: false };
+    const trackOps = {
+      /** stop a generating track's job */
+      cancel: (jobId: string) => cancelJob({ id: jobId }),
+      retry: (jobId: string) => retryJob({ id: jobId }),
+      /** delete a finished track from disk */
+      remove: removeAssets.remove,
+      removing: removeAssets.removing,
+      failures: [] as LabFailure[],
+    };
+    const advanced = {
+      lyricsMax: 4096,
+      bpmRange: [30, 300] as [number, number],
+      timesignatures: ["2", "3", "4", "6"],
+      languages: ["unknown", "en"],
+      stepsDefault: 8,
+      shiftDefault: 3.0,
+      metadataManagedOnly: false,
+    };
+    if (!catalog || !kindAssets) return { ...musicLab, ...advanced, ...trackOps, generate, busy: false };
+    // the Music lab owns its own jobs plus the Seed-VC conversions chained off
+    // its tracks (context "music") — plain Voice-lab conversions stay out
+    const musicJobs = (jobsData ?? []).filter(
+      (j) => j.payload?.type !== "voiceConvert" || j.payload.context === "music",
+    );
+    trackOps.failures = labFailures(musicJobs, "music", "voiceConvert");
+    advanced.lyricsMax = catalog.lyricsMax ?? 4096;
+    advanced.bpmRange = catalog.bpmRange ?? advanced.bpmRange;
+    advanced.timesignatures = catalog.timesignatures ?? advanced.timesignatures;
+    advanced.languages = catalog.languages ?? advanced.languages;
+    advanced.stepsDefault = catalog.stepsDefault ?? 8;
+    advanced.shiftDefault = catalog.shiftDefault ?? 3.0;
+    advanced.metadataManagedOnly = catalog.metadataManagedOnly ?? false;
 
-    const active = labJobs(jobsData, "music");
+    const active = labJobs(musicJobs, "music", "voiceConvert");
     const tracks: MusicTrack[] = [
       ...active.map((j) => ({
         id: j.id,
         title: j.title,
         bpm: 0,
         key: "",
-        duration: fmtClock(j.payload.durationSec),
+        duration: j.payload.type === "music" ? fmtClock(j.payload.durationSec) : "",
         waveSeed: waveSeed(j.id),
         swatch: labSwatch(j.id),
-        arrangement: j.payload.arrangement,
+        // a chained conversion is by definition re-voicing sung vocals
+        arrangement: j.payload.type === "music" ? j.payload.arrangement : ("vocals" as const),
         generating: { progress: j.progress, stage: j.stage ?? "Queued" },
       })),
       ...kindAssets.map((a, i) => ({
@@ -568,10 +976,13 @@ export function useMusicLab() {
         title: strip(a.name),
         bpm: 0,
         key: "",
-        duration: fmtBytes(a.sizeBytes),
+        // real length is probed client-side from the file (useMediaDuration);
+        // "" here means "unknown yet", never the file size
+        duration: "",
         waveSeed: waveSeed(a.id),
         swatch: labSwatch(a.id),
-        arrangement: "instrumental" as const,
+        // provenance sidecar knows; files without one predate it → default old label
+        arrangement: a.meta?.arrangement ?? ("instrumental" as const),
         url: media ? media(a.url) : undefined,
         relPath: a.relPath,
         selected: i === 0,
@@ -580,6 +991,8 @@ export function useMusicLab() {
 
     return {
       ...musicLab,
+      ...advanced,
+      ...trackOps,
       engine: {
         label: catalog.engine.label,
         note: catalog.engine.available ? catalog.engine.note : "not installed",
@@ -593,7 +1006,7 @@ export function useMusicLab() {
       generate,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending]);
+  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending, cancelJob, retryJob, removeAssets]);
 }
 
 /* ---------- asset library (LIVE) ---------- */
@@ -694,14 +1107,36 @@ export function useAssetLibrary() {
 export function useVideoLab() {
   const catalog = trpc.labs.video.catalog.useQuery().data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("video");
-  const images = trpc.library.list.useQuery().data?.assets.filter((a) => a.kind === "image");
+  const allAssets = trpc.library.list.useQuery().data?.assets;
+  const images = allAssets?.filter((a) => a.kind === "image");
   const mutation = trpc.labs.video.generate.useMutation(invalidate);
   const { mutate } = mutation;
+  const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
 
   return useMemo(() => {
+    const extras = {
+      /** every library still, newest first — the Replace-frame picker's roll */
+      frames: (images ?? []).slice(0, 60).map((a) => ({
+        relPath: a.relPath,
+        name: a.name,
+        meta: `${fmtBytes(a.sizeBytes)} · ${a.ext.toUpperCase()}`,
+        swatch: labSwatch(a.id),
+        url: media ? media(a.url) : undefined,
+      })),
+      /** voice takes usable as ia2v dialogue audio (lip-sync) */
+      audioSources: (allAssets ?? [])
+        .filter((a) => a.kind === "audio")
+        .slice(0, 30)
+        .map((a) => ({ relPath: a.relPath, name: a.name })),
+      failures: labFailures(jobsData, "video"),
+      retry: (id: string) => retryJob({ id }),
+      /** a rejected enqueue — surfaced under the Generate button */
+      error: mutation.error?.message ?? null,
+    };
     if (!catalog || !kindAssets) {
       return {
         ...videoLab,
+        ...extras,
         generate: (_: Omit<VideoGenerate, "project">) => {},
         busy: false,
         canGenerate: true,
@@ -720,8 +1155,9 @@ export function useVideoLab() {
         }
       : { ...videoLab.startFrame, url: undefined, relPath: undefined };
 
-    const generate = (input: Omit<VideoGenerate, "project" | "startFrame">) =>
-      mutate({ ...input, startFrame: startFrame.relPath, project });
+    /** callers may override startFrame (Replace picker) and attach audio (ia2v) */
+    const generate = (input: Omit<VideoGenerate, "project">) =>
+      mutate({ ...input, startFrame: input.startFrame ?? startFrame.relPath, project });
 
     const takes: VideoTake[] = kindAssets.slice(0, 8).map((a, i) => ({
       id: a.id,
@@ -767,6 +1203,7 @@ export function useVideoLab() {
 
     return {
       ...videoLab,
+      ...extras,
       engines: catalog.engines.map(({ available, ...e }) =>
         available ? e : { ...e, note: "not installed" },
       ),
@@ -785,7 +1222,7 @@ export function useVideoLab() {
       canGenerate: !!frame,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, kindAssets, images, jobsData, media, project, mutate, mutation.isPending]);
+  }, [catalog, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
 }
 
 /* ---------- studio: bible + production (LIVE) ---------- */
@@ -1084,6 +1521,10 @@ export function useSettings() {
       falApiKey: live?.providers.falApiKey ?? "",
       setFalApiKey(key: string) {
         update({ providers: { falApiKey: key.trim() } });
+      },
+      replicateApiToken: live?.providers.replicateApiToken ?? "",
+      setReplicateApiToken(key: string) {
+        update({ providers: { replicateApiToken: key.trim() } });
       },
     };
   }, [live, disk, update]);

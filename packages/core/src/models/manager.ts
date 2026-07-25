@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ModelEntry, ModelFile, ModelInfo, ModelStatus } from "@aurea/shared";
 import type { SettingsStore } from "../settings.js";
+import type { ModelNames } from "../comfy/graphs.js";
 import { downloadFile } from "../runtime/download.js";
 import { MODEL_REGISTRY } from "./registry.js";
 
@@ -54,6 +55,132 @@ export class ModelManager extends EventEmitter {
     return path.join(this.settings.get().storage.dataRoot, "models");
   }
 
+  /* ---------- linked roots ----------
+   *
+   * A user who already runs ComfyUI owns most of these weights: the same
+   * public files, from the same repos, often tens of gigabytes of them. Rather
+   * than make them download a second copy, storage.modelRoots names folders in
+   * conventional ComfyUI layout that we mount read-only (see
+   * EngineRuntime.writeExtraModelPaths) and read as already-installed.
+   *
+   * The rules that keep this honest live in one place, here:
+   *   - never checksum a linked file (it is not ours; a different but valid
+   *     quantisation is the user's business, not an integrity failure)
+   *   - never delete one (remove() refuses)
+   *   - a managed copy always wins, so an explicit download stays authoritative
+   */
+
+  /** ComfyUI resolves these pairs to the same search path, and real installs
+   * use them interchangeably — D:\models keeps GGUF diffusion weights under
+   * unet/ while our registry names them diffusion_models/. */
+  private static readonly CATEGORY_ALIASES: Record<string, string[]> = {
+    diffusion_models: ["diffusion_models", "unet"],
+    unet: ["unet", "diffusion_models"],
+    text_encoders: ["text_encoders", "clip"],
+    clip: ["clip", "text_encoders"],
+  };
+
+  /** Absolute path of a registry file inside a linked root, or null. Matching
+   * is exact-by-filename: close-but-different quantisations are a deliberate
+   * miss, because silently running weights the caller did not ask for is
+   * worse than saying "not installed". */
+  private linkedPath(file: ModelFile, roots: string[]): { root: string; file: string } | null {
+    const [category, ...rest] = file.name.split("/");
+    const base = rest.join("/") || category;
+    const categories = ModelManager.CATEGORY_ALIASES[category] ?? [category];
+    for (const root of roots) {
+      for (const c of categories) {
+        const candidate = path.join(root, c, base);
+        try {
+          if (fs.statSync(candidate).size > 0) return { root, file: candidate };
+        } catch {
+          /* not here */
+        }
+      }
+    }
+    return null;
+  }
+
+  /** The root satisfying every file of a model, or null if any file is
+   * missing. Files may come from different roots; we report the first. */
+  private linkedRoot(info: ModelInfo, roots = this.settings.get().storage.modelRoots): string | null {
+    if (roots.length === 0) return null;
+    let first: string | null = null;
+    for (const file of info.files) {
+      const found = this.linkedPath(file, roots);
+      if (!found) return null;
+      first ??= found.root;
+    }
+    return first;
+  }
+
+  /** Every registry model a given folder would satisfy — what the settings
+   * screen and the first-run wizard show before the user commits to a root,
+   * so "we found 6 models, 23 GB you don't need to download" is answerable
+   * before anything is saved. */
+  previewRoot(root: string): Array<{ id: string; name: string; sizeBytes: number }> {
+    return this.registry
+      .filter((info) => this.linkedRoot(info, [root]) !== null)
+      .map((info) => ({ id: info.id, name: info.name, sizeBytes: info.sizeBytes }));
+  }
+
+  /** ComfyUI loader names for a model's files, keyed by graph slot.
+   *
+   * This replaces the old `managed ? X_MANAGED : X_EXTERNAL` binary, which
+   * stopped describing reality the moment a managed engine could read a
+   * conventionally-named linked file. The rule is about the *file*, not the
+   * mode: a managed copy is addressed "<id>/<category>/<file>" (collision-proof
+   * inside our own flat mount), anything else by its bare conventional name. */
+  comfyNames(id: string): ModelNames {
+    const info = this.require(id);
+    // external ComfyUI has no managed store at all; linked roots mount under
+    // their conventional names — both want the bare filename
+    const bare = this.settings.get().engines.comfyMode === "external" || !this.managedPresent(info);
+    const pick = (...categories: string[]): string => {
+      const file = info.files.find((f) => categories.includes(f.name.split("/")[0]));
+      if (!file) throw new Error(`${info.name} has no ${categories[0]} file in the registry`);
+      const parts = file.name.split("/");
+      return bare ? parts[parts.length - 1] : [id, ...parts].join(path.sep);
+    };
+    return {
+      unet: pick("diffusion_models", "unet"),
+      clip: pick("text_encoders", "clip"),
+      vae: pick("vae"),
+    };
+  }
+
+  /** Loader name for a single-file model (a LoRA, an upscaler). */
+  comfyFileName(id: string): string {
+    const info = this.require(id);
+    const file = info.files[0];
+    if (!file) throw new Error(`${info.name} has no files`);
+    const parts = file.name.split("/");
+    const bare =
+      this.settings.get().engines.comfyMode === "external" || !this.managedPresent(info);
+    return bare ? parts[parts.length - 1] : [id, ...parts].join(path.sep);
+  }
+
+  /** Is this model runnable at all — downloaded by us, or linked from a root
+   * the user already owns? Adapters preflight on this, not on "installed". */
+  ready(id: string): boolean {
+    const info = this.registry.find((m) => m.id === id);
+    if (!info) return false;
+    const state = this.status(info).state;
+    return state === "installed" || state === "linked";
+  }
+
+  /** Do WE have this model, as opposed to reading the user's copy? Callers
+   * that build loader names need this: our own store is flat and addressed
+   * "<id>/<category>/<file>", every other source keeps conventional names. */
+  managedCopy(id: string): boolean {
+    const info = this.registry.find((m) => m.id === id);
+    return !!info && this.managedPresent(info);
+  }
+
+  private managedPresent(info: ModelInfo): boolean {
+    return !!this.manifest.installed[info.id] && this.filesPresent(info);
+  }
+
   private manifestFile(): string {
     return path.join(this.dir(), "manifest.json");
   }
@@ -86,9 +213,18 @@ export class ModelManager extends EventEmitter {
     return { ...info, status: this.status(info) };
   }
 
-  /** Delete a model's files (and any partials); the license acceptance stays. */
+  /** Delete a model's files (and any partials); the license acceptance stays.
+   * Only ever touches OUR copy under <dataRoot>/models/<id>/ — a model
+   * satisfied by a linked root has no files of ours to delete, and deleting
+   * the user's own library is not something this app gets to do. */
   remove(id: string): ModelEntry {
     const info = this.require(id);
+    if (!this.managedPresent(info) && this.linkedRoot(info)) {
+      throw new Error(
+        `"${info.name}" is linked from ${this.linkedRoot(info)} — it belongs to you, not to Aurea. ` +
+          "Remove the folder under Settings → Models → Linked folders instead.",
+      );
+    }
     this.active.get(id)?.ctrl.abort();
     fs.rmSync(path.join(this.dir(), id), { recursive: true, force: true });
     this.errors.delete(id);
@@ -98,6 +234,13 @@ export class ModelManager extends EventEmitter {
     }
     this.publish(true);
     return { ...info, status: this.status(info) };
+  }
+
+  /** Re-evaluate every entry and push a snapshot — linking a root can flip
+   * several models to "linked" at once, with nothing downloading to trigger
+   * the usual publish. */
+  refresh(): void {
+    this.publish(true);
   }
 
   close(): void {
@@ -118,9 +261,14 @@ export class ModelManager extends EventEmitter {
     const live = this.active.get(info.id);
     if (live) return { ...live.status };
     const licenseAccepted = !info.license.gated || this.manifest.accepted.includes(info.id);
-    const base = { bytesPerSec: null, file: null, error: null, licenseAccepted };
-    if (this.manifest.installed[info.id] && this.filesPresent(info)) {
+    const base = { bytesPerSec: null, file: null, error: null, licenseAccepted, linkedRoot: null };
+    if (this.managedPresent(info)) {
       return { state: "installed", bytes: info.sizeBytes, progress: 100, ...base };
+    }
+    // a managed copy always wins; only look outward when we don't have one
+    const linked = this.linkedRoot(info);
+    if (linked) {
+      return { state: "linked", bytes: info.sizeBytes, progress: 100, ...base, linkedRoot: linked };
     }
     const bytes = this.bytesOnDisk(info);
     const progress = info.sizeBytes ? Math.min(99, (bytes / info.sizeBytes) * 100) : 0;
@@ -177,6 +325,7 @@ export class ModelManager extends EventEmitter {
       file: null,
       error: null,
       licenseAccepted: true,
+      linkedRoot: null,
     };
     this.active.set(info.id, { ctrl, status });
     void this.run(info, ctrl.signal, status)
