@@ -1164,6 +1164,7 @@ export function useVideoLab() {
       label: strip(a.name),
       swatch: labSwatch(a.id),
       url: media ? media(a.url) : undefined,
+      relPath: a.relPath,
       selected: i === 0,
     }));
 

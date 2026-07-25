@@ -682,6 +682,8 @@ export interface VideoTake {
   selected?: boolean;
   /** playable media URL once the take is a real asset */
   url?: string;
+  /** dataRoot-relative path — the handle for star/download/delete/timeline */
+  relPath?: string;
 }
 
 export interface VideoStage {

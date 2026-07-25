@@ -200,7 +200,9 @@ export const videoPayloadSchema = z.object({
   startFrame: z.string().optional(),
   /** dialogue audio as a dataRoot-relative library path (switches to ia2v lip-sync) */
   audio: z.string().optional(),
-  durationSec: z.number().min(1).max(15).default(5),
+  /** LTX 2.3 has no fixed clip length — the ceiling here is VRAM headroom on a
+   * 24 GB card, not the model. Seedance rounds to its API's 5s/10s. */
+  durationSec: z.number().min(1).max(30).default(5),
   /** "1280 × 720" style; adapter parses W/H */
   resolution: z.string().default("1280 × 720"),
   motionStrength: z.number().min(0).max(1).optional(),

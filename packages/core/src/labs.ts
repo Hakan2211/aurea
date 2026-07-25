@@ -331,7 +331,20 @@ export class Labs {
           ? "Cloud render on your fal.ai account — ≈ $0.05/s at 720p, $0.15/s at 1080p"
           : "Add your fal.ai API key in Settings → AI Providers to enable",
       } as Record<string, string>,
-      durations: ["3 seconds", "4 seconds", "5 seconds", "6 seconds", "8 seconds"],
+      // LTX 2.3 is length-agnostic — the graph derives frames as duration*24+1,
+      // so the ceiling is VRAM, not the model (the shipped template defaults to
+      // 9s). Seedance's API only offers 5s/10s, so its adapter rounds.
+      durations: [
+        "3 seconds",
+        "4 seconds",
+        "5 seconds",
+        "6 seconds",
+        "8 seconds",
+        "10 seconds",
+        "12 seconds",
+        "15 seconds",
+        "20 seconds",
+      ],
       resolutions: ["704 × 896 (portrait)", "896 × 704 (landscape)", "1280 × 720 (16:9)"],
       promptMax: 1000,
       tip: "The start frame anchors identity — generate it in the Image lab first, then describe the motion here.",

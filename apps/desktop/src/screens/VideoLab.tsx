@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import {
   AudioLines,
   Check,
@@ -6,10 +7,13 @@ import {
   ChevronRight,
   CircleAlert,
   Copy,
+  Download,
   FileText,
   HelpCircle,
   Lightbulb,
+  ListPlus,
   Maximize2,
+  Minimize2,
   Monitor,
   MoreVertical,
   Pause,
@@ -20,13 +24,17 @@ import {
   Sparkles,
   Star,
   Timer,
+  Trash2,
+  Volume1,
   Volume2,
+  VolumeX,
   Wand2,
   X,
 } from "lucide-react";
-import { useJobs, useVideoLab } from "@/hooks";
+import { downloadAsset, useJobs, useLikes, useRemoveAssets, useSendToTimeline, useVideoLab } from "@/hooks";
 import type { VideoStage, VideoTake } from "@/data/sample";
 import { Chip, GoldButton, Progress, cx } from "@/components/ui";
+import { useVideoPlayer, type VideoPlayer } from "@/components/useVideoPlayer";
 
 /* Video gen — UI-Design/videogen lab.jpg. Keyframe-driven i2v: prompt + start
  * frame + engine choice (LTX-2 local free / Seedance API with a cost estimate
@@ -119,6 +127,7 @@ function ParamsPanel() {
   const audioName = audioRel
     ? (lab.audioSources.find((a) => a.relPath === audioRel)?.name ?? audioRel)
     : null;
+  const durationSec = parseInt(duration) || 5;
 
   return (
     <aside className="flex w-[280px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
@@ -272,24 +281,37 @@ function ParamsPanel() {
         </section>
 
         {/* 4/5 · duration + resolution */}
-        <section className="grid grid-cols-2 gap-1.5">
-          <div>
-            <PanelLabel>4 · Duration</PanelLabel>
-            <div className="mt-2">
-              <Select icon={Timer} value={duration} options={lab.durations} onChange={setDuration} />
+        <section>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <PanelLabel>4 · Duration</PanelLabel>
+              <div className="mt-2">
+                <Select icon={Timer} value={duration} options={lab.durations} onChange={setDuration} />
+              </div>
+            </div>
+            <div>
+              <PanelLabel>5 · Resolution</PanelLabel>
+              <div className="mt-2">
+                <Select
+                  icon={Monitor}
+                  value={resolution}
+                  options={lab.resolutions}
+                  onChange={setResolution}
+                />
+              </div>
             </div>
           </div>
-          <div>
-            <PanelLabel>5 · Resolution</PanelLabel>
-            <div className="mt-2">
-              <Select
-                icon={Monitor}
-                value={resolution}
-                options={lab.resolutions}
-                onChange={setResolution}
-              />
-            </div>
-          </div>
+          {engineId === "seedance" && durationSec > 7 && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+              Seedance only renders 5s or 10s — this queues as a 10-second clip.
+            </p>
+          )}
+          {engineId !== "seedance" && durationSec > 10 && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-gold/75">
+              Long clips scale VRAM and render time roughly linearly — drop the
+              resolution if a {durationSec}s take runs out of memory.
+            </p>
+          )}
         </section>
 
         {/* 6 · motion strength */}
@@ -318,7 +340,7 @@ function ParamsPanel() {
             lab.generate({
               prompt,
               engine: engineId,
-              durationSec: parseInt(duration) || 5,
+              durationSec,
               resolution,
               motionStrength: motion,
               startFrame: effectiveRel,
@@ -427,117 +449,356 @@ function ParamsPanel() {
 
 /* ---------- center: preview + takes ---------- */
 
-function TakeCard({ take, active, onSelect }: { take: VideoTake; active: boolean; onSelect: () => void }) {
+function TakeCard({
+  take,
+  active,
+  starred,
+  onSelect,
+  onStar,
+}: {
+  take: VideoTake;
+  active: boolean;
+  starred: boolean;
+  onSelect: () => void;
+  onStar: () => void;
+}) {
+  const hoverRef = useRef<HTMLVideoElement>(null);
   return (
-    <button
+    <div
       onClick={onSelect}
+      onMouseEnter={() => {
+        const el = hoverRef.current;
+        if (el) void el.play().catch(() => {});
+      }}
+      onMouseLeave={() => {
+        const el = hoverRef.current;
+        if (!el) return;
+        el.pause();
+        el.currentTime = 0;
+      }}
       className={cx(
-        "group relative aspect-video min-w-0 flex-1 overflow-hidden rounded-xl border transition",
+        "group relative aspect-video min-w-0 flex-1 cursor-pointer overflow-hidden rounded-xl border transition",
         active ? "border-gold/60" : "border-cream/10 hover:border-cream/25",
       )}
     >
       <div className={cx("absolute inset-0", take.swatch)} />
       {take.url ? (
+        /* hover scrubs the take silently — the preview player owns the sound */
         <video
+          ref={hoverRef}
           src={take.url}
           muted
+          loop
+          playsInline
           preload="metadata"
           className="absolute inset-0 h-full w-full object-cover"
         />
       ) : (
         <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
       )}
-      {take.starred && (
-        <Star size={12} className="absolute right-2 top-2 text-gold" fill="currentColor" />
-      )}
-      <span className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onStar();
+        }}
+        title={starred ? "Unstar this take" : "Star this take"}
+        className={cx(
+          "absolute right-1.5 top-1.5 z-[1] rounded-full p-1 transition",
+          starred ? "text-gold" : "text-cream/50 opacity-0 group-hover:opacity-100 hover:text-gold",
+        )}
+      >
+        <Star size={12} fill={starred ? "currentColor" : "none"} />
+      </button>
+      <span className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink/60 text-cream backdrop-blur">
           <Play size={13} className="ml-0.5" />
         </span>
       </span>
       <span
         className={cx(
-          "absolute bottom-2 left-2.5 text-[11px] font-medium",
+          "pointer-events-none absolute bottom-2 left-2.5 text-[11px] font-medium",
           active ? "text-gold" : "text-cream/85",
         )}
       >
         {take.label}
       </span>
-    </button>
+    </div>
+  );
+}
+
+/* ---------- transport controls ---------- */
+
+/** Click-and-drag scrub bar. Pointer capture keeps the drag alive when the
+ * cursor leaves the 1px track, which is most of the time. */
+function Scrubber({ player }: { player: VideoPlayer }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [hover, setHover] = useState<number | null>(null);
+
+  const fractionAt = useCallback((clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return 0;
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  }, []);
+
+  const seekable = player.durationSec > 0;
+  const shown = dragging && hover != null ? hover : player.played;
+
+  return (
+    <div
+      ref={trackRef}
+      role="slider"
+      aria-label="Seek"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(shown * 100)}
+      onPointerDown={(e) => {
+        if (!seekable) return;
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setDragging(true);
+        const f = fractionAt(e.clientX);
+        setHover(f);
+        player.seekFraction(f);
+      }}
+      onPointerMove={(e) => {
+        const f = fractionAt(e.clientX);
+        if (dragging) {
+          setHover(f);
+          player.seekFraction(f);
+        } else if (seekable) {
+          setHover(f);
+        }
+      }}
+      onPointerUp={(e) => {
+        if (!dragging) return;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        setDragging(false);
+      }}
+      onPointerLeave={() => !dragging && setHover(null)}
+      className={cx(
+        "group/scrub relative -my-2 min-w-0 flex-1 py-2",
+        seekable ? "cursor-pointer" : "cursor-default",
+      )}
+    >
+      <div className="relative h-1 rounded-full bg-cream/15">
+        {/* hover ghost — where a click would land */}
+        {hover != null && !dragging && (
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-cream/20"
+            style={{ width: `${hover * 100}%` }}
+          />
+        )}
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-gold-deep to-gold"
+          style={{ width: `${shown * 100}%` }}
+        />
+        <span
+          className={cx(
+            "absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-gold shadow transition-transform",
+            dragging && "scale-125",
+          )}
+          style={{ left: `calc(${shown * 100}% - 6px)` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function VolumeControl({ player }: { player: VideoPlayer }) {
+  const Icon = player.muted || player.volume === 0 ? VolumeX : player.volume < 0.5 ? Volume1 : Volume2;
+  return (
+    <div className="group/vol relative flex shrink-0 items-center">
+      <button
+        onClick={player.toggleMute}
+        title={player.muted ? "Unmute (M)" : "Mute (M)"}
+        className={cx(
+          "transition hover:text-gold",
+          player.muted ? "text-fog" : "text-cream/70",
+          player.autoplayBlocked && "animate-pulse text-gold",
+        )}
+      >
+        <Icon size={15} />
+      </button>
+      {/* slider expands on hover — no space stolen from the scrub bar */}
+      <div className="w-0 overflow-hidden opacity-0 transition-all duration-150 group-hover/vol:ml-2 group-hover/vol:w-20 group-hover/vol:opacity-100">
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={player.muted ? 0 : player.volume}
+          onChange={(e) => player.setVolume(Number(e.target.value))}
+          className="w-20 accent-gold"
+        />
+      </div>
+    </div>
   );
 }
 
 function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: string) => void }) {
   const lab = useVideoLab();
-  const [playing, setPlaying] = useState(true);
+  const navigate = useNavigate();
+  const { isLiked, toggleLike } = useLikes();
+  const timeline = useSendToTimeline();
+  const { remove } = useRemoveAssets();
   const take = lab.takes.find((t) => t.id === takeId) ?? lab.takes[0];
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const player = useVideoPlayer(take?.url);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [armed, setArmed] = useState(false);
 
   useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-    if (playing) void el.play().catch(() => {});
-    else el.pause();
-  }, [playing, take.url]);
+    const onChange = () => setFullscreen(document.fullscreenElement === stageRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void stageRef.current?.requestFullscreen().catch(() => {});
+  }, []);
+
+  /* transport shortcuts, scoped to the focused player so they never eat
+   * keystrokes meant for the prompt box */
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const key = e.key.toLowerCase();
+    if (key === " " || key === "k") {
+      e.preventDefault();
+      player.toggle();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      player.nudge(-2);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      player.nudge(2);
+    } else if (key === "m") {
+      player.toggleMute();
+    } else if (key === "f") {
+      toggleFullscreen();
+    }
+  };
 
   return (
     <section className="flex min-w-0 flex-1 flex-col p-4">
       <header className="flex items-center justify-between pb-3">
         <h2 className="font-serif text-[16px] font-semibold tracking-wide text-cream">Preview</h2>
-        <div className="flex items-center gap-1">
-          <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/10 text-fog transition hover:border-gold/35 hover:text-gold">
+        <div className="relative flex items-center gap-1">
+          <button
+            onClick={toggleFullscreen}
+            title="Fullscreen (F)"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/10 text-fog transition hover:border-gold/35 hover:text-gold"
+          >
             <Maximize2 size={13} />
           </button>
-          <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/10 text-fog transition hover:border-gold/35 hover:text-gold">
+          <button
+            onClick={() => {
+              setMenu((m) => !m);
+              setArmed(false);
+            }}
+            title="Take actions"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/10 text-fog transition hover:border-gold/35 hover:text-gold"
+          >
             <MoreVertical size={13} />
           </button>
+          {menu && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
+              <div className="absolute right-0 top-9 z-20 w-52 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
+                <button
+                  onClick={() => {
+                    setMenu(false);
+                    if (take?.relPath) void timeline.send(take.relPath);
+                  }}
+                  disabled={!take?.relPath || timeline.sending || !timeline.live}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+                >
+                  <ListPlus size={12} /> {timeline.sending ? "Sending…" : "Send to timeline"}
+                </button>
+                <button
+                  onClick={() => {
+                    setMenu(false);
+                    if (take?.url) void downloadAsset(take.url, `${take.label || "take"}.mp4`);
+                  }}
+                  disabled={!take?.url}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+                >
+                  <Download size={12} /> Download
+                </button>
+                <button
+                  onClick={() => {
+                    if (!armed) {
+                      setArmed(true);
+                      return;
+                    }
+                    setMenu(false);
+                    setArmed(false);
+                    if (take?.relPath) void remove(take.relPath);
+                  }}
+                  disabled={!take?.relPath}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5 disabled:opacity-40"
+                >
+                  <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </header>
 
       {/* player */}
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border hairline">
-        <div className={cx("absolute inset-0", take.swatch)} />
-        {take.url ? (
+      <div
+        ref={stageRef}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        className="group/player relative min-h-0 flex-1 overflow-hidden rounded-2xl border hairline bg-black outline-none focus-visible:border-gold/40"
+      >
+        {!take?.url && <div className={cx("absolute inset-0", take?.swatch)} />}
+        {take?.url ? (
           <video
-            ref={videoRef}
+            ref={player.ref}
             src={take.url}
-            muted
             loop
             playsInline
-            autoPlay
-            className="absolute inset-0 h-full w-full object-cover"
+            onClick={player.toggle}
+            className="absolute inset-0 h-full w-full cursor-pointer object-contain"
           />
         ) : (
           /* stand-in composition until real frames flow through the seam */
           <div className="absolute inset-0 bg-[radial-gradient(90%_70%_at_50%_35%,rgba(237,234,228,0.09),transparent_65%)]" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-ink/70 via-transparent to-ink/20" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink/80 to-transparent" />
+
+        {/* Chromium blocked unmuted autoplay — one click gets the sound back */}
+        {player.autoplayBlocked && (
+          <button
+            onClick={player.toggleMute}
+            className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-gold/40 bg-ink/80 px-3 py-1.5 text-[11px] text-gold backdrop-blur transition hover:bg-ink"
+          >
+            <VolumeX size={11} className="mr-1 inline" /> Muted — click for sound
+          </button>
+        )}
 
         <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 px-4 pb-3">
           <button
-            onClick={() => setPlaying((p) => !p)}
+            onClick={player.toggle}
+            title={player.playing ? "Pause (Space)" : "Play (Space)"}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110"
           >
-            {playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
+            {player.playing ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
           </button>
           <span className="shrink-0 text-[11px] tabular-nums text-cream/90">
-            {lab.playback.position} <span className="text-fog">/ {lab.playback.total}</span>
+            {player.position} <span className="text-fog">/ {player.total}</span>
           </span>
-          <div className="relative h-1 min-w-0 flex-1 rounded-full bg-cream/15">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-gold-deep to-gold"
-              style={{ width: `${lab.playback.played * 100}%` }}
-            />
-            <span
-              className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-gold shadow"
-              style={{ left: `calc(${lab.playback.played * 100}% - 6px)` }}
-            />
-          </div>
-          <button className="shrink-0 text-cream/70 transition hover:text-gold">
-            <Volume2 size={15} />
-          </button>
-          <button className="shrink-0 text-cream/70 transition hover:text-gold">
-            <Maximize2 size={14} />
+          <Scrubber player={player} />
+          <VolumeControl player={player} />
+          <button
+            onClick={toggleFullscreen}
+            title="Fullscreen (F)"
+            className="shrink-0 text-cream/70 transition hover:text-gold"
+          >
+            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
         </div>
       </div>
@@ -551,13 +812,23 @@ function PreviewPanel({ takeId, onSelect }: { takeId: string; onSelect: (id: str
               {lab.takes.length}
             </Chip>
           </div>
-          <button className="inline-flex items-center gap-0.5 text-[11px] text-gold hover:underline">
+          <button
+            onClick={() => navigate("/assets")}
+            className="inline-flex items-center gap-0.5 text-[11px] text-gold hover:underline"
+          >
             View all <ChevronRight size={11} />
           </button>
         </div>
         <div className="flex gap-2.5">
           {lab.takes.map((t) => (
-            <TakeCard key={t.id} take={t} active={t.id === takeId} onSelect={() => onSelect(t.id)} />
+            <TakeCard
+              key={t.id}
+              take={t}
+              active={t.id === takeId}
+              starred={t.relPath ? isLiked(t.relPath) : !!t.starred}
+              onSelect={() => onSelect(t.id)}
+              onStar={() => toggleLike(t.relPath)}
+            />
           ))}
         </div>
       </div>
