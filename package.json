@@ -11,6 +11,8 @@
     "dev": "npm run dev -w @aurea/desktop",
     "build": "npm run build -w @aurea/desktop",
     "package": "npm run package -w @aurea/desktop",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcut.ps1",
+    "app": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/launch-aurea.ps1",
     "studiod": "tsx packages/core/src/bin.ts",
     "mcp": "tsx packages/core/src/mcp.ts",
     "mcp:on": "node scripts/mcp-toggle.mjs on",
