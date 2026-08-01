@@ -556,7 +556,8 @@ function BlendPanel({ onClose }: { onClose: () => void }) {
               {contrasts.length === 2 && (
                 <p className="mt-1.5 text-[10px] leading-relaxed text-ember/80">
                   Three-way mixes are experimental — the engine was tuned for two visual
-                  languages per short. Expect a busier video; judge the first render.
+                  languages per short. The first one held together, but it proved the same
+                  number three times over. Give each paradigm its own claim below.
                 </p>
               )}
               {contrasts.length >= 3 && (

@@ -498,7 +498,9 @@ export function buildTools(api: StudiodApi): AureaTool[] {
             "blend formats in ONE video: paradigm id → share, ONE dominant (≥ 0.5) plus any number of " +
               "contrasts, shares summing to 1 — e.g. {\"d3Data\": 0.6, \"jsx2d\": 0.4} is 60% charts + " +
               "40% 2D metaphors. One contrast is the tuned sweet spot; each extra visual language makes " +
-              "the video busier (warn past two). ids: jsx2d (2D metaphors), svgChoreo (vector morphs), " +
+              "the video busier (warn past two). Give each paradigm a DIFFERENT claim — a mix fails by " +
+              "proving the same number twice in two languages long before it fails by looking busy. " +
+              "ids: jsx2d (2D metaphors), svgChoreo (vector morphs), " +
               "d3Data (charts), p5Canvas (generative physics), r3f3d (3D heroes), parallax25d (2.5D " +
               "worlds), manimClip (Manim math). Sets format to strategist automatically; the dominant " +
               "picks the recipe.",
