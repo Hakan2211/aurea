@@ -169,6 +169,140 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     seed: 23,
     voice: { voiceId: "barney", engine: "chatterbox", exaggeration: 0.7, cfgWeight: 0.4, deliveryNotes: "drawl it; lean into the sssibilants" },
   }),
+  /* --- Wardrobe Set B / Zoo Logic expansion cast (doc 31 §8.1) --- */
+  seedChar({
+    id: "alli",
+    name: "Allistaire",
+    species: "emperor penguin",
+    build:
+      "compact and barrel-chested, short strong flippers that work as arms, upright military " +
+      "posture, webbed orange feet",
+    face:
+      "crisp black-and-white face mask, golden-orange ear patches sweeping down the neck, sharp " +
+      "attentive slate-blue eyes, a straight orange-and-black beak",
+    wardrobe:
+      "a fitted navy turtleneck under a slim charcoal tactical vest with MOLLE webbing, flat matte " +
+      "buckles and a chest pocket, dark slate utility trousers, black boots",
+    props: "a red grease pencil clipped to the vest and a small folded briefing card",
+    colors: "black-and-white plumage, golden-orange ear patches, navy, charcoal grey, orange beak and feet",
+    signatureFeature:
+      "the red grease pencil and folded briefing card held in his flipper against the vest webbing",
+    anchors: {
+      body:
+        "a small squared-off chip in the LEFT edge of his upper beak and a single stray white " +
+        "feather flash high on the RIGHT side of his chest, offset from the clean white bib",
+      face: "the squared chip in the left beak edge",
+      macro: "the squared chip in the left upper beak edge and the offset white feather flash on the right chest",
+    },
+    personality:
+      "The tactical strategist — runs the crew's plans like briefings, thinks three moves ahead, " +
+      "allergic to improvisation; commands out of care, not ego.",
+    speechPattern:
+      "Clipped, precise, mid-range; short declarative sentences delivered like orders, brief " +
+      "pauses between beats, occasional dry command-voice snap.",
+    seed: 29,
+    voice: { voiceId: "alli", engine: "chatterbox", exaggeration: 0.55, cfgWeight: 0.4, deliveryNotes: "clipped and precise; command cadence, no rushing" },
+  }),
+  seedChar({
+    id: "silas",
+    name: "Silas",
+    species: "tiger",
+    build: "lean and athletic with wide shoulders and a slouched hands-in-pockets stance",
+    face:
+      "broad orange-and-black striped face, cream muzzle and cheek ruff, guarded jade-green eyes, " +
+      "ears held slightly back",
+    wardrobe:
+      "an oversized dark-wash denim jacket worn open over a black hoodie with the hood up, black " +
+      "jeans, scuffed black high-top sneakers",
+    props: "the hood up over his ears, hands buried in the jacket pockets, a thin black cord bracelet",
+    colors: "burnt-orange fur with black stripes, cream muzzle, indigo denim, black, jade green",
+    signatureFeature: "his guarded jade-green eyes in the shadow of the black hood, striped brow above",
+    anchors: {
+      body:
+        "a pale mismatched patch on his LEFT forearm where the stripes grew back broken and white, " +
+        "and a small clean split in the tip of his RIGHT ear",
+      face: "the split right ear tip",
+      macro: "the broken white stripe patch on the left forearm and the split right ear tip",
+    },
+    personality:
+      "The guarded survivor — keeps everyone at arm's length and uses sarcasm as armor; unlike " +
+      "Barney's delighted disdain his edge is defensive, and it drops when someone he trusts is hurting.",
+    speechPattern:
+      "Low, flat and unhurried with a sardonic lift at the end of a line; talks in short deflections, " +
+      "goes quiet rather than loud when it actually matters.",
+    seed: 31,
+    voice: { voiceId: "silas", engine: "chatterbox", exaggeration: 0.6, cfgWeight: 0.4, deliveryNotes: "flat and low; let the sarcasm sit under the line, never mug it" },
+  }),
+  seedChar({
+    id: "valentino",
+    name: "Valentino",
+    species: "hippo",
+    build: "big and rounded with a broad soft frame and a grand sweeping posture",
+    face:
+      "wide soft muzzle, long lashes, warm hazel eyes, small round ears, dewy well-moisturised skin " +
+      "with a subtle sheen",
+    wardrobe:
+      "a flowing silk floral robe in a blush-and-emerald botanical print, worn open over a gold " +
+      "sequined loungewear set (matching top and wide gold sequin lounge trousers), gold slide sandals",
+    props:
+      "oversized dark celebrity sunglasses (worn or pushed up on the head), gold hoop earrings, a " +
+      "gold-capped serum bottle in one hand",
+    colors: "soft grey-mauve skin, blush pink, emerald green, champagne gold, sequin sparkle",
+    signatureFeature:
+      "the oversized dark sunglasses pushed up on the head and the gold-capped serum bottle held in " +
+      "one hand, sequins catching the light",
+    anchors: {
+      body:
+        "a small heart-shaped cluster of freckles high on the LEFT cheek and one chipped lower-left " +
+        "tusk capped in gold",
+      face: "the gold-capped lower-left tusk and the heart-shaped cheek freckles",
+      macro: "the gold-capped chipped lower-left tusk and the heart-shaped freckle cluster on the left cheek",
+    },
+    personality:
+      "The luxury diva with a heart of gold — theatrical, high-maintenance and utterly generous; " +
+      "fixes everyone's crisis with a spa day and means it. Uses they/them pronouns.",
+    speechPattern:
+      "Warm, plush and languid with big theatrical swoops; drawn-out vowels, \"darling\" as " +
+      "punctuation, a delighted gasp on every reveal. Referred to as they/them.",
+    seed: 37,
+    voice: { voiceId: "valentino", engine: "chatterbox", exaggeration: 0.8, cfgWeight: 0.4, deliveryNotes: "plush and theatrical; stretch the vowels, land the gasps" },
+  }),
+  seedChar({
+    id: "omar",
+    name: "Omar",
+    species: "elephant",
+    build:
+      "large and slow-moving with a heavy rounded frame, a gently curled trunk, broad fanning ears " +
+      "and slightly stooped shoulders",
+    face:
+      "deep-set kind amber-brown eyes with heavy lids and long lashes, a softly wrinkled brow, short " +
+      "ivory tusks, warm slate-grey skin",
+    wardrobe:
+      "an oversized unbleached linen shirt with shell buttons and rolled sleeves, worn loose over " +
+      "soft wide-leg oatmeal linen trousers, simple leather sandals",
+    props:
+      "tortoiseshell reading glasses on a beaded chain, worn low on the brow or hanging at his chest, " +
+      "and a worn hardback book held in the curl of his trunk",
+    colors: "warm slate-grey skin, unbleached linen cream, oatmeal, ivory, tortoiseshell brown",
+    signatureFeature:
+      "the tortoiseshell reading glasses on their beaded chain resting against the linen shirt, " +
+      "beside the curled trunk tip",
+    anchors: {
+      body:
+        "his LEFT tusk is worn blunt and noticeably shorter than the right, and there is a ragged " +
+        "healed notch in the lower edge of his RIGHT ear like a coastline on a map",
+      face: "the blunt shorter left tusk and the notched lower right ear",
+      macro: "the blunted shorter left tusk and the ragged healed notch in the lower edge of the right ear",
+    },
+    personality:
+      "The wise old soul — the crew's anchor; says one sentence after everyone else has said twenty, " +
+      "and it is the one that lands. Remembers everything, judges nobody.",
+    speechPattern:
+      "Deep, slow and unhurried with long comfortable pauses; a low amused \"mm-hmm\" before he " +
+      "answers, warm gravel underneath.",
+    seed: 41,
+    voice: { voiceId: "omar", engine: "chatterbox", exaggeration: 0.4, cfgWeight: 0.4, deliveryNotes: "slow and low; the pauses are the performance" },
+  }),
 ];
 
 export const ANIMAL_SITCOM_LOCATIONS: BibleLocation[] = [

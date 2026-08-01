@@ -1,0 +1,86 @@
+{
+  "coffee-fund-a-0-sterling": {
+    "rel": "projects/playground/assets/audio/the-coffee-fund-is-voluntary-milo-whoever.wav",
+    "sec": 5.94,
+    "who": "sterling",
+    "text": "The coffee fund is voluntary, Milo. Whoever drinks it, pays for it. That is the entire system."
+  },
+  "coffee-fund-a-1-milo": {
+    "rel": "projects/playground/assets/audio/voluntary-you-bought-the-machine-and-you.wav",
+    "sec": 7.04,
+    "who": "milo",
+    "text": "Voluntary? You bought the machine, and you set the price. That's not a market, that's a landlord."
+  },
+  "coffee-fund-b-0-milo": {
+    "rel": "projects/playground/assets/audio/pool-it-everyone-pays-four-euros-everyone.wav",
+    "sec": 6.04,
+    "who": "milo",
+    "text": "Pool it. Everyone pays four euros, everyone drinks, nobody counts cups."
+  },
+  "coffee-fund-b-1-sterling": {
+    "rel": "projects/playground/assets/audio/and-by-thursday-the-pot-is-empty-and-nobod.wav",
+    "sec": 4.14,
+    "who": "sterling",
+    "text": "And by Thursday the pot is empty, and nobody knows whose fault that is."
+  },
+  "committee-a-0-alli": {
+    "rel": "projects/playground/assets/audio/the-policy-is-neutral-same-rules-same-for.wav",
+    "sec": 7.74,
+    "who": "alli",
+    "text": "The policy is neutral. Same rules, same forms, same panel for everyone. That is fairness."
+  },
+  "committee-a-1-valentino": {
+    "rel": "projects/playground/assets/audio/darling-neutral-rules-on-an-unequal-floor.wav",
+    "sec": 5.12,
+    "who": "valentino",
+    "text": "Darling, neutral rules on an unequal floor just make the tilt official."
+  },
+  "committee-b-0-omar": {
+    "rel": "projects/playground/assets/audio/mm-you-are-both-arguing-about-the-ladder.wav",
+    "sec": 5.32,
+    "who": "omar",
+    "text": "Mm. You are both arguing about the ladder. I am asking who built the wall."
+  },
+  "committee-b-1-valentino": {
+    "rel": "projects/playground/assets/audio/finally-someone-in-this-room-with-an-actua.wav",
+    "sec": 3.44,
+    "who": "valentino",
+    "text": "Finally. Someone in this room with an actual question."
+  },
+  "loft-a-0-grant": {
+    "rel": "projects/playground/assets/audio/nobody-works-harder-because-a-committee-ask.wav",
+    "sec": 5.08,
+    "who": "grant",
+    "text": "Nobody works harder because a committee asked them to. They work harder because it's theirs."
+  },
+  "loft-a-1-jax": {
+    "rel": "projects/playground/assets/audio/or-because-the-rent-is-due-let-s-not-dress.wav",
+    "sec": 3.38,
+    "who": "jax",
+    "text": "Or because the rent is due. Let's not dress that up as ambition."
+  },
+  "loft-a-2-barney": {
+    "rel": "projects/playground/assets/audio/ohhh-i-love-it-when-the-bird-gets-bleak.wav",
+    "sec": 2.34,
+    "who": "barney",
+    "text": "Ohhh, I love it when the bird gets bleak."
+  },
+  "loft-b-0-sterling": {
+    "rel": "projects/playground/assets/audio/you-ve-started-without-me-again.wav",
+    "sec": 2.1,
+    "who": "sterling",
+    "text": "You've started without me. Again."
+  },
+  "loft-b-1-milo": {
+    "rel": "projects/playground/assets/audio/they-started-without-you-because-you-d-have.wav",
+    "sec": 4.88,
+    "who": "milo",
+    "text": "They started without you because you'd have made it about the coffee fund."
+  },
+  "loft-b-2-barney": {
+    "rel": "projects/playground/assets/audio/he-s-not-wrong-cat.wav",
+    "sec": 1.42,
+    "who": "barney",
+    "text": "He's not wrong, cat."
+  }
+}
