@@ -31,6 +31,34 @@ export const videofastPayloadSchema = z.object({
   seed: z.number().int().optional(),
   /** third topic-CSV cell: title hint, or attribution for the quote format */
   titleHint: z.string().optional(),
+  /** format id from the videofast registry — overrides the account's format
+   * via a synthesized per-run account file */
+  format: z.string().optional(),
+  /** style pack id — pins the pack pool to exactly this pack for the run */
+  stylePack: z.string().optional(),
+  /** target runtime, seconds — scales the writer's word budget + scene count;
+   * the finished video lands within ~±15% (durations retime to the spoken VO).
+   * Omitted → the account's targetDurationSec, else the natural 25-45s. */
+  durationSec: z.number().int().min(15).max(180).optional(),
+  /** hand-authored blend: becomes the video's StyleBrief verbatim (the
+   * strategist pass is skipped). The adapter fills schema-required fields the
+   * caller leaves out and normalizes the mix shares to sum to 1. */
+  brief: z
+    .object({
+      /** paradigm id → share; ONE dominant (≥ 0.5) plus any number of
+       * contrasts (one is the tuned sweet spot, each extra reads busier).
+       * ids: jsx2d, svgChoreo, d3Data, p5Canvas, r3f3d, parallax25d, manimClip */
+      paradigmMix: z.record(z.string(), z.number().min(0).max(1)),
+      narrativeArc: z
+        .enum(["problem-shift-payoff", "myth-bust", "countdown", "metaphor-journey", "data-story"])
+        .optional(),
+      /** the concrete image the whole video hangs on */
+      visualMetaphor: z.string().optional(),
+      hookStrategy: z.string().optional(),
+      /** worn-out images/angles to steer away from */
+      avoid: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export const imagePayloadSchema = z.object({

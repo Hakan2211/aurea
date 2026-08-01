@@ -64,13 +64,59 @@ export class VideofastAdapter implements EngineAdapter {
       if (!vf) {
         throw new Error("videofast path not set — point Settings → Storage at your videofast checkout");
       }
-      const accountFile = path.join(vf, "accounts", `${payload.account}.json`);
+      let accountFile = path.join(vf, "accounts", `${payload.account}.json`);
       if (!fs.existsSync(accountFile)) {
         throw new Error(`unknown videofast account "${payload.account}" (${accountFile})`);
       }
 
       const runDir = path.join(AUREA_DIR, "runs", job.id);
       fs.mkdirSync(runDir, { recursive: true });
+
+      // Format/pack overrides ride on a per-run clone of the account — the
+      // orchestrator only reads these knobs from the account file, and
+      // loadAccount() accepts any absolute path. A blend brief forces the
+      // strategist meta-format so the dominant paradigm picks the recipe.
+      const base = JSON.parse(fs.readFileSync(accountFile, "utf8"));
+      const format = payload.format ?? (payload.brief ? "strategist" : undefined);
+      if (format || payload.stylePack || payload.durationSec) {
+        if (format) base.format = format;
+        if (payload.stylePack) base.stylePacks = [payload.stylePack];
+        if (payload.durationSec) base.targetDurationSec = payload.durationSec;
+        accountFile = path.join(runDir, "account.json");
+        fs.writeFileSync(accountFile, JSON.stringify(base, null, 2));
+      }
+
+      // Hand-authored blend → a complete StyleBrief file. styleBriefSchema is
+      // strict (arc enum, hook ≥ 10 chars, metaphor ≥ 8) and readBrief drops
+      // invalid briefs SILENTLY, so every field is defaulted/guarded here and
+      // the mix shares are renormalized to sum to 1.
+      let briefFile: string | undefined;
+      if (payload.brief) {
+        const mix = payload.brief.paradigmMix;
+        const sum = Object.values(mix).reduce((a, b) => a + b, 0);
+        const hook = payload.brief.hookStrategy?.trim();
+        const metaphor = payload.brief.visualMetaphor?.trim();
+        const brief = {
+          stylePack: payload.stylePack ?? base.stylePacks?.[0] ?? "noirLuxury",
+          paradigmMix:
+            sum > 0
+              ? Object.fromEntries(Object.entries(mix).map(([k, v]) => [k, v / sum]))
+              : mix,
+          narrativeArc: payload.brief.narrativeArc ?? "problem-shift-payoff",
+          hookStrategy:
+            hook && hook.length >= 10
+              ? hook
+              : "Open on the most confronting, concrete line of the idea — no warm-up.",
+          visualMetaphor:
+            metaphor && metaphor.length >= 8
+              ? metaphor
+              : `one concrete, ownable image for "${payload.topic}" — never the topic restated`,
+          avoid: payload.brief.avoid ?? [],
+          varietyNotes: "hand-authored blend (Aurea)",
+        };
+        briefFile = path.join(runDir, "brief.json");
+        fs.writeFileSync(briefFile, JSON.stringify(brief, null, 2));
+      }
       const topicsFile = path.join(runDir, "topics.csv");
       const row = [
         csvCell(payload.topic),
@@ -82,7 +128,11 @@ export class VideofastAdapter implements EngineAdapter {
 
       const output = await new Promise<string | undefined>((resolve, reject) => {
         // npx resolves the webapp's local tsx; .cmd shims need a shell on Windows
-        const cmd = `npx tsx scripts/batch/run-batch.ts --topics ${JSON.stringify(topicsFile)} --account ${JSON.stringify(accountFile)} --limit 1`;
+        const cmd =
+          `npx tsx scripts/batch/run-batch.ts --topics ${JSON.stringify(topicsFile)} ` +
+          `--account ${JSON.stringify(accountFile)}` +
+          (briefFile ? ` --brief ${JSON.stringify(briefFile)}` : "") +
+          ` --limit 1`;
         child = spawn(cmd, {
           cwd: path.join(vf, "webapp"),
           shell: true,

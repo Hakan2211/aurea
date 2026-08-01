@@ -467,25 +467,127 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       title: "Create finished video (videofast)",
       description:
         "Enqueue a complete short video through the videofast batch pipeline (script → voiceover → music " +
-        "→ render → thumbnails). account = a JSON file in <videofastDir>/accounts (e.g. 'mind'). Runs " +
-        "minutes, GPU-heavy — wait_for_job with a generous timeout. Returns the job.",
+        "→ render → thumbnails). Pass format to pick the recipe (motivational, quote, imageMotion, " +
+        "metaphor, dataStory, mathExplainer, generative, cinematic, whiteboard, strategist) and " +
+        "stylePack to pin the look; omit account to auto-pick the channel built for that format. " +
+        "Runs minutes, GPU-heavy — do not wait_for_job on it. Returns the job.",
       schema: {
-        account: z.string().min(1).describe("account id — <videofastDir>/accounts/<id>.json"),
+        account: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("account id — <videofastDir>/accounts/<id>.json; omit to derive from format"),
         topic: z.string().min(1).describe("what the video is about (drives the script)"),
         titleHint: z.string().optional().describe("title hint, or attribution for the quote format"),
         seed: z.number().int().optional(),
+        format: z
+          .string()
+          .optional()
+          .describe("format id from the videofast registry — overrides the account's format"),
+        stylePack: z
+          .string()
+          .optional()
+          .describe(
+            "style pack id: noirLuxury, emberNoir, neuronGlow, therapyMinimal, kurzFlat, paperCollage, " +
+              "blueprintSchematic, gradientMeshSoft, chalkboardManim, editorialMagazine, terminalGreen, sketchbook",
+          ),
+        paradigmMix: z
+          .record(z.string(), z.number().min(0).max(1))
+          .optional()
+          .describe(
+            "blend formats in ONE video: paradigm id → share, ONE dominant (≥ 0.5) plus any number of " +
+              "contrasts, shares summing to 1 — e.g. {\"d3Data\": 0.6, \"jsx2d\": 0.4} is 60% charts + " +
+              "40% 2D metaphors. One contrast is the tuned sweet spot; each extra visual language makes " +
+              "the video busier (warn past two). ids: jsx2d (2D metaphors), svgChoreo (vector morphs), " +
+              "d3Data (charts), p5Canvas (generative physics), r3f3d (3D heroes), parallax25d (2.5D " +
+              "worlds), manimClip (Manim math). Sets format to strategist automatically; the dominant " +
+              "picks the recipe.",
+          ),
+        durationSec: z
+          .number()
+          .int()
+          .min(15)
+          .max(180)
+          .optional()
+          .describe(
+            "target runtime in seconds (word budget + scene count scale to it; lands within ~±15% " +
+              "since scenes retime to the spoken VO). Omit for the channel's default, else the " +
+              "writer's natural 25-45s.",
+          ),
+        narrativeArc: z
+          .enum(["problem-shift-payoff", "myth-bust", "countdown", "metaphor-journey", "data-story"])
+          .optional()
+          .describe("story shape for a blend (default problem-shift-payoff)"),
+        visualMetaphor: z
+          .string()
+          .optional()
+          .describe("blend only: the ONE concrete image the video hangs on (≥ 8 chars)"),
+        hookStrategy: z
+          .string()
+          .optional()
+          .describe("blend only: how the first two seconds grab (≥ 10 chars)"),
+        avoid: z
+          .array(z.string())
+          .optional()
+          .describe("blend only: worn-out images/angles to steer away from"),
         project: z.string().default("playground"),
       },
-      handler: async ({ account, topic, titleHint, seed, project }) => {
+      handler: async ({
+        account,
+        topic,
+        titleHint,
+        seed,
+        format,
+        stylePack,
+        paradigmMix,
+        durationSec,
+        narrativeArc,
+        visualMetaphor,
+        hookStrategy,
+        avoid,
+        project,
+      }) => {
         await requireProject(project);
+        const wantFormat = format ?? (paradigmMix ? "strategist" : undefined);
+        if (!account) {
+          const accounts = await api.videofast.accounts.query();
+          account =
+            (wantFormat ? accounts.find((a) => a.format === wantFormat)?.id : undefined) ??
+            accounts.find((a) => a.id === "strategist-mind")?.id ??
+            accounts[0]?.id;
+          if (!account) {
+            throw new Error("no videofast accounts found — set the videofast path in Settings → Storage");
+          }
+        }
+        const brief = paradigmMix
+          ? { paradigmMix, narrativeArc, visualMetaphor, hookStrategy, avoid }
+          : undefined;
         const job = await api.jobs.enqueue.mutate({
           title: topic.length > 44 ? `${topic.slice(0, 43)}…` : topic,
           kind: "video",
           engine: "videofast",
           priority: "batch",
-          detail: `${account} · full pipeline`,
+          detail: [
+            account,
+            brief ? `blend ${Object.keys(paradigmMix!).join("+")}` : wantFormat,
+            stylePack,
+            durationSec ? `~${durationSec}s` : undefined,
+            "full pipeline",
+          ]
+            .filter(Boolean)
+            .join(" · "),
           project: `/${project}`,
-          payload: { type: "videofast", account, topic, titleHint, seed },
+          payload: {
+            type: "videofast",
+            account,
+            topic,
+            titleHint,
+            seed,
+            format: wantFormat,
+            stylePack,
+            durationSec,
+            brief,
+          },
         });
         return json(job);
       },

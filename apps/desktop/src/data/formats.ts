@@ -199,6 +199,40 @@ export const FORMATS: FormatCard[] = [
   },
 ];
 
+/* ---------- blending (custom StyleBrief) ----------
+ * The engine mixes at most TWO paradigms per video: one dominant (share ≥ 0.5,
+ * owns the recipe + emotional peaks) plus one contrast. Mirrors
+ * videofast/webapp/src/server/llm/strategist.ts (BRIEF_PARADIGMS et al.). */
+
+export interface BlendParadigm {
+  id: string;
+  label: string;
+  /** the format whose recipe writes a video this paradigm dominates */
+  format: string;
+  desc: string;
+}
+
+export const BLEND_PARADIGMS: BlendParadigm[] = [
+  { id: "jsx2d", label: "2D metaphors", format: "metaphor", desc: "choreographed component metaphors — feelings, felt experience" },
+  { id: "svgChoreo", label: "Vector morphs", format: "metaphor", desc: "SVG layers drawing & morphing — process, transformation" },
+  { id: "d3Data", label: "Charts", format: "dataStory", desc: "animated data stories — quantity, trend, comparison" },
+  { id: "p5Canvas", label: "Generative physics", format: "generative", desc: "p5 canvas textures — texture-of-thought, mood physics" },
+  { id: "r3f3d", label: "3D heroes", format: "cinematic", desc: "full 3D subject scenes — presence, scale, monument" },
+  { id: "parallax25d", label: "2.5D worlds", format: "cinematic", desc: "layered worlds the camera travels — journey, depth" },
+  { id: "manimClip", label: "Manim math", format: "mathExplainer", desc: "offline precise math animation — real, checkable" },
+];
+
+export const blendParadigmById = (id: string) => BLEND_PARADIGMS.find((p) => p.id === id)!;
+
+export const NARRATIVE_ARCS = [
+  "problem-shift-payoff",
+  "myth-bust",
+  "countdown",
+  "metaphor-journey",
+  "data-story",
+] as const;
+export type NarrativeArc = (typeof NARRATIVE_ARCS)[number];
+
 export const STAGE_LABELS: Record<string, string> = {
   generate: "Generate",
   codegen: "Codegen",

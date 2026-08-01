@@ -66,6 +66,7 @@ import { describeExport, sequenceEnd } from "./adapters/ffmpeg-export.js";
 import { composeShotFromBoard } from "./shot-director.js";
 import { labEnqueue } from "./labs.js";
 import { removeAssets, scanLibrary } from "./library.js";
+import { listVideofastAccounts } from "./videofast.js";
 import { procedure, router, type Context } from "./trpc.js";
 
 const jobId = z.object({ id: z.string() });
@@ -118,6 +119,11 @@ export const appRouter = router({
         yield jobs as Job[];
       }
     }),
+  }),
+
+  videofast: router({
+    /** the channel presets the finished-video pipeline renders as */
+    accounts: procedure.query(({ ctx }) => listVideofastAccounts(ctx.settings)),
   }),
 
   projects: router({

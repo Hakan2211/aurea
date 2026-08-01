@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router";
 import {
   AlertTriangle,
   Check,
@@ -117,7 +118,14 @@ interface AttachApi {
   onClear: () => void;
 }
 
-function Thread({ attach }: { attach: AttachApi }) {
+/** composer prefill handed over by another screen (Formats "Chat with Director");
+ * sentAt keys the remount so a second send re-seeds a dirty composer */
+export interface DirectorSeed {
+  text: string;
+  sentAt: number;
+}
+
+function Thread({ attach, seed }: { attach: AttachApi; seed: DirectorSeed | null }) {
   const { messages, busy, send, stop } = useChat();
   const endRef = useRef<HTMLDivElement>(null);
   const last = messages[messages.length - 1];
@@ -162,6 +170,8 @@ function Thread({ attach }: { attach: AttachApi }) {
       </div>
 
       <Composer
+        key={seed ? seed.sentAt : "free"}
+        initialText={seed?.text}
         busy={busy}
         attach={attach}
         onSend={(text) => {
@@ -456,13 +466,15 @@ function Composer({
   attach,
   onSend,
   onStop,
+  initialText,
 }: {
   busy: boolean;
   attach: AttachApi;
   onSend: (text: string) => void;
   onStop: () => void;
+  initialText?: string;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText ?? "");
 
   const submit = () => {
     if (busy || !text.trim()) return;
@@ -641,6 +653,7 @@ function JobRow({ job }: { job: Job }) {
 /* ---------- screen ---------- */
 
 export function DirectorChat() {
+  const seed = (useLocation().state as { seed?: DirectorSeed } | null)?.seed ?? null;
   const [pending, setPending] = useState<Asset[]>([]);
   const attach: AttachApi = {
     pending,
@@ -654,7 +667,7 @@ export function DirectorChat() {
   return (
     <div className="flex h-full">
       <AssetRail onAttach={attach.onAttach} />
-      <Thread attach={attach} />
+      <Thread attach={attach} seed={seed} />
       <JobRail />
     </div>
   );

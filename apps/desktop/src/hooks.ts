@@ -228,6 +228,13 @@ export function useFormats() {
   return { formats: FORMATS, packs: STYLE_PACKS };
 }
 
+/** LIVE — the channel presets in <videofastDir>/accounts the finished-video
+ * pipeline renders as. Empty when the videofast path isn't configured. */
+export function useVideofastAccounts() {
+  const query = trpc.videofast.accounts.useQuery(undefined, { staleTime: 60_000 });
+  return { accounts: query.data ?? [], live: !!query.data };
+}
+
 /* ---------- timeline (LIVE) ---------- */
 
 /** LIVE — the project's sequence. The screen edits a local copy and saves the
