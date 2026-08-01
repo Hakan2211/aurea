@@ -133,8 +133,9 @@ export const musicPayloadSchema = z.object({
   arrangement: z.enum(["instrumental", "vocals"]).default("instrumental"),
   /** cloned character voice for sung vocals (arrangement === "vocals") */
   singVoice: z.string().optional(),
-  /** own lyrics ("[verse]"/"[chorus]" section tags welcome); absent + vocals →
-   * the 5Hz LM writes them */
+  /** own lyrics ("[verse]"/"[chorus]" section tags welcome). Absent + vocals =
+   * wordless singing: the 5Hz LM returns tempo/key/caption and hands the DiT an
+   * empty lyric block, so it improvises a vocal line rather than writing words. */
   lyrics: z.string().max(4096).optional(),
   /** absent = the model estimates tempo */
   bpm: z.number().int().min(30).max(300).optional(),
@@ -459,6 +460,17 @@ export type VoiceAdd = z.input<typeof voiceAddSchema>;
 
 export const voiceRemoveSchema = z.object({ id: z.string().min(1) });
 
+/** Display-name overlay. The id keeps pointing at the same reference clip, so
+ * renaming never orphans a job, a bible character or a shot spec. */
+export const voiceRenameSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(40),
+});
+
+/** Hide/restore a voice in the pickers — how read-only voices (videofast
+ * char_refs, presets) leave the roster without deleting anyone's files. */
+export const voiceHideSchema = z.object({ id: z.string().min(1), hidden: z.boolean() });
+
 /* ---------- system ---------- */
 
 export const vramSchema = z.object({
@@ -753,6 +765,15 @@ export const assetMetaSchema = z.object({
   arrangement: z.enum(["instrumental", "vocals"]).optional(),
   /** dataRoot-relative source the job transformed (upscale/convert) */
   source: z.string().optional(),
+  /** the words a music take was sung to — either the ones you wrote or the
+   * ones the LM wrote for you. Job history is capped, so unless the sidecar
+   * keeps them the lyrics are gone the moment the job ages out. */
+  lyrics: z.string().optional(),
+  /** the brief the take was generated from (music: description + styles) */
+  prompt: z.string().optional(),
+  bpm: z.number().optional(),
+  /** musical key as requested, e.g. "C Major" */
+  keyscale: z.string().optional(),
 });
 export type AssetMeta = z.infer<typeof assetMetaSchema>;
 

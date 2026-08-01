@@ -50,7 +50,9 @@ import {
   voiceAddSchema,
   voiceConvertGenerateSchema,
   rvcTrainGenerateSchema,
+  voiceHideSchema,
   voiceRemoveSchema,
+  voiceRenameSchema,
   voiceSourceAddSchema,
   type DirectorState,
   type Job,
@@ -196,6 +198,22 @@ export const appRouter = router({
       remove: procedure.input(voiceRemoveSchema).mutation(({ ctx, input }) => {
         try {
           ctx.labs.removeVoice(input.id);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+      /** rename any voice for display — the id (and every reference to it) stays */
+      rename: procedure.input(voiceRenameSchema).mutation(({ ctx, input }) => {
+        try {
+          return ctx.labs.renameVoice(input.id, input.name);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+        }
+      }),
+      /** hide/restore a voice — works for read-only voices too, nothing is deleted */
+      setHidden: procedure.input(voiceHideSchema).mutation(({ ctx, input }) => {
+        try {
+          ctx.labs.setVoiceHidden(input.id, input.hidden);
         } catch (err) {
           throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
         }

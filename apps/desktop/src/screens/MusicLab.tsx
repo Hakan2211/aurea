@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   CircleAlert,
+  Copy,
   Dices,
   Download,
   Drum,
@@ -275,7 +276,7 @@ function CreatePanel() {
               onChange={(e) => setLyrics(e.target.value.slice(0, lab.lyricsMax))}
               rows={7}
               className="mt-2 w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 font-mono text-[11px] leading-relaxed text-cream placeholder:font-sans placeholder:text-fog focus:border-gold/40 focus:outline-none"
-              placeholder="Leave blank and the model writes the lyrics…"
+              placeholder="Leave blank for wordless vocals…"
             />
             <div className="mt-1 flex items-center justify-between">
               <div className="flex gap-1">
@@ -773,6 +774,83 @@ function TracksPanel({
 
 const stemIcons = { vocals: Mic, drums: Drum, bass: Guitar, other: AudioWaveform } as const;
 
+/** ACE-Step section tags — "[verse]", "[chorus]", "[bridge]" — mark structure
+ * rather than words, so they read as headings, not as a line to sing. */
+const SECTION_TAG = /^\s*\[[^\]]+\]\s*$/;
+
+/** The words the take was sung to, read back off the provenance sidecar. Two
+ * different nothings hide behind an empty tab, and conflating them reads as a
+ * bug: a take sung wordlessly on purpose, and one made before the studio kept
+ * lyrics at all. The sidecar's presence tells them apart. */
+function LyricsPanel({ track }: { track: MusicTrack }) {
+  const [copied, setCopied] = useState(false);
+
+  if (track.arrangement !== "vocals") {
+    return (
+      <p className="text-[12px] leading-relaxed text-fog">
+        Instrumental take — switch the arrangement to Vocals to write lyrics.
+      </p>
+    );
+  }
+  if (!track.lyrics?.trim()) {
+    return (
+      <p className="text-[12px] leading-relaxed text-fog">
+        {track.origin
+          ? // verified on a real run: ACE-Step's LM returns bpm/key/caption and
+            // hands the DiT an empty lyric block — it sings, it doesn't write
+            "Sung without words. Left blank, ACE-Step improvises a vocal line rather than writing lyrics — type your own in the Create panel and they'll be kept here with the take."
+          : "No lyrics recorded for this take. Tracks made before the studio started keeping them beside the file can't get them back — the words lived in the job, and job history is capped."}
+      </p>
+    );
+  }
+
+  const copy = () => {
+    void navigator.clipboard.writeText(track.lyrics!);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <PanelLabel>Lyrics</PanelLabel>
+        <button
+          onClick={copy}
+          title="Copy lyrics"
+          className="flex items-center gap-1 text-[10px] text-fog transition hover:text-gold"
+        >
+          {copied ? <Check size={11} className="text-gold" /> : <Copy size={11} />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <div className="mt-2.5 space-y-0.5">
+        {track.lyrics.split("\n").map((line, i) =>
+          SECTION_TAG.test(line) ? (
+            <div
+              key={i}
+              className="pt-2.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gold/70 first:pt-0"
+            >
+              {line.trim().replace(/^\[|\]$/g, "")}
+            </div>
+          ) : line.trim() === "" ? (
+            <div key={i} className="h-2" />
+          ) : (
+            <p key={i} className="text-[12px] leading-relaxed text-cream/85">
+              {line}
+            </p>
+          ),
+        )}
+      </div>
+      {track.prompt && (
+        <div className="mt-5 border-t hairline pt-3">
+          <PanelLabel>Brief</PanelLabel>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-fog">{track.prompt}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
 function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPlayer }) {
   const lab = useMusicLab();
   const [tab, setTab] = useState<"stems" | "lyrics" | "details">("stems");
@@ -889,17 +967,7 @@ function StemsInspector({ track, player }: { track: MusicTrack; player: AudioPla
           </>
         )}
 
-        {tab === "lyrics" &&
-          (track.arrangement === "vocals" ? (
-            <p className="text-[12px] leading-relaxed text-fog">
-              Lyrics aren't stored with the track yet — the words you (or the model)
-              wrote live in the generation job only.
-            </p>
-          ) : (
-            <p className="text-[12px] leading-relaxed text-fog">
-              Instrumental take — switch the arrangement to Vocals to write lyrics.
-            </p>
-          ))}
+        {tab === "lyrics" && <LyricsPanel track={track} />}
 
         {tab === "details" && (
           <div className="space-y-2">

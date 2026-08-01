@@ -6,9 +6,24 @@
  * state, bible.json is the truth). */
 
 import { useRef, useState } from "react";
-import { Expand, Play, Plus, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
+import {
+  Crosshair,
+  Expand,
+  ImagePlus,
+  Images,
+  Loader2,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCw,
+  Sparkles,
+  Star,
+  Trash2,
+  X,
+} from "lucide-react";
 import type { BibleCharacter, BibleLocation, BibleStyle } from "@aurea/shared";
 import { Chip, GhostButton, GoldButton, Waveform, cx } from "@/components/ui";
+import { fileToPngBase64 } from "@/components/imageFile";
 import { useBible, useDraft } from "@/hooks";
 
 const sectionLabel = "text-[10px] font-semibold uppercase tracking-[0.16em] text-fog";
@@ -298,14 +313,7 @@ function CharacterDetail({
   const { draft, patch } = useDraft(character, bible.upsertCharacter);
   const [zoom, setZoom] = useState<string | null>(null);
 
-  const sheetUrl = bible.refUrl(draft.refs.sheet ?? draft.refs.turnaround ?? draft.refs.hero);
-  const strip = [
-    ...(draft.refs.hero ? [draft.refs.hero] : []),
-    ...(draft.refs.turnaround ? [draft.refs.turnaround] : []),
-    ...draft.refs.frames,
-    ...draft.refs.dataset,
-    ...draft.refs.custom,
-  ];
+  const strip = refEntries(draft.refs);
 
   return (
     <>
@@ -331,53 +339,7 @@ function CharacterDetail({
           </div>
         </header>
 
-        {/* turnaround sheet viewer */}
-        <div className={cx(card, "p-0")}>
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className={sectionLabel}>Turnaround sheet</span>
-            {sheetUrl && (
-              <button
-                onClick={() => setZoom(sheetUrl)}
-                className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
-              >
-                <Expand size={11} /> View full size
-              </button>
-            )}
-          </div>
-          {sheetUrl ? (
-            <img src={sheetUrl} alt={`${draft.name} sheet`} className="max-h-[420px] w-full object-contain pb-2" />
-          ) : (
-            <div className="flex h-[220px] items-center justify-center bg-gradient-to-br from-[#241a10] to-[#0f0b06] text-[11px] text-fog">
-              No reference sheet yet — run the character-sheet pipeline, then re-run the seed.
-            </div>
-          )}
-        </div>
-
-        {/* expressions / frames strip */}
-        {strip.length > 0 && (
-          <div className="mt-3">
-            <span className={sectionLabel}>Reference frames</span>
-            <div className="mt-1.5 flex gap-2 overflow-x-auto pb-1.5">
-              {strip.map((relPath) => {
-                const url = bible.refUrl(relPath);
-                return (
-                  <button
-                    key={relPath}
-                    onClick={() => url && setZoom(url)}
-                    title={relPath.split("/").at(-1)}
-                    className="h-[84px] w-[68px] shrink-0 overflow-hidden rounded-lg border hairline transition hover:border-gold/50"
-                  >
-                    {url ? (
-                      <img src={url} alt="" className="h-full w-full object-cover object-top" />
-                    ) : (
-                      <span className="block h-full w-full bg-gradient-to-br from-[#2a2118] to-[#0f0b06]" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <ReferenceManager draft={draft} patch={patch} bible={bible} onZoom={setZoom} />
 
         {/* structured appearance slots */}
         <div className="mt-4 grid grid-cols-2 gap-3">
@@ -429,7 +391,7 @@ function CharacterDetail({
             Seed <span className="text-cream/80">{draft.seed ?? "—"}</span>
           </span>
           <span>
-            Frames <span className="text-cream/80">{strip.length}</span>
+            References <span className="text-cream/80">{strip.length}</span>
           </span>
         </footer>
       </section>
@@ -484,6 +446,310 @@ function CharacterDetail({
         </div>
       )}
     </>
+  );
+}
+
+/* ---------- reference images ---------- */
+
+type RefSlot = "keyframeRef" | "hero" | "turnaround" | "sheet";
+
+/** The four named slots, in the order they matter. `keyframeRef` is the one
+ * with teeth: composeKeyframePrompt / composeShotSpec feed it to qwen-edit as
+ * the subject image, so a wrong picture here puts a wrong character on screen. */
+const SLOTS: { slot: RefSlot; label: string; icon: typeof Star; hint: string }[] = [
+  {
+    slot: "keyframeRef",
+    label: "Key ref",
+    icon: Crosshair,
+    hint: "The subject image every storyboard keyframe and shot prompt is built from",
+  },
+  { slot: "hero", label: "Hero", icon: Star, hint: "The clean full-body hero frame" },
+  { slot: "turnaround", label: "Turnaround", icon: RotateCw, hint: "Front / side / back views" },
+  { slot: "sheet", label: "Sheet", icon: Images, hint: "Composite contact sheet" },
+];
+
+const SLOT_LABEL: Record<RefSlot, string> = {
+  keyframeRef: "Key ref",
+  hero: "Hero",
+  turnaround: "Turnaround",
+  sheet: "Sheet",
+};
+
+type RefEntry = { rel: string; roles: string[] };
+
+/** Every image attached to a character, de-duplicated (one picture can hold
+ * several roles), most important first. */
+function refEntries(refs: BibleCharacter["refs"]): RefEntry[] {
+  const roles = new Map<string, string[]>();
+  const push = (rel: string | null | undefined, role: string) => {
+    if (!rel) return;
+    const at = roles.get(rel);
+    if (at) {
+      if (!at.includes(role)) at.push(role);
+    } else roles.set(rel, [role]);
+  };
+  for (const { slot } of SLOTS) push(refs[slot], SLOT_LABEL[slot]);
+  refs.frames.forEach((r) => push(r, "Frame"));
+  refs.dataset.forEach((r) => push(r, "Dataset"));
+  refs.custom.forEach((r) => push(r, "Upload"));
+  return [...roles].map(([rel, r]) => ({ rel, roles: r }));
+}
+
+const fileName = (rel: string) => rel.split("/").at(-1) ?? rel;
+
+/** A reference the user staged here (or in the image lab) rather than one the
+ * seed copied in — those are ours to delete outright when they're dropped. */
+const isStaged = (rel: string) => rel.includes("/refs/");
+
+/** The character's picture library: pick one to inspect, promote it into a
+ * slot, drop it, or upload replacements. Before this the Bible was read-only —
+ * a wrong seeded image was stuck on the character for good. */
+function ReferenceManager({
+  draft,
+  patch,
+  bible,
+  onZoom,
+}: {
+  draft: BibleCharacter;
+  patch: (p: Partial<BibleCharacter>) => void;
+  bible: ReturnType<typeof useBible>;
+  onZoom: (url: string) => void;
+}) {
+  const entries = refEntries(draft.refs);
+  const [selRel, setSelRel] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const selected = entries.find((e) => e.rel === selRel) ?? entries[0] ?? null;
+  const url = bible.refUrl(selected?.rel);
+
+  const setSlot = (slot: RefSlot, rel: string | null) =>
+    patch({ refs: { ...draft.refs, [slot]: rel } });
+
+  /** unlink from every slot and list — plus delete the file when it was one of
+   * ours (a staged upload), so dropping it doesn't leave litter behind */
+  const detach = (rel: string) => {
+    const r = draft.refs;
+    patch({
+      refs: {
+        keyframeRef: r.keyframeRef === rel ? null : r.keyframeRef,
+        turnaround: r.turnaround === rel ? null : r.turnaround,
+        hero: r.hero === rel ? null : r.hero,
+        sheet: r.sheet === rel ? null : r.sheet,
+        frames: r.frames.filter((x) => x !== rel),
+        dataset: r.dataset.filter((x) => x !== rel),
+        custom: r.custom.filter((x) => x !== rel),
+      },
+    });
+    if (selRel === rel) setSelRel(null);
+    if (isStaged(rel)) void bible.deleteRefFile(rel).catch(() => {});
+  };
+
+  /** upload → project refs/ → the character's custom list. The first picture a
+   * character ever gets also becomes its key ref: an unassigned slot is the
+   * commonest reason a boarded shot comes back off-model. */
+  const upload = async (files: FileList | File[]) => {
+    setError(null);
+    const added: string[] = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      try {
+        const png = await fileToPngBase64(file);
+        added.push(await bible.uploadRef(file.name.replace(/\.[^.]+$/, "") || draft.id, png));
+      } catch (err) {
+        setError(String((err as Error).message ?? err));
+      }
+    }
+    if (added.length === 0) return;
+    const hadNone = entries.length === 0;
+    patch({
+      refs: {
+        ...draft.refs,
+        custom: [...draft.refs.custom, ...added],
+        ...(hadNone ? { keyframeRef: added[0], hero: draft.refs.hero ?? added[0] } : {}),
+      },
+    });
+    setSelRel(added[0]);
+  };
+
+  const pickFiles = () => fileInput.current?.click();
+
+  return (
+    <div className={cx(card, "p-0")}>
+      <div className="flex items-center justify-between gap-3 border-b hairline px-3 py-2">
+        <div className="flex items-baseline gap-2">
+          <span className={sectionLabel}>References</span>
+          <span className="text-[10px] tabular-nums text-fog/70">{entries.length}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {url && (
+            <button
+              onClick={() => onZoom(url)}
+              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
+            >
+              <Expand size={11} /> Full size
+            </button>
+          )}
+          <GhostButton onClick={pickFiles} disabled={bible.uploadingRef} className="py-1">
+            {bible.uploadingRef ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <ImagePlus size={12} />
+            )}
+            {bible.uploadingRef ? "Uploading…" : "Upload"}
+          </GhostButton>
+        </div>
+      </div>
+
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) void upload(e.target.files);
+          e.target.value = "";
+        }}
+      />
+
+      {/* the picture under inspection — big, because "is this the right animal?"
+          is the question this screen exists to answer */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (e.dataTransfer.files.length) void upload(e.dataTransfer.files);
+        }}
+        className={cx("p-3", dragging && "bg-gold/6 ring-1 ring-inset ring-gold/40")}
+      >
+        {selected && url ? (
+          <>
+            <div className="flex items-center justify-center rounded-lg bg-ink/40">
+              <img
+                src={url}
+                alt={`${draft.name} reference`}
+                onClick={() => onZoom(url)}
+                className="max-h-[360px] w-full cursor-zoom-in object-contain"
+              />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {selected.roles.map((r) => (
+                <Chip key={r} tone={r === "Key ref" ? "gold" : "muted"} className="text-[10px]">
+                  {r}
+                </Chip>
+              ))}
+              <span className="ml-1 min-w-0 truncate text-[10px] text-fog" title={selected.rel}>
+                {fileName(selected.rel)}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {SLOTS.map(({ slot, label, icon: Icon, hint }) => {
+                const active = draft.refs[slot] === selected.rel;
+                return (
+                  <button
+                    key={slot}
+                    title={active ? `Clear the ${label.toLowerCase()} slot` : hint}
+                    onClick={() => setSlot(slot, active ? null : selected.rel)}
+                    className={cx(
+                      "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition",
+                      active
+                        ? "border-gold/50 bg-gold/12 text-gold"
+                        : "border-cream/10 text-cream/70 hover:border-gold/40 hover:text-gold",
+                    )}
+                  >
+                    <Icon size={11} />
+                    {active ? label : `Set ${label.toLowerCase()}`}
+                  </button>
+                );
+              })}
+              <button
+                title={
+                  isStaged(selected.rel)
+                    ? "Delete this upload — it lives in this project's refs folder"
+                    : "Remove from this character (the file stays in the library)"
+                }
+                onClick={() => detach(selected.rel)}
+                className="ml-auto inline-flex items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[10px] font-medium text-fog transition hover:border-[#e07a6b]/50 hover:text-[#e07a6b]"
+              >
+                <Trash2 size={11} /> {isStaged(selected.rel) ? "Delete" : "Remove"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <button
+            onClick={pickFiles}
+            className="flex w-full flex-col items-center gap-1.5 rounded-xl border border-dashed border-gold/35 px-4 py-10 transition hover:border-gold/60 hover:bg-gold/4"
+          >
+            <ImagePlus size={22} strokeWidth={1.5} className="text-gold/80" />
+            <span className="mt-1 text-[12px] font-medium text-cream/90">
+              {bible.uploadingRef ? "Uploading…" : "Drop reference images here"}
+            </span>
+            <span className="text-[11px] text-fog">
+              or click to upload — run the character-sheet pipeline and re-seed for the full set
+            </span>
+          </button>
+        )}
+        {error && <p className="mt-2 text-[10px] text-[#e07a6b]">{error}</p>}
+      </div>
+
+      {entries.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto px-3 pb-3">
+          {entries.map((entry) => {
+            const thumb = bible.refUrl(entry.rel);
+            const active = entry.rel === selected?.rel;
+            const isKey = draft.refs.keyframeRef === entry.rel;
+            return (
+              <button
+                key={entry.rel}
+                onClick={() => setSelRel(entry.rel)}
+                title={`${fileName(entry.rel)} — ${entry.roles.join(" · ")}`}
+                className={cx(
+                  "group relative h-[84px] w-[68px] shrink-0 overflow-hidden rounded-lg border transition",
+                  active ? "border-gold" : "border-cream/10 hover:border-gold/50",
+                )}
+              >
+                {thumb ? (
+                  <img src={thumb} alt="" className="h-full w-full object-cover object-top" />
+                ) : (
+                  <span className="block h-full w-full bg-gradient-to-br from-[#2a2118] to-[#0f0b06]" />
+                )}
+                {isKey && (
+                  <span className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-ink">
+                    <Crosshair size={9} strokeWidth={3} />
+                  </span>
+                )}
+                <span
+                  role="button"
+                  title="Remove from this character"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    detach(entry.rel);
+                  }}
+                  className="absolute right-1 top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-ink/80 text-fog transition hover:text-[#e07a6b] group-hover:flex"
+                >
+                  <X size={10} />
+                </span>
+              </button>
+            );
+          })}
+          <button
+            onClick={pickFiles}
+            title="Upload more references"
+            className="flex h-[84px] w-[68px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-cream/15 text-fog transition hover:border-gold/50 hover:text-gold"
+          >
+            <Plus size={14} />
+            <span className="text-[9px]">Add</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -625,27 +891,120 @@ function LocationDetail({
           />
         </label>
 
-        {draft.refs.length > 0 && (
-          <div>
-            <span className={fieldLabel}>Reference stills</span>
-            <div className="flex gap-2 overflow-x-auto pb-1.5">
-              {draft.refs.map((relPath) => {
-                const url = bible.refUrl(relPath);
-                return (
-                  <span key={relPath} className="h-[76px] w-[120px] shrink-0 overflow-hidden rounded-lg border hairline">
-                    {url && <img src={url} alt="" className="h-full w-full object-cover" />}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <LocationRefs draft={draft} patch={patch} bible={bible} />
         <p className="text-[10px] leading-relaxed text-fog/80">
-          Location reference stills arrive with the storyboard step — generated keyframes can be
-          pinned here as the set's canon.
+          The first still is the set's canon — it goes to qwen-edit as the scene reference when a
+          shot here is boarded.
         </p>
       </div>
     </section>
+  );
+}
+
+/** Location stills — a flat list, so the whole editor is upload / reorder-to-
+ * front / remove. Same staging path as the character references. */
+function LocationRefs({
+  draft,
+  patch,
+  bible,
+}: {
+  draft: BibleLocation;
+  patch: (p: Partial<BibleLocation>) => void;
+  bible: ReturnType<typeof useBible>;
+}) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const upload = async (files: FileList | File[]) => {
+    setError(null);
+    const added: string[] = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      try {
+        const png = await fileToPngBase64(file);
+        added.push(await bible.uploadRef(file.name.replace(/\.[^.]+$/, "") || draft.id, png));
+      } catch (err) {
+        setError(String((err as Error).message ?? err));
+      }
+    }
+    if (added.length) patch({ refs: [...draft.refs, ...added] });
+  };
+
+  const remove = (rel: string) => {
+    patch({ refs: draft.refs.filter((r) => r !== rel) });
+    if (isStaged(rel)) void bible.deleteRefFile(rel).catch(() => {});
+  };
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <span className={fieldLabel}>Reference stills</span>
+        <span className="text-[10px] tabular-nums text-fog/70">{draft.refs.length}</span>
+      </div>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) void upload(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (e.dataTransfer.files.length) void upload(e.dataTransfer.files);
+        }}
+        className="flex gap-2 overflow-x-auto pb-1.5"
+      >
+        {draft.refs.map((rel, i) => {
+          const url = bible.refUrl(rel);
+          return (
+            <div
+              key={rel}
+              className="group relative h-[76px] w-[120px] shrink-0 overflow-hidden rounded-lg border hairline"
+            >
+              {url && <img src={url} alt="" className="h-full w-full object-cover" />}
+              {i === 0 && (
+                <span className="absolute left-1 top-1 rounded-full bg-gold/90 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-ink">
+                  Canon
+                </span>
+              )}
+              <div className="absolute inset-x-1 bottom-1 hidden justify-end gap-1 group-hover:flex">
+                {i > 0 && (
+                  <button
+                    title="Make this the canon still"
+                    onClick={() => patch({ refs: [rel, ...draft.refs.filter((r) => r !== rel)] })}
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-ink/85 text-fog transition hover:text-gold"
+                  >
+                    <Star size={10} />
+                  </button>
+                )}
+                <button
+                  title={isStaged(rel) ? "Delete this upload" : "Remove from this location"}
+                  onClick={() => remove(rel)}
+                  className="flex h-5 w-5 items-center justify-center rounded-full bg-ink/85 text-fog transition hover:text-[#e07a6b]"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        <button
+          onClick={() => fileInput.current?.click()}
+          title="Upload reference stills"
+          className="flex h-[76px] w-[120px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-cream/15 text-fog transition hover:border-gold/50 hover:text-gold"
+        >
+          {bible.uploadingRef ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
+          <span className="text-[10px]">{bible.uploadingRef ? "Uploading…" : "Add stills"}</span>
+        </button>
+      </div>
+      {error && <p className="mt-1 text-[10px] text-[#e07a6b]">{error}</p>}
+    </div>
   );
 }
 

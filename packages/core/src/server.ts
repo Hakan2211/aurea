@@ -93,8 +93,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new FfmpegExportAdapter(settings),
     ],
     storeFile: () => path.join(settings.get().storage.dataRoot, "jobs.json"),
-    importOutput: (job) => {
-      const imported = projects.importJobOutputDetailed(job);
+    importOutput: (job, meta) => {
+      const imported = projects.importJobOutputDetailed(job, meta);
       // storyboard delivery: finished stills become keyframes on their shot
       const board =
         job.payload?.type === "image" || job.payload?.type === "video"

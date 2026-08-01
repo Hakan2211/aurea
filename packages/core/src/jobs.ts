@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { jobSchema, type EnqueueJobResolved, type Job, type JobPriority } from "@aurea/shared";
+import { jobSchema, type AssetMeta, type EnqueueJobResolved, type Job, type JobPriority } from "@aurea/shared";
 import type { AdapterRun, EngineAdapter } from "./adapters/types.js";
 import { GpuScheduler, type JobResources, type ResourceClass } from "./scheduler.js";
 
@@ -60,8 +60,10 @@ export interface JobEngineOptions {
   adapters?: EngineAdapter[];
   /** persistence file, resolved per save so a dataRoot change carries the history along */
   storeFile?: () => string;
-  /** move a finished adapter job's artifact into its project; returns the new path */
-  importOutput?: (job: Job) => string | undefined;
+  /** move a finished adapter job's artifact into its project; returns the new
+   * path. `meta` is the adapter's own provenance, merged over what the job
+   * payload already explains. */
+  importOutput?: (job: Job, meta?: AssetMeta) => string | undefined;
   /** admission control (lanes, VRAM preflight, legacy-lock interop);
    * defaults to a bare scheduler — gpu lane exclusive, no preflight */
   scheduler?: GpuScheduler;
@@ -266,7 +268,7 @@ export class JobEngine extends EventEmitter {
     });
     this.execs.set(job.id, run);
     run.done
-      .then(({ output }) => {
+      .then(({ output, meta }) => {
         if (job.status !== "running") return; // canceled while finishing
         job.status = "completed";
         job.progress = 100;
@@ -276,7 +278,7 @@ export class JobEngine extends EventEmitter {
         if (output && this.opts.importOutput) {
           try {
             // pull the artifact into the project's assets tree (library picks it up)
-            job.output = this.opts.importOutput({ ...job }) ?? output;
+            job.output = this.opts.importOutput({ ...job }, meta) ?? output;
           } catch {
             // delivery stays valid at the adapter's original path
           }

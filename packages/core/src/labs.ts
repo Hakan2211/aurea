@@ -31,6 +31,16 @@ export interface LabVoice {
   source?: "studio" | "videofast";
   /** a trained RVC v2 model exists for this voice (voices/rvc/<id>.zip) */
   rvcTrained?: boolean;
+  /** hidden from the rosters — the clip is still on disk and still speakable */
+  hidden?: boolean;
+}
+
+/** <dataRoot>/voices/registry.json — display names and hidden ids. Ids stay
+ * the filename forever (jobs, bible characters and shot specs reference them),
+ * so a rename is an overlay, never a file move. */
+interface VoiceRegistry {
+  names: Record<string, string>;
+  hidden: string[];
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -116,10 +126,33 @@ export class Labs {
     };
   }
 
-  /** cloned roster = every frozen reference clip in <dataRoot>/voices plus
-   * videofast's char_refs (studio's own folder wins on id collisions) */
-  voiceCatalog() {
-    const { storage, engines, providers } = this.settings.get();
+  private voicesDir(): string {
+    return path.join(this.settings.get().storage.dataRoot, "voices");
+  }
+
+  private readVoiceRegistry(): VoiceRegistry {
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(this.voicesDir(), "registry.json"), "utf8"));
+      return {
+        names: raw && typeof raw.names === "object" ? raw.names : {},
+        hidden: Array.isArray(raw?.hidden) ? raw.hidden.filter((x: unknown) => typeof x === "string") : [],
+      };
+    } catch {
+      return { names: {}, hidden: [] };
+    }
+  }
+
+  private writeVoiceRegistry(reg: VoiceRegistry): void {
+    const dir = this.voicesDir();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "registry.json"), JSON.stringify(reg, null, 2));
+  }
+
+  /** every voice this machine knows, hidden ones included — what routing and
+   * the /voiceref/ preview resolve against (hiding must never break a take
+   * that already names the voice) */
+  voiceRoster(): LabVoice[] {
+    const { storage } = this.settings.get();
     const vf = this.vf();
     const voices: LabVoice[] = [];
     const refDirs: Array<[string, NonNullable<LabVoice["source"]>]> = [
@@ -146,6 +179,20 @@ export class Labs {
       { id: "gravel", name: "Gravel narrator", kind: "preset", engine: "Qwen3-TTS" },
       { id: "aiden", name: "Aiden", kind: "preset", engine: "Qwen3-TTS" },
     );
+    const reg = this.readVoiceRegistry();
+    return voices.map((v) => ({
+      ...v,
+      name: reg.names[v.id] ?? v.name,
+      ...(reg.hidden.includes(v.id) ? { hidden: true } : {}),
+    }));
+  }
+
+  /** cloned roster = every frozen reference clip in <dataRoot>/voices plus
+   * videofast's char_refs (studio's own folder wins on id collisions) */
+  voiceCatalog() {
+    const { engines, providers } = this.settings.get();
+    const roster = this.voiceRoster();
+    const voices = roster.filter((v) => !v.hidden);
     const managed = engines.ttsMode === "managed";
     const chatterboxReady = managed
       ? this.runtime.componentReady("chatterbox") &&
@@ -177,6 +224,8 @@ export class Labs {
         },
       ] satisfies LabEngine[],
       voices,
+      /** hidden from the pickers, restorable from the Voice lab */
+      hiddenVoices: roster.filter((v) => v.hidden),
       scriptMax: 5000,
       /** Seed-VC voice/singing conversion (managed engine only) */
       convert: {
@@ -198,7 +247,7 @@ export class Labs {
    * preset — that used to die minutes later inside the adapter with "no
    * reference clip". Route by roster instead of trusting the pairing. */
   routeTtsEngine(voice: string, requested: string): string {
-    const entry = this.voiceCatalog().voices.find((v) => v.id === voice.toLowerCase());
+    const entry = this.voiceRoster().find((v) => v.id === voice.toLowerCase());
     if (!entry) return requested; // unknown voice — the adapter reports it cleanly
     if (entry.kind === "preset") return "qwen";
     // cloned voices: DramaBox is an explicit opt-in; anything else normalizes
@@ -226,19 +275,58 @@ export class Labs {
     ) {
       throw new Error("sample is not a WAV file");
     }
-    if (this.voiceCatalog().voices.some((v) => v.id === id)) {
+    if (this.voiceRoster().some((v) => v.id === id)) {
       throw new Error(`a voice named "${id}" already exists`);
     }
-    const dir = path.join(this.settings.get().storage.dataRoot, "voices");
+    const dir = this.voicesDir();
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `${id}.wav`), wav);
-    return { id, name: voiceName(id), kind: "cloned", engine: "Chatterbox", source: "studio" };
+    // the id has to be slug-safe, the label doesn't — keep what was typed
+    const label = name.trim().slice(0, 40);
+    const reg = this.readVoiceRegistry();
+    reg.hidden = reg.hidden.filter((h) => h !== id);
+    if (label && label !== voiceName(id)) reg.names[id] = label;
+    else delete reg.names[id];
+    this.writeVoiceRegistry(reg);
+    return {
+      id,
+      name: reg.names[id] ?? voiceName(id),
+      kind: "cloned",
+      engine: "Chatterbox",
+      source: "studio",
+    };
+  }
+
+  /** rename a voice for display only — the id stays the filename, so every
+   * job, bible character and shot spec that references it keeps working */
+  renameVoice(id: string, name: string): LabVoice {
+    const voice = this.voiceRoster().find((v) => v.id === id.toLowerCase());
+    if (!voice) throw new Error(`unknown voice "${id}"`);
+    const label = name.trim().slice(0, 40);
+    if (!label) throw new Error("voice name cannot be empty");
+    const reg = this.readVoiceRegistry();
+    if (label === voiceName(voice.id)) delete reg.names[voice.id];
+    else reg.names[voice.id] = label;
+    this.writeVoiceRegistry(reg);
+    return { ...voice, name: label };
+  }
+
+  /** hide/restore a voice in the pickers. Non-studio clips (videofast's
+   * char_refs) and presets aren't ours to delete, so hiding is how they leave
+   * the roster — and it's reversible for studio voices too. */
+  setVoiceHidden(id: string, hidden: boolean): void {
+    const voice = this.voiceRoster().find((v) => v.id === id.toLowerCase());
+    if (!voice) throw new Error(`unknown voice "${id}"`);
+    const reg = this.readVoiceRegistry();
+    reg.hidden = reg.hidden.filter((h) => h !== voice.id);
+    if (hidden) reg.hidden.push(voice.id);
+    this.writeVoiceRegistry(reg);
   }
 
   /** absolute path of a roster voice's reference clip — what the /voiceref/
    * preview route streams (cloned voices only; presets have no clip) */
   voiceRefPath(id: string): string | null {
-    const v = this.voiceCatalog().voices.find(
+    const v = this.voiceRoster().find(
       (x) => x.id === id.toLowerCase() && x.kind === "cloned",
     );
     if (!v) return null;
@@ -252,12 +340,28 @@ export class Labs {
   }
 
   /** delete a studio voice's reference clip; videofast char_refs and presets
-   * aren't ours to delete */
+   * aren't ours to delete — those hide instead (setVoiceHidden) */
   removeVoice(id: string): void {
     if (!VOICE_ID.test(id)) throw new Error(`invalid voice id "${id}"`);
-    const file = path.join(this.settings.get().storage.dataRoot, "voices", `${id}.wav`);
-    if (!fs.existsSync(file)) throw new Error(`"${id}" is not a studio voice`);
+    const { dataRoot } = this.settings.get().storage;
+    const file = path.join(dataRoot, "voices", `${id}.wav`);
+    if (!fs.existsSync(file)) {
+      const voice = this.voiceRoster().find((v) => v.id === id);
+      throw new Error(
+        voice
+          ? `"${voice.name}" isn't a studio voice — hide it instead of deleting it`
+          : `"${id}" is not a studio voice`,
+      );
+    }
     fs.unlinkSync(file);
+    // a trained RVC model outlives its clip otherwise, and a re-clone under the
+    // same id would inherit a model trained on someone else's voice
+    const rvc = rvcModelPath(dataRoot, id);
+    if (fs.existsSync(rvc)) fs.unlinkSync(rvc);
+    const reg = this.readVoiceRegistry();
+    delete reg.names[id];
+    reg.hidden = reg.hidden.filter((h) => h !== id);
+    this.writeVoiceRegistry(reg);
   }
 
   musicCatalog() {

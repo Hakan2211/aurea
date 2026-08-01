@@ -50,6 +50,7 @@ import {
   type LibraryAsset,
   type MusicTrack,
   type VideoTake,
+  type Voice,
   type VoiceTake,
 } from "@/data/sample";
 import { FORMATS, STYLE_PACKS } from "@/data/formats";
@@ -500,8 +501,11 @@ const IMAGE_ADVANCED_FALLBACK = {
   defaults: {} as Record<string, { steps: number; cfg: number }>,
 };
 
-/** how many finished stills the lab canvas holds before it stops scrolling */
-const IMAGE_ROLL_MAX = 24;
+/** Ceiling on the stills the lab canvas will hold. This is a memory guard, not
+ * a view: the canvas pages through the roll a screenful at a time, so the
+ * number only has to be larger than any run of work you'd scroll back through.
+ * It used to be 24, which silently hid everything older than a day or two. */
+const IMAGE_ROLL_MAX = 600;
 
 export function useImageLab() {
   const catalog = trpc.labs.image.catalog.useQuery().data;
@@ -646,16 +650,18 @@ export function useImageLab() {
         relPath: a.relPath,
         name: a.name,
         upscaled: a.meta?.origin === "imageUpscale",
+        day: a.createdAt.slice(0, 10),
       })),
     ].slice(0, IMAGE_ROLL_MAX);
 
-    // history = the image roll grouped by day, newest first
+    // history = the image roll grouped by day, newest first. The same day keys
+    // separate the canvas, so a row and its section always agree.
     const byDay = new Map<string, CoreAsset[]>();
     for (const a of kindAssets) {
       const day = a.createdAt.slice(0, 10);
       byDay.set(day, [...(byDay.get(day) ?? []), a]);
     }
-    const history: ImageHistoryEntry[] = [...byDay.entries()].slice(0, 6).map(([day, group], i) => ({
+    const history: ImageHistoryEntry[] = [...byDay.entries()].map(([day, group], i) => ({
       id: day,
       when: relTime(group[0].createdAt),
       count: group.length,
@@ -663,6 +669,7 @@ export function useImageLab() {
       swatches: group.slice(0, 4).map((a) => labSwatch(a.id)),
       urls: group.slice(0, 4).map((a) => (media ? media(a.url) : undefined)),
       current: i === 0,
+      relPaths: group.map((a) => a.relPath),
     }));
 
     return {
@@ -788,8 +795,12 @@ export function useVoiceLab() {
   const refreshVoices = { onSuccess: () => void utils.labs.invalidate() };
   const addMutation = trpc.labs.voice.add.useMutation(refreshVoices);
   const removeMutation = trpc.labs.voice.remove.useMutation(refreshVoices);
+  const renameMutation = trpc.labs.voice.rename.useMutation(refreshVoices);
+  const hideMutation = trpc.labs.voice.setHidden.useMutation(refreshVoices);
   const { mutateAsync: addAsync } = addMutation;
   const { mutateAsync: removeAsync } = removeMutation;
+  const { mutateAsync: renameAsync } = renameMutation;
+  const { mutateAsync: hideAsync } = hideMutation;
   const convertMutation = trpc.labs.voice.convert.useMutation(invalidate);
   const { mutate: mutateConvert } = convertMutation;
   const addSourceMutation = trpc.labs.voice.addSource.useMutation();
@@ -803,7 +814,15 @@ export function useVoiceLab() {
     const generate = (input: Omit<TtsGenerate, "project">) => mutate({ ...input, project });
     const addVoice = (name: string, wavBase64: string) => addAsync({ name, wavBase64 });
     const removeVoice = (id: string) => removeAsync({ id });
-    const cloning = { addVoice, removeVoice, adding: addMutation.isPending };
+    const cloning = {
+      addVoice,
+      removeVoice,
+      /** display-only rename — the voice id (and everything referencing it) stays */
+      renameVoice: (id: string, name: string) => renameAsync({ id, name }),
+      /** how read-only voices leave the roster: nothing on disk is touched */
+      hideVoice: (id: string, hidden: boolean) => hideAsync({ id, hidden }),
+      adding: addMutation.isPending,
+    };
     /** delete a generated take (a real library file) from disk */
     const takeOps = {
       removeTake: removeAssets.remove,
@@ -835,7 +854,15 @@ export function useVoiceLab() {
         .map((a) => ({ relPath: a.relPath, name: a.name, kind: a.kind })),
     };
     if (!catalog || !kindAssets) {
-      return { ...voiceLab, ...cloning, ...takeOps, ...conversion, generate, busy: false };
+      return {
+        ...voiceLab,
+        ...cloning,
+        ...takeOps,
+        ...conversion,
+        hiddenVoices: [] as Voice[],
+        generate,
+        busy: false,
+      };
     }
 
     // conversions chained off a Music-lab track (context "music") belong to
@@ -845,6 +872,15 @@ export function useVoiceLab() {
     );
     takeOps.failures = labFailures(voiceJobs, "tts", "voiceConvert", "rvcTrain");
     const active = labJobs(voiceJobs, "tts", "voiceConvert", "rvcTrain");
+    const decorateVoice = (v: (typeof catalog.voices)[number]): Voice => ({
+      ...v,
+      swatch: labSwatch(v.id),
+      // cloned voices carry a playable reference clip — /voiceref/ streams it
+      sampleUrl: v.kind === "cloned" && media ? media(`/voiceref/${v.id}`) : undefined,
+      rvcTrained: v.rvcTrained ?? false,
+      // training in flight for this voice — the row shows a spinner state
+      rvcTraining: active.some((j) => j.payload.type === "rvcTrain" && j.payload.voice === v.id),
+    });
     const takes: VoiceTake[] = [
       ...active.map((j) => ({
         id: j.id,
@@ -874,17 +910,9 @@ export function useVoiceLab() {
       engines: catalog.engines.map(({ available, ...e }) =>
         available ? e : { ...e, note: "not installed" },
       ),
-      voices: catalog.voices.map((v) => ({
-        ...v,
-        swatch: labSwatch(v.id),
-        // cloned voices carry a playable reference clip — /voiceref/ streams it
-        sampleUrl: v.kind === "cloned" && media ? media(`/voiceref/${v.id}`) : undefined,
-        rvcTrained: v.rvcTrained ?? false,
-        // training in flight for this voice — the row shows a spinner state
-        rvcTraining: active.some(
-          (j) => j.payload.type === "rvcTrain" && j.payload.voice === v.id,
-        ),
-      })),
+      voices: catalog.voices.map(decorateVoice),
+      /** hidden from the pickers; the Voice lab lists them for restore */
+      hiddenVoices: (catalog.hiddenVoices ?? []).map(decorateVoice),
       scriptMax: catalog.scriptMax,
       takes,
       playback: { position: "00:00.0", total: "", played: 0 },
@@ -910,6 +938,8 @@ export function useVoiceLab() {
     mutateTrainRvc,
     retryJob,
     removeAssets,
+    renameAsync,
+    hideAsync,
   ]);
 }
 
@@ -976,8 +1006,10 @@ export function useMusicLab() {
       ...kindAssets.map((a, i) => ({
         id: a.id,
         title: strip(a.name),
-        bpm: 0,
-        key: "",
+        // the sidecar carries what the take was actually sung to — tempo and
+        // key included, whether you asked for them or the model chose
+        bpm: a.meta?.bpm ?? 0,
+        key: a.meta?.keyscale ?? "",
         // real length is probed client-side from the file (useMediaDuration);
         // "" here means "unknown yet", never the file size
         duration: "",
@@ -985,6 +1017,9 @@ export function useMusicLab() {
         swatch: labSwatch(a.id),
         // provenance sidecar knows; files without one predate it → default old label
         arrangement: a.meta?.arrangement ?? ("instrumental" as const),
+        lyrics: a.meta?.lyrics,
+        prompt: a.meta?.prompt,
+        origin: a.meta?.origin,
         url: media ? media(a.url) : undefined,
         relPath: a.relPath,
         selected: i === 0,
@@ -1336,6 +1371,11 @@ export function useBible() {
   const removeLocMutation = trpc.studio.bible.removeLocation.useMutation(sync);
   const styleMutation = trpc.studio.bible.updateStyle.useMutation(sync);
   const cineMutation = trpc.studio.bible.importCinematography.useMutation(sync);
+  // the Bible manages its own reference images: uploads land in the project's
+  // refs/ folder (same staging the image lab uses), and a ref the user drops
+  // that came from there is deleted for good rather than left orphaned
+  const addRefMutation = trpc.labs.image.addRef.useMutation();
+  const removeAssets = useRemoveAssets();
   const seedMutation = trpc.studio.seedAnimalSitcom.useMutation({
     // the seed touches the bible, production.json, project assets AND the voice roster
     onSuccess: () => {
@@ -1352,6 +1392,8 @@ export function useBible() {
   const { mutate: saveStyle } = styleMutation;
   const { mutate: importCine } = cineMutation;
   const { mutateAsync: seedAsync } = seedMutation;
+  const { mutateAsync: addRefAsync } = addRefMutation;
+  const { remove: removeFiles } = removeAssets;
 
   return useMemo(
     () => ({
@@ -1375,6 +1417,14 @@ export function useBible() {
       upsertLocation: (location: BibleLocation) => upsertLoc({ project, location }),
       removeLocation: (id: string) => removeLoc({ project, id }),
       updateStyle: (style: BibleStyle) => saveStyle({ project, style }),
+      /** stage an uploaded reference image; resolves to its dataRoot-relative
+       * path, ready to drop into a character's or location's refs */
+      uploadRef: async (name: string, pngBase64: string) =>
+        (await addRefAsync({ project, name, pngBase64 })).ref,
+      uploadingRef: addRefMutation.isPending,
+      /** delete a staged upload from disk — only ever called for files under
+       * the project's own refs/ folder, never for library assets */
+      deleteRefFile: (relPath: string) => removeFiles(relPath),
       /** install the curated doc-26 cinematography bank */
       importCinematography: () => importCine({ project }),
       importingCinematography: cineMutation.isPending,
@@ -1383,7 +1433,7 @@ export function useBible() {
       seedResult: seedMutation.data,
       seedError: seedMutation.error?.message,
     }),
-    [project, query.data, voices, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, importCine, cineMutation.isPending, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
+    [project, query.data, voices, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, importCine, cineMutation.isPending, addRefAsync, addRefMutation.isPending, removeFiles, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
   );
 }
 

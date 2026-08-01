@@ -221,6 +221,8 @@ export interface Voice {
   rvcTrained?: boolean;
   /** an RVC training job is running for this voice */
   rvcTraining?: boolean;
+  /** hidden from the pickers — the clip is untouched and still speakable */
+  hidden?: boolean;
 }
 
 export interface VoiceTake {
@@ -297,6 +299,16 @@ export interface MusicTrack {
   url?: string;
   /** library relPath once the track is a real asset — enables Send to timeline */
   relPath?: string;
+  /** the words this take was sung to, off the provenance sidecar — yours if
+   * you wrote them, the model's if it did. Absent on instrumentals and on
+   * tracks made before the sidecar recorded them. */
+  lyrics?: string;
+  /** the caption the take was generated from (description + style chips) */
+  prompt?: string;
+  /** payload type of the job behind the file. Its presence is the tell that the
+   * take has a provenance sidecar at all — which separates "sung without words"
+   * from "made before the studio kept any of this". */
+  origin?: string;
 }
 
 export const musicLab = {
@@ -851,9 +863,13 @@ export interface ImageTile {
   name?: string;
   /** produced by an upscale job (provenance sidecar) — tile shows a pill */
   upscaled?: boolean;
+  /** ISO day (YYYY-MM-DD) the file landed — the roll's date separators and the
+   * history rail group on this. Renders in flight sit under today. */
+  day?: string;
 }
 
 export interface ImageHistoryEntry {
+  /** ISO day (YYYY-MM-DD) — also the entry id; the roll groups on the same key */
   id: string;
   when: string;
   count: number;
@@ -863,6 +879,8 @@ export interface ImageHistoryEntry {
   urls?: (string | undefined)[];
   /** the batch currently shown on the canvas */
   current?: boolean;
+  /** every relPath from that day — what the row's bulk actions address */
+  relPaths?: string[];
 }
 
 export const imageLab = {

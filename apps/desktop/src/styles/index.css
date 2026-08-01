@@ -62,6 +62,16 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
+  /* Scroll, but never draw a bar — for narrow chrome (the icon rail) where an
+     8px track eats a quarter of the width and reads as a rendering bug */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
   .glass {
     background: color-mix(in srgb, var(--color-surface) 78%, transparent);
     backdrop-filter: blur(14px);

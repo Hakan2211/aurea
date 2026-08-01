@@ -122,6 +122,10 @@ export class MusicAdapter implements EngineAdapter {
       const err = new LastError();
       report({ progress: 2, stage: "Starting ACE-Step" });
 
+      // what the engine actually sang — only present when the run left lyrics,
+      // tempo or key to the model (managed mode; the external CLI is silent)
+      let take: { lyrics?: string; bpm?: string; keyscale?: string } | undefined;
+
       proc = runProcess({
         exe,
         args,
@@ -133,6 +137,14 @@ export class MusicAdapter implements EngineAdapter {
           if (line.includes("initializing DiT")) report({ progress: 8, stage: "Loading DiT" });
           if (line.includes("initializing 5Hz LM")) report({ progress: 30, stage: "Loading language model" });
           if (line.includes("generating...")) report({ progress: 55, stage: "Composing arrangement and mixing" });
+          const marker = line.indexOf("[aurea-music] TAKE ");
+          if (marker !== -1) {
+            try {
+              take = JSON.parse(line.slice(marker + "[aurea-music] TAKE ".length));
+            } catch {
+              // provenance is best-effort — the wav is the deliverable
+            }
+          }
           if (line.includes("OK ->")) report({ progress: 98 });
         },
       });
@@ -142,7 +154,21 @@ export class MusicAdapter implements EngineAdapter {
       if (code !== 0 || !fs.existsSync(out)) {
         throw new Error(err.message(`music generation exited with code ${code}`));
       }
-      return { output: out };
+      // the sidecar keeps the words with the file; the request that carried
+      // them ages out of the capped job history long before the track does
+      const lyrics = payload.lyrics?.trim() || take?.lyrics?.trim();
+      const sung = Number(take?.bpm);
+      const bpm = payload.bpm ?? (Number.isFinite(sung) && sung > 0 ? sung : undefined);
+      const keyscale = payload.keyscale || take?.keyscale || undefined;
+      return {
+        output: out,
+        meta: {
+          ...(payload.arrangement === "vocals" && lyrics ? { lyrics } : {}),
+          ...(bpm !== undefined ? { bpm } : {}),
+          ...(keyscale ? { keyscale } : {}),
+          prompt: caption,
+        },
+      };
     })();
 
     return {

@@ -289,6 +289,12 @@ export const DRAMABOX_DESIGNS: Record<string, string> = {
   jax: "a clear confident male voice with a slight airy resonance, visionary and thoughtful, deliberate pauses, speaks in a calm big-picture way as if seeing from above",
   barney:
     "a smooth sly slightly raspy male voice, dry sarcastic drawl, unhurried and amused, elongated hissing S sounds, effortlessly cool",
+  alli: "a clipped precise male command voice, tactical and controlled, short declarative sentences delivered like briefing orders, crisp consonants, brief pauses between beats",
+  silas:
+    "a low flat guarded male voice, unhurried and sardonic with a dry lift at the end of a line, understated and withholding, never raised",
+  valentino:
+    "a warm plush languid voice, theatrical and glamorous, drawn-out vowels and big expressive swoops, delighted gasps, indulgent diva delivery",
+  omar: "a deep slow warm elderly male voice with gentle gravel, unhurried with long comfortable pauses, wise patient and kind, a low amused hum before speaking",
 };
 
 export const DRAMABOX_DESIGN_FALLBACK = "a natural, clear voice with expressive delivery";

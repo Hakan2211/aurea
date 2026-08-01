@@ -8,6 +8,8 @@ import {
   ChevronRight,
   CircleAlert,
   CloudUpload,
+  Eye,
+  EyeOff,
   HelpCircle,
   ListMusic,
   Maximize2,
@@ -246,23 +248,68 @@ function VoiceRow({
   active,
   player,
   onSelect,
+  onRename,
+  onHide,
   onRemove,
 }: {
   voice: Voice;
   active: boolean;
   player: AudioPlayer;
   onSelect: () => void;
-  /** present only for studio voices — the rest are read-only */
+  onRename: (name: string) => void;
+  onHide: () => void;
+  /** present only for studio voices — the rest can only be hidden */
   onRemove?: () => void;
 }) {
   const [menu, setMenu] = useState(false);
   const [armed, setArmed] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(voice.name);
   const playingSample =
     !!voice.sampleUrl && player.src === voice.sampleUrl && player.playing;
+
+  const commit = () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (next && next !== voice.name) onRename(next);
+    else setDraft(voice.name);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2.5 rounded-xl border border-gold/50 bg-surface p-2">
+        <span className={cx("flex h-9 w-9 shrink-0 items-center justify-center rounded-full", voice.swatch)}>
+          <AudioLines size={14} className="text-cream/80" />
+        </span>
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, 40))}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") {
+              setDraft(voice.name);
+              setEditing(false);
+            }
+          }}
+          className="min-w-0 flex-1 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-[12px] text-cream focus:border-gold/40 focus:outline-none"
+        />
+        <span title="Save" className="shrink-0 text-fog/60">
+          <Check size={13} />
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="relative">
       <button
         onClick={onSelect}
+        onDoubleClick={() => {
+          setDraft(voice.name);
+          setEditing(true);
+        }}
         className={cx(
           "flex w-full items-center gap-2.5 rounded-xl border p-2 text-left transition",
           active
@@ -312,34 +359,62 @@ function VoiceRow({
           </span>
         )}
         <span
+          title="Rename, hide or delete"
           onClick={(e) => {
-            if (!onRemove) return;
             e.stopPropagation();
             setMenu((m) => !m);
             setArmed(false);
           }}
-          className={cx("shrink-0 text-fog/60", onRemove && "transition hover:text-cream")}
+          className="shrink-0 text-fog/60 transition hover:text-cream"
         >
           <MoreVertical size={14} />
         </span>
       </button>
-      {menu && onRemove && (
+      {menu && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
-          <div className="absolute right-1 top-10 z-20 w-48 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
+          <div className="absolute right-1 top-10 z-20 w-56 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
             <button
               onClick={() => {
-                if (!armed) {
-                  setArmed(true);
-                  return;
-                }
                 setMenu(false);
-                onRemove();
+                setDraft(voice.name);
+                setEditing(true);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5"
             >
-              <Trash2 size={12} /> {armed ? "Click again to confirm" : "Remove voice"}
+              <Pencil size={12} /> Rename
             </button>
+            <button
+              onClick={() => {
+                setMenu(false);
+                onHide();
+              }}
+              title="Takes it off every voice picker. Nothing is deleted — restore it from “Hidden” at the bottom of this list."
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5"
+            >
+              <EyeOff size={12} /> Hide from list
+            </button>
+            {onRemove ? (
+              <button
+                onClick={() => {
+                  if (!armed) {
+                    setArmed(true);
+                    return;
+                  }
+                  setMenu(false);
+                  onRemove();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5"
+              >
+                <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete permanently"}
+              </button>
+            ) : (
+              <p className="px-2.5 py-2 text-[10px] leading-relaxed text-fog/70">
+                {voice.kind === "preset"
+                  ? "Built-in preset — it can be hidden, not deleted."
+                  : "Lives in videofast’s char_refs, not the studio folder — hide it here, delete the .wav there."}
+              </p>
+            )}
           </div>
         </>
       )}
@@ -359,6 +434,12 @@ function VoicesPanel({
   onAdd: () => void;
 }) {
   const lab = useVoiceLab();
+  const [showHidden, setShowHidden] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const guard = (p: Promise<unknown>) => {
+    setError(null);
+    void p.catch((err: unknown) => setError(String((err as Error).message ?? err)));
+  };
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
       <div className="flex items-center justify-between p-4 pb-3">
@@ -372,6 +453,11 @@ function VoicesPanel({
       </div>
 
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3">
+        {error && (
+          <p className="rounded-lg border border-red-500/30 bg-red-500/6 px-2.5 py-2 text-[10px] leading-relaxed text-red-300">
+            {error}
+          </p>
+        )}
         {lab.voices.map((v) => (
           <VoiceRow
             key={v.id}
@@ -379,13 +465,42 @@ function VoicesPanel({
             active={v.id === voiceId}
             player={player}
             onSelect={() => onSelect(v.id)}
-            onRemove={
-              v.source === "studio"
-                ? () => lab.removeVoice(v.id).catch((err) => console.error("remove voice:", err))
-                : undefined
-            }
+            onRename={(name) => guard(lab.renameVoice(v.id, name))}
+            onHide={() => guard(lab.hideVoice(v.id, true))}
+            // only studio clips are ours to delete — the rest hide instead
+            onRemove={v.source === "studio" ? () => guard(lab.removeVoice(v.id)) : undefined}
           />
         ))}
+
+        {lab.hiddenVoices.length > 0 && (
+          <div className="pt-2">
+            <button
+              onClick={() => setShowHidden((s) => !s)}
+              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog transition hover:text-cream"
+            >
+              <ChevronRight
+                size={11}
+                className={cx("transition-transform", showHidden && "rotate-90")}
+              />
+              Hidden · {lab.hiddenVoices.length}
+            </button>
+            {showHidden &&
+              lab.hiddenVoices.map((v) => (
+                <div
+                  key={v.id}
+                  className="flex items-center gap-2 rounded-xl px-2 py-1.5 opacity-60 transition hover:opacity-100"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-cream/85">{v.name}</span>
+                  <button
+                    onClick={() => guard(lab.hideVoice(v.id, false))}
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[10px] text-cream/80 transition hover:border-gold/40 hover:text-gold"
+                  >
+                    <Eye size={11} /> Restore
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       <div className="p-3">
@@ -483,7 +598,28 @@ function CenterStage({
   const [dbxDurMult, setDbxDurMult] = useState(0.9);
   const [dbxGenDur, setDbxGenDur] = useState("");
   const [dbxWatermark, setDbxWatermark] = useState(false);
+  // the id being renamed, not a boolean: picking another voice mid-edit used to
+  // blur-commit the draft onto whichever voice was selected by then
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState(voice.name);
   const sourceInput = useRef<HTMLInputElement>(null);
+  const renaming = renamingId === voice.id;
+
+  const startRename = () => {
+    setNameDraft(voice.name);
+    setRenamingId(voice.id);
+  };
+
+  const commitRename = () => {
+    const id = renamingId;
+    const next = nameDraft.trim();
+    setRenamingId(null);
+    const target = lab.voices.find((v) => v.id === id);
+    if (!id || !target || !next || next === target.name) return;
+    lab.renameVoice(id, next).catch((err: unknown) =>
+      setVcError(String((err as Error).message ?? err)),
+    );
+  };
 
   const engine = lab.engines.find((e) => e.id === engineId) ?? lab.engines[0];
   // player drives the clock/waveform only while the selected take is its clip
@@ -516,7 +652,26 @@ function CenterStage({
       {/* header */}
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="font-serif text-[20px] font-semibold text-cream">{voice.name}</h2>
+          {renaming ? (
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value.slice(0, 40))}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") setRenamingId(null);
+              }}
+              className="w-56 rounded-lg border border-gold/40 bg-surface px-2 py-1 font-serif text-[18px] font-semibold text-cream focus:outline-none"
+            />
+          ) : (
+            <h2
+              onDoubleClick={startRename}
+              className="font-serif text-[20px] font-semibold text-cream"
+            >
+              {voice.name}
+            </h2>
+          )}
           <Chip tone={voice.kind === "cloned" ? "gold" : "muted"} className="text-[9px] uppercase tracking-wider">
             {voice.kind}
           </Chip>
@@ -539,7 +694,11 @@ function CenterStage({
               Train RVC voice · {lab.rvcTrainEstimate}
             </button>
           )}
-          <button className="text-fog/60 transition hover:text-gold">
+          <button
+            title="Rename this voice"
+            onClick={startRename}
+            className="text-fog/60 transition hover:text-gold"
+          >
             <Pencil size={13} />
           </button>
         </div>

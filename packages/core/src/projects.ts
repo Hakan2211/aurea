@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { AssetMeta, Job, LibraryKind, Project } from "@aurea/shared";
+import { assetMetaSchema, type AssetMeta, type Job, type LibraryKind, type Project } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 
 export const ASSET_KINDS = ["image", "video", "audio", "music", "model3d"] as const;
@@ -57,7 +57,15 @@ function assetMetaFor(job: Job): AssetMeta | null {
     case "imageUpscale":
       return { origin: p.type, source: p.source };
     case "music":
-      return { origin: p.type, arrangement: p.arrangement };
+      return {
+        origin: p.type,
+        arrangement: p.arrangement,
+        // words you wrote yourself are known without asking the engine; the
+        // adapter fills these in when the model wrote them instead
+        ...(p.arrangement === "vocals" && p.lyrics?.trim() ? { lyrics: p.lyrics.trim() } : {}),
+        ...(p.bpm !== undefined ? { bpm: p.bpm } : {}),
+        ...(p.keyscale ? { keyscale: p.keyscale } : {}),
+      };
     case "voiceConvert":
       return { origin: p.type, source: p.source, ...(p.mode === "sing" ? { arrangement: "vocals" as const } : {}) };
     default:
@@ -137,14 +145,14 @@ export class ProjectStore {
    * the file matching the job's own kind is the primary output. Returns the
    * imported primary path, or undefined when the job isn't tied to a real
    * project (demo jobs carry display-only project strings). */
-  importJobOutput(job: Job): string | undefined {
-    return this.importJobOutputDetailed(job).primary;
+  importJobOutput(job: Job, meta?: AssetMeta): string | undefined {
+    return this.importJobOutputDetailed(job, meta).primary;
   }
 
   /** Like importJobOutput, but also reports every file that landed matching
    * the job's own kind — the storyboard hook attaches all of a batch's
    * stills, not just the primary. */
-  importJobOutputDetailed(job: Job): { primary?: string; files: string[] } {
+  importJobOutputDetailed(job: Job, adapterMeta?: AssetMeta): { primary?: string; files: string[] } {
     if (!job.project || !job.output) return { files: [] };
     const id = job.project.replace(/^\//, "").split("/")[0];
     if (!this.read(id) || !fs.existsSync(job.output)) return { files: [] };
@@ -154,7 +162,7 @@ export class ProjectStore {
       // the job kind decides the shelf (a music wav is music, not voice);
       // the extension only speaks for files the kind can't explain
       const dest = this.importFile(id, JOB_KIND_DIR[job.kind], job.output, base);
-      this.writeMeta(dest, job);
+      this.writeMeta(dest, job, adapterMeta);
       return { primary: dest, files: [dest] };
     }
 
@@ -186,7 +194,7 @@ export class ProjectStore {
         : `${base}-${slugify(path.basename(entry.name, path.extname(entry.name)))}`;
       const dest = this.importFile(id, kind, path.join(job.output, entry.name), name);
       if (kind === JOB_KIND_DIR[job.kind]) {
-        this.writeMeta(dest, job);
+        this.writeMeta(dest, job, adapterMeta);
         files.push(dest);
         if (!primary) primary = dest;
       }
@@ -229,9 +237,23 @@ export class ProjectStore {
 
   /** dotfile sidecar next to the imported output; the scanner reads it back
    * into LibraryAsset.meta and skips it as an asset (dotfiles are ignored) */
-  private writeMeta(dest: string, job: Job): void {
-    const meta = assetMetaFor(job);
+  private writeMeta(dest: string, job: Job, adapterMeta?: AssetMeta): void {
+    const fromJob = assetMetaFor(job);
+    // the adapter speaks last: it knows what the engine chose where the
+    // request left a field open (the lyrics ACE-Step wrote for you)
+    const meta = fromJob || adapterMeta ? { ...fromJob, ...adapterMeta } : null;
     if (!meta) return;
+    // a re-voiced song is the same song — carry the words (and tempo, and key)
+    // across the conversion rather than handing back a track with no lyrics
+    if (meta.source) {
+      const inherited = this.readMeta(meta.source);
+      if (inherited) {
+        meta.lyrics ??= inherited.lyrics;
+        meta.prompt ??= inherited.prompt;
+        meta.bpm ??= inherited.bpm;
+        meta.keyscale ??= inherited.keyscale;
+      }
+    }
     try {
       fs.writeFileSync(
         path.join(path.dirname(dest), `.${path.basename(dest)}.meta.json`),
@@ -239,6 +261,23 @@ export class ProjectStore {
       );
     } catch {
       // provenance is best-effort — the asset itself already landed
+    }
+  }
+
+  /** read back a sidecar by dataRoot-relative path (the shape meta.source uses) */
+  private readMeta(relPath: string): AssetMeta | undefined {
+    try {
+      const file = path.join(this.settings.get().storage.dataRoot, relPath);
+      return assetMetaSchema.parse(
+        JSON.parse(
+          fs.readFileSync(
+            path.join(path.dirname(file), `.${path.basename(file)}.meta.json`),
+            "utf8",
+          ),
+        ),
+      );
+    } catch {
+      return undefined;
     }
   }
 

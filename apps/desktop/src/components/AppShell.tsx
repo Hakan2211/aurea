@@ -1,3 +1,5 @@
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, Outlet } from "react-router";
 import {
   BookOpen,
@@ -66,15 +68,42 @@ const navSections: { label: string; items: NavItem[] }[] = [
   },
 ];
 
+/** The rail's hover label. It lives in a portal on <body>, not inside the
+ * rail: an absolutely-positioned tooltip sticking out of the scrolling <nav>
+ * widened its scroll box, which Chromium answered with a horizontal scrollbar
+ * across the bottom of the rail every time you hovered an icon. */
+function RailTooltip({ label, anchor }: { label: string; anchor: DOMRect }) {
+  return createPortal(
+    <span
+      style={{ left: anchor.right + 10, top: anchor.top + anchor.height / 2 }}
+      className="pointer-events-none fixed z-[60] -translate-y-1/2 whitespace-nowrap rounded-md glass px-2 py-1 text-[11px] text-cream shadow-lg shadow-ink/60"
+    >
+      {label}
+    </span>,
+    document.body,
+  );
+}
+
 function RailLink({ to, label, icon: Icon, end, badge }: NavItem & { badge?: number }) {
+  const ref = useRef<HTMLAnchorElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const show = () => setAnchor(ref.current?.getBoundingClientRect() ?? null);
+  const hide = () => setAnchor(null);
+  const tip = badge ? `${label} — ${badge} running` : label;
+
   return (
     <NavLink
+      ref={ref}
       to={to}
       end={end}
-      title={badge ? `${label} — ${badge} running` : label}
+      onMouseEnter={show}
+      onFocus={show}
+      onMouseLeave={hide}
+      onBlur={hide}
+      onClick={hide}
       className={({ isActive }) =>
         cx(
-          "group relative flex h-10 w-10 items-center justify-center rounded-xl transition",
+          "relative flex h-10 w-10 items-center justify-center rounded-xl transition",
           isActive
             ? "bg-gold/12 text-gold"
             : "text-fog hover:bg-cream/5 hover:text-cream",
@@ -87,9 +116,7 @@ function RailLink({ to, label, icon: Icon, end, badge }: NavItem & { badge?: num
           {badge > 9 ? "9+" : badge}
         </span>
       )}
-      <span className="pointer-events-none absolute left-12 z-10 hidden whitespace-nowrap rounded-md glass px-2 py-1 text-[11px] text-cream group-hover:block">
-        {label}
-      </span>
+      {anchor && <RailTooltip label={tip} anchor={anchor} />}
     </NavLink>
   );
 }
@@ -121,7 +148,7 @@ export function AppShell() {
           <span className="font-serif text-lg font-semibold text-gold">A</span>
         </div>
 
-        <nav className="flex min-h-0 flex-col gap-1 overflow-y-auto">
+        <nav className="scrollbar-none flex min-h-0 w-full flex-col items-center gap-1 overflow-y-auto overflow-x-hidden">
           {navSections.map((section, i) => (
             <div key={section.label} className="flex flex-col items-center gap-1.5">
               <span
@@ -144,18 +171,7 @@ export function AppShell() {
         </nav>
 
         <div className="mt-auto flex flex-col items-center gap-1.5">
-          <NavLink
-            to="/settings"
-            title="Settings"
-            className={({ isActive }) =>
-              cx(
-                "flex h-10 w-10 items-center justify-center rounded-xl transition",
-                isActive ? "bg-gold/12 text-gold" : "text-fog hover:bg-cream/5 hover:text-cream",
-              )
-            }
-          >
-            <Settings size={18} strokeWidth={1.75} />
-          </NavLink>
+          <RailLink to="/settings" label="Settings" icon={Settings} />
           <div
             title="hbilgic · Pro"
             className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-gold/60 to-gold-deep/60 text-[11px] font-semibold text-ink"

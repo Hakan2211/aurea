@@ -23,6 +23,28 @@ const DEFAULT_TRACKS: Array<{ kind: "video" | "voice" | "music"; name: string }>
   { kind: "music", name: "Music" },
 ];
 
+/** Every sequence keeps a lane per default kind, even an empty one — the mixer
+ * lives on the track head, so a project with no Music lane has nowhere to put
+ * a score and no way to say so. Documents written before a kind existed (or
+ * saved without it) get it back on load instead of staying short forever; the
+ * caller's own extra lanes and their order are left alone. */
+function withBaseLanes(tracks: Timeline["tracks"]): Timeline["tracks"] {
+  const out = [...tracks];
+  for (const base of DEFAULT_TRACKS) {
+    if (out.some((t) => t.kind === base.kind)) continue;
+    out.push({ id: randomUUID(), ...base, muted: false, gain: 1, clips: [] });
+  }
+  // keep the lanes grouped in the canonical order: video, then voice, then music
+  const rank = (kind: string) => {
+    const i = DEFAULT_TRACKS.findIndex((t) => t.kind === kind);
+    return i === -1 ? DEFAULT_TRACKS.length : i;
+  };
+  return out
+    .map((track, i) => ({ track, i }))
+    .sort((a, b) => rank(a.track.kind) - rank(b.track.kind) || a.i - b.i)
+    .map(({ track }) => track);
+}
+
 /** which track a library kind lands on — mirrors the Timeline screen's rail */
 const TRACK_FOR_KIND: Record<string, TimelineTrackKind> = {
   video: "video",
@@ -45,7 +67,8 @@ export class TimelineStore {
 
   get(project: string): Timeline {
     try {
-      return timelineSchema.parse(JSON.parse(fs.readFileSync(this.file(project), "utf8")));
+      const tl = timelineSchema.parse(JSON.parse(fs.readFileSync(this.file(project), "utf8")));
+      return { ...tl, tracks: withBaseLanes(tl.tracks) };
     } catch {
       return timelineSchema.parse({
         tracks: DEFAULT_TRACKS.map((t) => ({ id: randomUUID(), ...t })),

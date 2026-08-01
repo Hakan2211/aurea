@@ -230,13 +230,21 @@ export function TimelineScreen() {
     setSelected({ track: target.id, clip: clipId });
   };
 
-  const addVideoTrack = () => {
-    const count = tl.tracks.filter((t) => t.kind === "video").length;
-    // insert right after the last video track so the lanes stay grouped —
-    // array order still means "later composites on top"
-    const at = tl.tracks.reduce((m, t, i) => (t.kind === "video" ? i : m), -1) + 1;
+  const addTrack = (kind: TimelineTrack["kind"], label: string) => {
+    const count = tl.tracks.filter((t) => t.kind === kind).length;
+    // insert right after the last track of the kind so the lanes stay grouped —
+    // among video tracks, array order still means "later composites on top"
+    const at = tl.tracks.reduce((m, t, i) => (t.kind === kind ? i : m), -1);
     const tracks = [...tl.tracks];
-    tracks.splice(at, 0, { id: uid(), kind: "video", name: `Video ${count + 1}`, muted: false, gain: 1, clips: [] });
+    const track = {
+      id: uid(),
+      kind,
+      name: count === 0 ? label : `${label} ${count + 1}`,
+      muted: false,
+      gain: 1,
+      clips: [],
+    };
+    tracks.splice(at === -1 ? tracks.length : at + 1, 0, track);
     apply({ ...tl, tracks });
   };
 
@@ -303,10 +311,21 @@ export function TimelineScreen() {
             {POOL_GROUPS.map(({ label, kind }) => {
               const items = pool.filter((a) => a.kind === kind);
               if (items.length === 0) return null;
+              const Kind = kindIcon[kind as keyof typeof kindIcon];
               return (
-                <div key={kind}>
-                  <div className="px-1 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-fog/60">
-                    {label} · {items.length}
+                <div key={kind} className="pb-1">
+                  {/* the group headers used to be 9px fog/60 and vanished into
+                      the thumbnails — they carry the rail's whole structure */}
+                  <div className="sticky top-0 z-10 -mx-3 mb-2 mt-3 bg-[#0e0e10]/95 px-3 pb-1.5 pt-1 backdrop-blur-sm first:mt-0">
+                    <div className="flex items-center gap-1.5 border-b border-cream/10 pb-1.5">
+                      {Kind && <Kind size={11} className="shrink-0 text-gold/80" />}
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cream/85">
+                        {label}
+                      </span>
+                      <span className="ml-auto rounded-full bg-cream/8 px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-fog">
+                        {items.length}
+                      </span>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {items.map((a) => {
@@ -559,13 +578,27 @@ export function TimelineScreen() {
                 </div>
               );
             })}
-            <button
-              onClick={addVideoTrack}
-              title="Add a video track — its clips composite over the tracks above (inserts, cutaways)"
-              className="flex h-[26px] w-full items-center gap-1.5 px-3 text-[10px] font-medium text-fog transition hover:text-gold"
-            >
-              <Plus size={11} /> Video track
-            </button>
+            {/* one compact row — three stacked buttons would cost the preview
+                50px of height for something clicked once a project */}
+            <div className="flex h-[26px] items-center gap-1 px-2 text-[10px] font-medium">
+              <Plus size={10} className="shrink-0 text-fog/60" />
+              {(
+                [
+                  ["video", "Video", "Add a video track — its clips composite over the tracks above (inserts, cutaways)"],
+                  ["voice", "Voice", "Add a voice track — dialogue and VO, mixed under the takes"],
+                  ["music", "Music", "Add a music track — score and stings, mixed under the takes"],
+                ] as const
+              ).map(([kind, label, title]) => (
+                <button
+                  key={kind}
+                  onClick={() => addTrack(kind, label)}
+                  title={title}
+                  className="text-fog transition hover:text-gold"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="relative flex-1 overflow-x-auto overflow-y-hidden">

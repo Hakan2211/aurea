@@ -8,7 +8,7 @@
  * them and fails later with a confusing generation error. */
 
 export const ACESTEP_SCRIPT = `"""Aurea managed ACE-Step synthesis (generated file — edits are discarded)."""
-import os, shutil, sys, tempfile
+import json, os, shutil, sys, tempfile
 
 ROOT       = os.environ["AUREA_ACESTEP_ROOT"]       # pinned source checkout
 PROJECT    = os.environ["AUREA_CHECKPOINT_ROOT"]    # <dataRoot>/models/acestep-v15
@@ -87,5 +87,18 @@ if not result.success or not result.audios:
 
 os.makedirs(os.path.dirname(os.path.abspath(OUT_WAV)), exist_ok=True)
 shutil.copyfile(result.audios[0]["path"], OUT_WAV)
+
+# What the take was actually sung to. When a field is left to the model,
+# generate_music writes its choice back onto params as cot_<field> — that is
+# the only place the LM-written lyrics exist, and the job history that holds
+# the request is capped, so emit it now for the provenance sidecar.
+if VOCALS:
+    effective = dict(
+        lyrics=LYRICS or getattr(params, "cot_lyrics", "") or "",
+        bpm=BPM or getattr(params, "cot_bpm", "") or "",
+        keyscale=KEYSCALE or getattr(params, "cot_keyscale", "") or "",
+    )
+    print("[aurea-music] TAKE " + json.dumps(effective), flush=True)
+
 print(f"[aurea-music] OK -> {OUT_WAV}", flush=True)
 `;

@@ -28,6 +28,7 @@ import {
 import { downloadAsset, useImageLab, useLikes, useSystem, useJobs } from "@/hooks";
 import type { ImageHistoryEntry, ImageTile } from "@/data/sample";
 import { Chip, cx } from "@/components/ui";
+import { fileToPngBase64 } from "@/components/imageFile";
 
 /* Image lab — UI-Design/Image Lab.jpg. Prompt-to-image with the real engine
  * roster (Krea 2 default, z-image-turbo drafts, Qwen-Edit reference edits);
@@ -47,6 +48,46 @@ const MODE_LABEL: Record<LabMode, string> = {
   edit: "Edit with refs",
   deck: "Deck",
 };
+
+/** stills the canvas renders before the "Show older" button takes over — the
+ * roll can be hundreds deep, and mounting all of them costs a visible beat */
+const ROLL_PAGE = 60;
+
+const isoDay = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** "Today" / "Yesterday" / "Mon, 21 Jul" — the roll's date separators. Days
+ * come in as local ISO (YYYY-MM-DD), so compare them as strings, not as
+ * Dates: parsing "2026-07-27" gives UTC midnight and shifts the label. */
+function dayLabel(day: string): string {
+  const now = new Date();
+  if (day === isoDay(now)) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (day === isoDay(yesterday)) return "Yesterday";
+  const [y, m, d] = day.split("-").map(Number);
+  if (!y || !m || !d) return day;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(y === now.getFullYear() ? {} : { year: "numeric" }),
+  });
+}
+
+/** the roll in render order, split into dated sections. Renders in flight have
+ * no file yet and so no day — they belong at the top, under today. */
+function groupByDay(tiles: ImageTile[]): { day: string; tiles: ImageTile[] }[] {
+  const today = isoDay(new Date());
+  const out: { day: string; tiles: ImageTile[] }[] = [];
+  for (const tile of tiles) {
+    const day = tile.day ?? today;
+    const last = out[out.length - 1];
+    if (last?.day === day) last.tiles.push(tile);
+    else out.push({ day, tiles: [tile] });
+  }
+  return out;
+}
 
 /** a staged reference: server path (job payload) + local preview */
 export interface RefImage {
@@ -79,19 +120,6 @@ export function parseDeckImport(text: string): string[] {
   }
   const blocks = /\n\s*\n/.test(t) ? t.split(/\n\s*\n+/) : t.split("\n");
   return blocks.map((s) => s.trim()).filter(Boolean);
-}
-
-/** decode any picked image, downscale to max 2048, re-encode as PNG base64 */
-async function fileToPngBase64(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  const dataUrl = canvas.toDataURL("image/png");
-  return dataUrl.slice(dataUrl.indexOf(",") + 1);
 }
 
 /* ---------- left panel ---------- */
@@ -1045,34 +1073,102 @@ function Lightbox({
 
 /* ---------- right rail ---------- */
 
-function HistoryRow({ entry }: { entry: ImageHistoryEntry }) {
+function HistoryRow({ entry, active, onToggle }: {
+  entry: ImageHistoryEntry;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  const lab = useImageLab();
+  const [menu, setMenu] = useState(false);
+  /** deleting a whole day is two clicks — the row is small and the act is final */
+  const [armed, setArmed] = useState(false);
+  const rels = entry.relPaths ?? [];
+
+  const close = () => {
+    setMenu(false);
+    setArmed(false);
+  };
+
   return (
-    <button
+    <div
       className={cx(
-        "flex w-full items-center gap-2.5 rounded-xl border p-2 text-left transition",
-        entry.current
+        "relative rounded-xl border transition",
+        active
           ? "border-gold/50 bg-surface"
           : "border-transparent bg-surface/60 hover:border-cream/15",
       )}
     >
-      <div className="flex gap-1">
-        {entry.swatches.map((sw, i) =>
-          entry.urls?.[i] ? (
-            <img key={i} src={entry.urls[i]} alt="" className="h-10 w-10 rounded-md object-cover" />
-          ) : (
-            <span key={i} className={cx("h-10 w-10 rounded-md", sw)} />
-          ),
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-[11px] text-cream/85">{entry.when}</div>
-        <div className="text-[10px] text-fog">{entry.count} images</div>
-        <Chip tone="muted" className="mt-1 tabular-nums">
-          {entry.aspect}
-        </Chip>
-      </div>
-      <MoreHorizontal size={14} className="shrink-0 text-fog/60" />
-    </button>
+      <button
+        onClick={onToggle}
+        title={active ? "Show the whole roll again" : `Show only ${dayLabel(entry.id)}`}
+        className="flex w-full items-center gap-2.5 p-2 text-left"
+      >
+        <div className="flex gap-1">
+          {entry.swatches.map((sw, i) =>
+            entry.urls?.[i] ? (
+              <img key={i} src={entry.urls[i]} alt="" className="h-10 w-10 rounded-md object-cover" />
+            ) : (
+              <span key={i} className={cx("h-10 w-10 rounded-md", sw)} />
+            ),
+          )}
+        </div>
+        {/* pr-5 keeps the text clear of the absolutely-placed kebab above it */}
+        <div className="min-w-0 flex-1 pr-5">
+          <div className="truncate text-[11px] text-cream/85">{dayLabel(entry.id)}</div>
+          <div className="truncate text-[10px] text-fog">
+            {entry.count} image{entry.count === 1 ? "" : "s"} · {entry.when}
+          </div>
+          {active && (
+            <Chip tone="gold" className="mt-1">
+              Filtering
+            </Chip>
+          )}
+        </div>
+      </button>
+
+      <button
+        onClick={() => (menu ? close() : setMenu(true))}
+        title="Actions for this day"
+        className="absolute right-1.5 top-2 p-1 text-fog/60 transition hover:text-gold"
+      >
+        <MoreHorizontal size={14} />
+      </button>
+
+      {menu && (
+        <>
+          {/* click-away — a menu that only closes via its own items strands you */}
+          <div className="fixed inset-0 z-20" onClick={close} />
+          <div className="glass absolute right-1.5 top-8 z-30 w-[188px] overflow-hidden rounded-xl py-1">
+            <button
+              onClick={() => {
+                onToggle();
+                close();
+              }}
+              className="block w-full px-3 py-1.5 text-left text-[11px] text-cream/85 transition hover:bg-cream/8 hover:text-gold"
+            >
+              {active ? "Clear day filter" : "Show only this day"}
+            </button>
+            <button
+              onClick={() => {
+                if (!armed) {
+                  setArmed(true);
+                  return;
+                }
+                close();
+                if (rels.length) void lab.remove(rels);
+              }}
+              disabled={!rels.length || lab.removing}
+              className={cx(
+                "block w-full px-3 py-1.5 text-left text-[11px] transition hover:bg-cream/8 disabled:opacity-40",
+                armed ? "text-red-400" : "text-cream/85 hover:text-red-400",
+              )}
+            >
+              {armed ? `Sure? Delete ${rels.length}` : `Delete all ${rels.length}`}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1214,12 +1310,21 @@ function RefsPanel({ refs, setRefs, onAdded }: {
   );
 }
 
-function RightRail({ refs, setRefs, onRefAdded }: {
+/** history days shown before "View all" opens the rest — the rail is a shortcut
+ * into the roll, not a second copy of it */
+const HISTORY_DAYS = 6;
+
+function RightRail({ refs, setRefs, onRefAdded, dayFilter, setDayFilter }: {
   refs: RefImage[];
   setRefs: React.Dispatch<React.SetStateAction<RefImage[]>>;
   onRefAdded: () => void;
+  dayFilter: string | null;
+  setDayFilter: (day: string | null) => void;
 }) {
   const lab = useImageLab();
+  const [all, setAll] = useState(false);
+  const shown = all ? lab.history : lab.history.slice(0, HISTORY_DAYS);
+
   return (
     <aside className="flex w-[316px] shrink-0 flex-col gap-3 overflow-y-auto border-l hairline bg-[#0e0e10] p-3">
       <section className="rounded-xl bg-surface/40 p-2.5">
@@ -1227,13 +1332,31 @@ function RightRail({ refs, setRefs, onRefAdded }: {
           <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
             Generation history
           </h3>
-          <button className="text-[11px] text-gold hover:underline">View all</button>
+          {lab.history.length > HISTORY_DAYS && (
+            <button
+              onClick={() => setAll((v) => !v)}
+              className="text-[11px] text-gold hover:underline"
+            >
+              {all ? "Show less" : `View all ${lab.history.length}`}
+            </button>
+          )}
         </div>
-        <div className="space-y-1.5">
-          {lab.history.map((h) => (
-            <HistoryRow key={h.id} entry={h} />
-          ))}
-        </div>
+        {shown.length === 0 ? (
+          <p className="px-1 pb-1 text-[11px] leading-relaxed text-fog">
+            No stills yet — finished renders group here by day.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {shown.map((h) => (
+              <HistoryRow
+                key={h.id}
+                entry={h}
+                active={dayFilter === h.id}
+                onToggle={() => setDayFilter(dayFilter === h.id ? null : h.id)}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       <RefsPanel refs={refs} setRefs={setRefs} onAdded={onRefAdded} />
@@ -1299,9 +1422,22 @@ export function ImageLab() {
   const [refs, setRefs] = useState<RefImage[]>([]);
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  /** a day picked in the history rail — the roll narrows to it until cleared */
+  const [dayFilter, setDayFilter] = useState<string | null>(null);
+  const [visible, setVisible] = useState(ROLL_PAGE);
+
+  // a filtered roll still shows work in flight — otherwise pressing Generate
+  // while a past day is pinned looks like nothing happened
+  const roll = dayFilter
+    ? lab.batch.filter((t) => t.generating || t.day === dayFilter)
+    : lab.batch;
+
+  // a narrower roll must start from the top again, or "show older" state from
+  // the full roll leaves a filtered day looking longer than it is
+  useEffect(() => setVisible(ROLL_PAGE), [dayFilter]);
 
   /** only finished stills are openable/actionable — generating tiles have no file */
-  const openable = lab.batch.filter((t) => t.url && t.relPath);
+  const openable = roll.filter((t) => t.url && t.relPath);
 
   const actions: TileActions = {
     liked: (t) => likes.isLiked(t.relPath),
@@ -1355,25 +1491,83 @@ export function ImageLab() {
             <DeckCard key={deck.id} deck={deck} />
           ))}
 
-          {lab.batch.length === 0 ? (
+          {roll.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
               <Sparkles size={22} className="text-gold/60" />
-              <p className="text-[12px] text-cream/80">Nothing rendered yet</p>
-              <p className="max-w-[280px] text-[11px] leading-relaxed text-fog">
-                Describe an image on the left and hit Generate — every take lands here and in the
-                asset library.
+              <p className="text-[12px] text-cream/80">
+                {dayFilter ? "Nothing from that day" : "Nothing rendered yet"}
               </p>
+              <p className="max-w-[280px] text-[11px] leading-relaxed text-fog">
+                {dayFilter
+                  ? "Those stills have been deleted since. Clear the filter to see the rest of the roll."
+                  : "Describe an image on the left and hit Generate — every take lands here and in the asset library."}
+              </p>
+              {dayFilter && (
+                <button
+                  onClick={() => setDayFilter(null)}
+                  className="mt-1 text-[11px] text-gold hover:underline"
+                >
+                  Clear filter
+                </button>
+              )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 2xl:grid-cols-3">
-              {lab.batch.map((tile) => (
-                <ResultTile key={tile.id} tile={tile} actions={actions} />
+            <>
+              {dayFilter && (
+                <div className="flex items-center gap-2 rounded-xl bg-gold/8 px-3 py-2">
+                  <span className="text-[11px] text-cream/85">
+                    Showing {dayLabel(dayFilter)} only
+                  </span>
+                  <button
+                    onClick={() => setDayFilter(null)}
+                    className="ml-auto flex items-center gap-1 text-[11px] text-gold hover:underline"
+                  >
+                    <X size={11} /> Clear
+                  </button>
+                </div>
+              )}
+              {groupByDay(roll.slice(0, visible)).map((section) => (
+                <div key={section.day} className="first:-mt-2">
+                  {/* the roll used to run together as one undated wall — the
+                      separator is what makes "a day's work" legible, so it
+                      gets real weight, a rule, and air above it */}
+                  <div className="sticky top-0 z-10 -mx-4 mb-3 mt-5 bg-ink/92 px-4 pb-2 pt-2 backdrop-blur-sm">
+                    <div className="flex items-center gap-2.5 border-b border-cream/12 pb-2">
+                      <span className="h-3.5 w-[3px] shrink-0 rounded-full bg-gold/70" />
+                      <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-cream">
+                        {dayLabel(section.day)}
+                      </h3>
+                      <span className="rounded-full bg-cream/8 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-fog">
+                        {section.tiles.length}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 2xl:grid-cols-3">
+                    {section.tiles.map((tile) => (
+                      <ResultTile key={tile.id} tile={tile} actions={actions} />
+                    ))}
+                  </div>
+                </div>
               ))}
-            </div>
+              {visible < roll.length && (
+                <button
+                  onClick={() => setVisible((v) => v + ROLL_PAGE)}
+                  className="mx-auto rounded-xl border border-cream/12 px-4 py-2 text-[11px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                >
+                  Show older — {roll.length - visible} more
+                </button>
+              )}
+            </>
           )}
         </section>
 
-        <RightRail refs={refs} setRefs={setRefs} onRefAdded={() => setMode("edit")} />
+        <RightRail
+          refs={refs}
+          setRefs={setRefs}
+          onRefAdded={() => setMode("edit")}
+          dayFilter={dayFilter}
+          setDayFilter={setDayFilter}
+        />
       </div>
       <StatusBar />
 
