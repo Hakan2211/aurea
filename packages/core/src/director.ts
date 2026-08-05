@@ -130,7 +130,7 @@ const systemPrompt = (project: string) =>
     "  claim in different languages.",
     "- Duration: create_video's durationSec targets the runtime (word budget + scene count scale",
     "  to it; the finished video lands within ~±15% because scenes retime to the spoken VO).",
-    "  When the user names a length ('about a minute'), pass it (15-180s); a longer target with",
+    "  When the user names a length ('about a minute', 'five minutes'), pass it (15-300s); a longer target with",
     "  many paradigms also relieves the busier-mix concern. Omitted, the channel preset's",
     "  targetDurationSec applies, else the writer's natural 25-45s.",
     "- Messages may end with an [Attached assets] block — library files the user pinned to that",

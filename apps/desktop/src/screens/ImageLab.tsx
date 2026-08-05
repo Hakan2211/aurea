@@ -25,6 +25,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { falImageEstimate, falSizeError } from "@aurea/shared";
 import { downloadAsset, useImageLab, useLikes, useSystem, useJobs } from "@/hooks";
 import type { ImageHistoryEntry, ImageTile } from "@/data/sample";
 import { Chip, cx } from "@/components/ui";
@@ -137,6 +138,13 @@ function PanelLabel({ children, hint }: { children: React.ReactNode; hint?: bool
 const modelRole = (m: { id: string; role?: string }) =>
   m.role ?? (m.id === "qwen-edit" ? "edit" : "generate");
 
+/** a model can serve both tabs — GPT Image 2 does, since fal routes a
+ * prompt-only run and a referenced one to two endpoints of the same model */
+const modelDoes = (m: { id: string; role?: string }, want: "generate" | "edit") => {
+  const role = modelRole(m);
+  return role === want || role === "both";
+};
+
 /** sample-data models carry no availability — treat absent as runnable */
 const modelAvailable = (m: { id: string; available?: boolean }) => m.available !== false;
 
@@ -174,10 +182,15 @@ function NumberField({
   );
 }
 
-function ParamsPanel({ mode, setMode, refs }: {
+function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
   mode: LabMode;
   setMode: (m: LabMode) => void;
   refs: RefImage[];
+  /** the chosen edit model lives in the parent — RefsPanel enforces its
+   * per-model reference ceiling, and that panel is a sibling of this one */
+  editorId: string;
+  setEditorId: (id: string) => void;
+  refsMax: number;
 }) {
   const lab = useImageLab();
   const [prompt, setPrompt] = useState(lab.prompt);
@@ -194,6 +207,12 @@ function ParamsPanel({ mode, setMode, refs }: {
   const [height, setHeight] = useState("");
   const [steps, setSteps] = useState("");
   const [cfg, setCfg] = useState("");
+  /** cloud-model knobs — inert for the local graphs, which use steps/cfg */
+  const [quality, setQuality] = useState("high");
+  const [outputFormat, setOutputFormat] = useState("png");
+  /** "auto" = let the model take its size from the references, which is the
+   * right default for an edit; picking an aspect chip switches this off */
+  const [autoSize, setAutoSize] = useState(true);
   const [deckName, setDeckName] = useState("");
   /** one entry per prompt — a prompt can span many lines (JSON, shot specs) */
   const [deckItems, setDeckItems] = useState<string[]>([""]);
@@ -206,29 +225,56 @@ function ParamsPanel({ mode, setMode, refs }: {
     .slice(0, lab.deckMax);
   const importParsed = importOpen ? parseDeckImport(importText) : [];
 
-  const generators = lab.models.filter((m) => modelRole(m) === "generate");
-  const editor = lab.models.find((m) => modelRole(m) === "edit");
-  /** catalog says the edit model can't run — warn up front instead of letting
-   * the job die in engine preflight with nothing visible in the lab */
-  const editorMissing = mode === "edit" && !!editor && !modelAvailable(editor);
+  const generators = lab.models.filter((m) => modelDoes(m, "generate"));
+  /** decks are a Comfy-only path, and a 40-prompt run on a paid model would
+   * be a very expensive button — so the deck picker stays local */
+  const deckable = generators.filter((m) =>
+    lab.deckModels.length ? lab.deckModels.includes(m.id) : true,
+  );
+  /** more than one edit model now (local qwen-edit, cloud gpt-image-2), so
+   * edit mode gets the same picker generate mode has */
+  const editors = lab.models.filter((m) => modelDoes(m, "edit"));
+  const editor = editors.find((m) => m.id === editorId) ?? editors[0];
+  const pickable = mode === "edit" ? editors : mode === "deck" ? deckable : generators;
+  /** catalog says the model can't run — warn up front instead of letting the
+   * job die in engine preflight with nothing visible in the lab */
   const activeId = mode === "edit" ? (editor?.id ?? "qwen-edit") : modelId;
   const model =
     (mode === "edit" ? editor : generators.find((m) => m.id === modelId)) ?? generators[0];
+  const editorMissing = mode !== "deck" && !!model && !modelAvailable(model);
+
+  /** paid-per-image model — everything that can spend money shows a number.
+   * Decks never route to the cloud, so its knobs stay hidden there. */
+  const isCloud = mode !== "deck" && lab.cloudModels.includes(activeId);
+  const supportsAutoSize = isCloud && lab.autoSizeModels.includes(activeId);
+  const sizeIsAuto = supportsAutoSize && autoSize;
 
   const adv = lab.advancedCfg;
   const defaults = adv.defaults[activeId];
+  /** cloud renders aren't bounded by this GPU's VRAM, so they get a bigger
+   * ceiling than the local 2048 */
+  const sizeMax = adv.sizeMaxByModel?.[activeId] ?? adv.sizeMax;
   const num = (s: string) => (s.trim() !== "" && !Number.isNaN(Number(s)) ? Number(s) : undefined);
   /** free size only applies when both fields are set; snap into the valid grid */
   const snapSize = (v: number) =>
-    Math.min(adv.sizeMax, Math.max(adv.sizeMin, Math.round(v / adv.sizeStep) * adv.sizeStep));
+    Math.min(sizeMax, Math.max(adv.sizeMin, Math.round(v / adv.sizeStep) * adv.sizeStep));
   const sizeOverride =
-    num(width) !== undefined && num(height) !== undefined
+    !sizeIsAuto && num(width) !== undefined && num(height) !== undefined
       ? { width: snapSize(num(width)!), height: snapSize(num(height)!) }
       : {};
+  /** what this run will cost, live — same rate table the adapter bills from */
+  const estimate = falImageEstimate(quality, count, sizeOverride.width, sizeOverride.height);
+  /** fal rejects sizes the local engines accept (min total pixels, max edge,
+   * 3:1 aspect) — catch it here rather than after the upload round-trip */
+  const sizeIssue =
+    isCloud && sizeOverride.width && sizeOverride.height
+      ? falSizeError(sizeOverride.width, sizeOverride.height)
+      : null;
 
   const canGenerate =
     !lab.sending &&
     !editorMissing &&
+    !sizeIssue &&
     (mode === "deck"
       ? deckName.trim() !== "" && deckLines.length > 0
       : !!prompt.trim() && (mode === "generate" || refs.length > 0));
@@ -373,9 +419,10 @@ function ParamsPanel({ mode, setMode, refs }: {
         <PanelLabel>Model</PanelLabel>
         {mode === "edit" ? (
           <>
-            <div
+            <button
+              onClick={() => setModelOpen((o) => !o)}
               className={cx(
-                "mt-2 flex w-full items-center gap-2.5 rounded-xl border bg-surface px-3 py-2.5",
+                "mt-2 flex w-full items-center gap-2.5 rounded-xl border bg-surface px-3 py-2.5 text-left transition hover:border-gold/35",
                 editorMissing ? "border-amber-500/40" : "border-cream/10",
               )}
             >
@@ -383,12 +430,45 @@ function ParamsPanel({ mode, setMode, refs }: {
               <span className="flex-1 truncate text-[12px] text-cream">
                 {editor?.label ?? "Qwen Edit 2509 · local"}
               </span>
-              <span className="text-[10px] text-fog">{refs.length}/{lab.refsMax} refs</span>
-            </div>
+              <span className="text-[10px] text-fog">
+                {refs.length}/{refsMax} refs
+              </span>
+              <ChevronDown
+                size={13}
+                className={cx("text-fog transition-transform", modelOpen && "rotate-180")}
+              />
+            </button>
+            {modelOpen && (
+              <div className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-cream/12 bg-raised shadow-xl">
+                {editors.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setEditorId(m.id);
+                      setModelOpen(false);
+                    }}
+                    className={cx(
+                      "flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition hover:bg-cream/5",
+                      m.id === editorId ? "text-gold" : "text-cream/85",
+                    )}
+                  >
+                    <span className="w-3.5">{m.id === editorId && <Check size={12} />}</span>
+                    <span className="flex-1">{m.label}</span>
+                    <span className="text-[10px] text-fog">{m.note}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {lab.modelNotes[activeId] && (
+              <p className="mt-1.5 text-[10px] leading-relaxed text-fog/80">
+                {lab.modelNotes[activeId]}
+              </p>
+            )}
             {editorMissing && (
               <p className="mt-1.5 rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-[10px] leading-relaxed text-amber-300">
-                This model isn't installed — download it under Settings → Models, or link a folder
-                that already has the weights (Settings → Models → Linked folders).
+                {isCloud
+                  ? "This model runs on fal.ai — add your API key under Settings → AI Providers to enable it."
+                  : "This model isn't installed — download it under Settings → Models, or link a folder that already has the weights (Settings → Models → Linked folders)."}
               </p>
             )}
           </>
@@ -399,7 +479,12 @@ function ParamsPanel({ mode, setMode, refs }: {
               className="mt-2 flex w-full items-center gap-2.5 rounded-xl border border-cream/10 bg-surface px-3 py-2.5 text-left transition hover:border-gold/35"
             >
               <Sparkles size={13} className="text-gold/80" />
-              <span className="flex-1 truncate text-[12px] text-cream">{model.label}</span>
+              <span className="flex-1 truncate text-[12px] text-cream">
+                {(mode === "deck"
+                  ? (deckable.find((m) => m.id === modelId) ?? deckable[0])
+                  : model
+                )?.label}
+              </span>
               <ChevronDown
                 size={13}
                 className={cx("text-fog transition-transform", modelOpen && "rotate-180")}
@@ -407,7 +492,7 @@ function ParamsPanel({ mode, setMode, refs }: {
             </button>
             {modelOpen && (
               <div className="absolute inset-x-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-cream/12 bg-raised shadow-xl">
-                {generators.map((m) => (
+                {pickable.map((m) => (
                   <button
                     key={m.id}
                     onClick={() => {
@@ -431,15 +516,31 @@ function ParamsPanel({ mode, setMode, refs }: {
       </section>
 
       <section>
-        <PanelLabel>Aspect ratio</PanelLabel>
+        <PanelLabel>{supportsAutoSize ? "Dimensions" : "Aspect ratio"}</PanelLabel>
         <div className="mt-2 flex flex-wrap gap-1.5">
+          {supportsAutoSize && (
+            <button
+              onClick={() => setAutoSize(true)}
+              className={cx(
+                "rounded-lg border px-2.5 py-1.5 text-[11px] transition",
+                sizeIsAuto
+                  ? "border-gold/60 bg-gold/12 text-gold"
+                  : "border-cream/10 text-cream/70 hover:border-gold/35 hover:text-cream",
+              )}
+            >
+              Auto
+            </button>
+          )}
           {(lab.aspects as Aspect[]).map((a) => (
             <button
               key={a}
-              onClick={() => setAspect(a)}
+              onClick={() => {
+                setAspect(a);
+                setAutoSize(false);
+              }}
               className={cx(
                 "rounded-lg border px-2.5 py-1.5 text-[11px] tabular-nums transition",
-                aspect === a
+                aspect === a && !sizeIsAuto
                   ? "border-gold/60 bg-gold/12 text-gold"
                   : "border-cream/10 text-cream/70 hover:border-gold/35 hover:text-cream",
               )}
@@ -448,7 +549,63 @@ function ParamsPanel({ mode, setMode, refs }: {
             </button>
           ))}
         </div>
+        {supportsAutoSize && (
+          <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+            {sizeIsAuto
+              ? mode === "edit"
+                ? "Output matches your references' shape — usually right for an edit."
+                : "The model picks the size that best fits your prompt."
+              : `Forces ${aspect}. Set exact pixels under Advanced (up to ${sizeMax}).`}
+          </p>
+        )}
       </section>
+
+      {isCloud && (
+        <section>
+          <PanelLabel>Quality</PanelLabel>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {lab.qualities.map((q) => (
+              <button
+                key={q}
+                onClick={() => setQuality(q)}
+                className={cx(
+                  "rounded-lg border px-2.5 py-1.5 text-[11px] capitalize transition",
+                  quality === q
+                    ? "border-gold/60 bg-gold/12 text-gold"
+                    : "border-cream/10 text-cream/70 hover:border-gold/35 hover:text-cream",
+                )}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+            Quality drives the bill — low is roughly a cent an image, high is ~15× that.
+          </p>
+        </section>
+      )}
+
+      {isCloud && (
+        <section>
+          <PanelLabel>Output format</PanelLabel>
+          <div className="mt-2 flex gap-1.5">
+            {lab.outputFormats.map((f) => (
+              <button
+                key={f}
+                onClick={() => setOutputFormat(f)}
+                className={cx(
+                  "flex-1 rounded-lg border py-1.5 text-[11px] uppercase transition",
+                  outputFormat === f
+                    ? "border-gold/60 bg-gold/12 text-gold"
+                    : "border-cream/10 text-cream/70 hover:border-gold/35 hover:text-cream",
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <PanelLabel>Style preset</PanelLabel>
@@ -537,39 +694,55 @@ function ParamsPanel({ mode, setMode, refs }: {
               label="Width"
               value={width}
               onChange={setWidth}
-              placeholder={`${aspect} auto`}
+              placeholder={sizeIsAuto ? "matches refs" : `${aspect} auto`}
               min={adv.sizeMin}
-              max={adv.sizeMax}
+              max={sizeMax}
               step={adv.sizeStep}
             />
             <NumberField
               label="Height"
               value={height}
               onChange={setHeight}
-              placeholder={`${aspect} auto`}
+              placeholder={sizeIsAuto ? "matches refs" : `${aspect} auto`}
               min={adv.sizeMin}
-              max={adv.sizeMax}
+              max={sizeMax}
               step={adv.sizeStep}
             />
-            <NumberField
-              label="Steps"
-              value={steps}
-              onChange={setSteps}
-              placeholder={String(defaults?.steps ?? "auto")}
-              min={1}
-              max={adv.stepsMax}
-            />
-            <NumberField
-              label="CFG"
-              value={cfg}
-              onChange={setCfg}
-              placeholder={String(defaults?.cfg ?? "auto")}
-              min={0}
-              max={adv.cfgMax}
-              step={0.5}
-            />
+            {/* steps/cfg are sampler knobs on the local graphs — the cloud
+                endpoint exposes quality instead, so showing them would be a
+                pair of controls that silently do nothing */}
+            {!isCloud && (
+              <>
+                <NumberField
+                  label="Steps"
+                  value={steps}
+                  onChange={setSteps}
+                  placeholder={String(defaults?.steps ?? "auto")}
+                  min={1}
+                  max={adv.stepsMax}
+                />
+                <NumberField
+                  label="CFG"
+                  value={cfg}
+                  onChange={setCfg}
+                  placeholder={String(defaults?.cfg ?? "auto")}
+                  min={0}
+                  max={adv.cfgMax}
+                  step={0.5}
+                />
+              </>
+            )}
+            {sizeIssue && (
+              <p className="rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-[10px] leading-relaxed text-amber-300">
+                fal won't accept that size — {sizeIssue}.
+              </p>
+            )}
             <p className="pt-1 text-[10px] leading-relaxed text-fog/70">
-              Width + height override the aspect bucket. Blank = the model's proven defaults.
+              {sizeIsAuto
+                ? "Dimensions is set to Auto — pick an aspect above to use these."
+                : isCloud
+                  ? `Width + height override the aspect bucket: multiples of 16, no edge over ${sizeMax}px, at least ~0.66 MP, aspect within 3:1.`
+                  : "Width + height override the aspect bucket. Blank = the model's proven defaults."}
             </p>
           </div>
         )}
@@ -595,7 +768,11 @@ function ParamsPanel({ mode, setMode, refs }: {
               lab.generateDeck({
                 deckName: deckName.trim(),
                 prompts: deckLines,
-                model: modelId,
+                // a cloud model left selected from the generate tab can't run
+                // a deck — fall back rather than enqueue something that dies
+                model: deckable.some((m) => m.id === modelId)
+                  ? modelId
+                  : (deckable[0]?.id ?? "z-image"),
                 ...shared,
               });
             } else {
@@ -605,6 +782,15 @@ function ParamsPanel({ mode, setMode, refs }: {
                 count,
                 ...shared,
                 ...(mode === "edit" ? { refs: refs.map((r) => r.rel) } : {}),
+                // cloud-only knobs; sending them to a local graph would be
+                // dead weight in the payload and a lie on the job card
+                ...(isCloud
+                  ? {
+                      quality: quality as "auto" | "low" | "medium" | "high",
+                      outputFormat: outputFormat as "png" | "jpeg" | "webp",
+                      sizeMode: sizeIsAuto ? ("auto" as const) : ("aspect" as const),
+                    }
+                  : {}),
               });
             }
           }}
@@ -614,10 +800,14 @@ function ParamsPanel({ mode, setMode, refs }: {
           {lab.sending
             ? "Queuing…"
             : editorMissing
-              ? "Model not installed"
-              : mode === "edit" && refs.length === 0
-                ? "Add a reference"
-                : mode === "deck"
+              ? isCloud
+                ? "Add a fal.ai key"
+                : "Model not installed"
+              : sizeIssue
+                ? "Fix the dimensions"
+                : mode === "edit" && refs.length === 0
+                  ? "Add a reference"
+                  : mode === "deck"
                   ? `Generate deck${deckLines.length ? ` · ${deckLines.length}` : ""}`
                   : "Generate"}
         </button>
@@ -625,13 +815,22 @@ function ParamsPanel({ mode, setMode, refs }: {
           <ChevronDown size={14} />
         </button>
         </div>
+        {/* cost lands above the error slot so it is visible while you set up
+            the run, not only after something goes wrong */}
+        {isCloud && !editorMissing && (
+          <p className="text-center text-[10px] text-fog">
+            {estimate} for {count} image{count === 1 ? "" : "s"} · billed to your fal.ai account
+          </p>
+        )}
         {lab.error ? (
           <p className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-1.5 text-[10px] leading-relaxed text-red-300">
             {lab.error}
           </p>
         ) : lab.busy ? (
           <p className="text-center text-[10px] text-fog">
-            Rendering on the GPU — watch the canvas, or queue another run.
+            {isCloud
+              ? "Rendering at fal.ai — watch the canvas, or queue another run."
+              : "Rendering on the GPU — watch the canvas, or queue another run."}
           </p>
         ) : null}
       </div>
@@ -1172,26 +1371,36 @@ function HistoryRow({ entry, active, onToggle }: {
   );
 }
 
-function RefsPanel({ refs, setRefs, onAdded }: {
+/** What each slot is for. The local 3-ref stack has fixed roles because
+ * Qwen encodes them positionally; the cloud model just takes a list, so past
+ * the third every slot is simply another reference in priority order. */
+function refSlotLabel(i: number, refsMax: number): string {
+  if (refsMax <= 3) return i === 0 ? "subject" : i === 1 ? "scene / prop" : "style";
+  return i === 0 ? "subject" : `reference ${i + 1}`;
+}
+
+function RefsPanel({ refs, setRefs, onAdded, refsMax }: {
   refs: RefImage[];
   setRefs: React.Dispatch<React.SetStateAction<RefImage[]>>;
   onAdded: () => void;
+  /** ceiling for the selected edit model, not the lab-wide outer bound */
+  refsMax: number;
 }) {
   const lab = useImageLab();
   const fileInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const full = refs.length >= lab.refsMax;
+  const full = refs.length >= refsMax;
 
   const addFiles = async (files: FileList | File[]) => {
     setError(null);
     for (const file of Array.from(files)) {
-      if (refs.length + 1 > lab.refsMax) break;
+      if (refs.length + 1 > refsMax) break;
       if (!file.type.startsWith("image/")) continue;
       try {
         const pngBase64 = await fileToPngBase64(file);
         const rel = await lab.addRef(file.name.replace(/\.[^.]+$/, "") || "reference", pngBase64);
         setRefs((prev) =>
-          prev.length < lab.refsMax
+          prev.length < refsMax
             ? [...prev, { rel, url: URL.createObjectURL(file), name: file.name, staged: true }]
             : prev,
         );
@@ -1217,7 +1426,7 @@ function RefsPanel({ refs, setRefs, onAdded }: {
           Edit with reference
         </h3>
         <span className="text-[10px] tabular-nums text-fog/70">
-          {refs.length}/{lab.refsMax}
+          {refs.length}/{refsMax}
         </span>
       </div>
 
@@ -1231,9 +1440,7 @@ function RefsPanel({ refs, setRefs, onAdded }: {
               <img src={r.url} alt="" className="h-10 w-10 rounded-md object-cover" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[11px] text-cream/85">{r.name}</div>
-                <div className="text-[10px] text-fog">
-                  {i === 0 ? "subject" : i === 1 ? "scene / prop" : "style"}
-                </div>
+                <div className="text-[10px] text-fog">{refSlotLabel(i, refsMax)}</div>
               </div>
               <button
                 title="Move up"
@@ -1303,8 +1510,9 @@ function RefsPanel({ refs, setRefs, onAdded }: {
       )}
       {error && <p className="mt-2 px-1 text-[10px] text-red-400">{error}</p>}
       <p className="mt-2 px-1 text-[10px] leading-relaxed text-fog">
-        References route through Qwen-Edit 2509 — keeps characters on-model with no LoRA. Order
-        matters: subject first, then scene/prop, then style.
+        {refsMax <= 3
+          ? "References route through Qwen-Edit 2509 — keeps characters on-model with no LoRA. Order matters: subject first, then scene/prop, then style."
+          : `Up to ${refsMax} references on this model — a whole cast plus a location plate and style frames in one edit. Order still matters: most important first.`}
       </p>
     </section>
   );
@@ -1314,12 +1522,13 @@ function RefsPanel({ refs, setRefs, onAdded }: {
  * into the roll, not a second copy of it */
 const HISTORY_DAYS = 6;
 
-function RightRail({ refs, setRefs, onRefAdded, dayFilter, setDayFilter }: {
+function RightRail({ refs, setRefs, onRefAdded, dayFilter, setDayFilter, refsMax }: {
   refs: RefImage[];
   setRefs: React.Dispatch<React.SetStateAction<RefImage[]>>;
   onRefAdded: () => void;
   dayFilter: string | null;
   setDayFilter: (day: string | null) => void;
+  refsMax: number;
 }) {
   const lab = useImageLab();
   const [all, setAll] = useState(false);
@@ -1359,7 +1568,7 @@ function RightRail({ refs, setRefs, onRefAdded, dayFilter, setDayFilter }: {
         )}
       </section>
 
-      <RefsPanel refs={refs} setRefs={setRefs} onAdded={onRefAdded} />
+      <RefsPanel refs={refs} setRefs={setRefs} onAdded={onRefAdded} refsMax={refsMax} />
     </aside>
   );
 }
@@ -1420,6 +1629,10 @@ export function ImageLab() {
   const likes = useLikes();
   const [mode, setMode] = useState<LabMode>("generate");
   const [refs, setRefs] = useState<RefImage[]>([]);
+  /** which edit model is selected. It lives here because the params panel
+   * picks it but the refs panel (a sibling) enforces its reference ceiling. */
+  const [editorId, setEditorId] = useState("qwen-edit");
+  const refsMax = lab.refsMaxByModel[editorId] ?? lab.refsMax;
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [dismissed, setDismissed] = useState<string[]>([]);
   /** a day picked in the history rail — the roll narrows to it until cleared */
@@ -1436,6 +1649,13 @@ export function ImageLab() {
   // the full roll leaves a filtered day looking longer than it is
   useEffect(() => setVisible(ROLL_PAGE), [dayFilter]);
 
+  // dropping from the cloud model's 16 refs back to qwen-edit's 3 has to trim
+  // the list here — otherwise the extras stay on screen and the run dies in
+  // the adapter with a limit the panel was still showing as fine
+  useEffect(() => {
+    setRefs((prev) => (prev.length > refsMax ? prev.slice(0, refsMax) : prev));
+  }, [refsMax]);
+
   /** only finished stills are openable/actionable — generating tiles have no file */
   const openable = roll.filter((t) => t.url && t.relPath);
 
@@ -1451,7 +1671,7 @@ export function ImageLab() {
       if (!t.relPath || !t.url) return;
       setMode("edit");
       setRefs((prev) =>
-        prev.some((r) => r.rel === t.relPath) || prev.length >= lab.refsMax
+        prev.some((r) => r.rel === t.relPath) || prev.length >= refsMax
           ? prev
           : [...prev, { rel: t.relPath!, url: t.url!, name: t.name ?? "reference" }],
       );
@@ -1473,7 +1693,14 @@ export function ImageLab() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex min-h-0 flex-1">
-        <ParamsPanel mode={mode} setMode={setMode} refs={refs} />
+        <ParamsPanel
+          mode={mode}
+          setMode={setMode}
+          refs={refs}
+          editorId={editorId}
+          setEditorId={setEditorId}
+          refsMax={refsMax}
+        />
 
         <section className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
           {lab.failures
@@ -1567,6 +1794,7 @@ export function ImageLab() {
           onRefAdded={() => setMode("edit")}
           dayFilter={dayFilter}
           setDayFilter={setDayFilter}
+          refsMax={refsMax}
         />
       </div>
       <StatusBar />

@@ -914,6 +914,9 @@ function LocationRefs({
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  /** already-attached stills are hidden so the grid can't add a duplicate */
+  const unused = bible.libraryImages.filter((a) => !draft.refs.includes(a.relPath));
 
   const upload = async (files: FileList | File[]) => {
     setError(null);
@@ -1002,7 +1005,53 @@ function LocationRefs({
           {bible.uploadingRef ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
           <span className="text-[10px]">{bible.uploadingRef ? "Uploading…" : "Add stills"}</span>
         </button>
+        <button
+          onClick={() => setPicking((p) => !p)}
+          title="Attach a still already generated in the Image lab"
+          className={cx(
+            "flex h-[76px] w-[120px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-dashed transition",
+            picking
+              ? "border-gold/50 text-gold"
+              : "border-cream/15 text-fog hover:border-gold/50 hover:text-gold",
+          )}
+        >
+          <Images size={14} />
+          <span className="text-[10px]">From library</span>
+        </button>
       </div>
+      {picking && (
+        <div className="mt-2 rounded-lg border hairline p-2">
+          {unused.length === 0 ? (
+            <p className="px-1 py-3 text-center text-[10px] text-fog/70">
+              No unused stills in this project yet — generate a set plate in the Image lab.
+            </p>
+          ) : (
+            <div className="grid max-h-[220px] grid-cols-4 gap-1.5 overflow-y-auto">
+              {unused.map((a) => (
+                <button
+                  key={a.relPath}
+                  title={a.name}
+                  onClick={() => {
+                    patch({ refs: [...draft.refs, a.relPath] });
+                    setPicking(false);
+                  }}
+                  className="group relative aspect-[4/3] overflow-hidden rounded-md border hairline transition hover:border-gold/60"
+                >
+                  <img
+                    src={bible.refUrl(a.relPath)}
+                    alt=""
+                    className="h-full w-full object-cover transition group-hover:opacity-80"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="mt-1.5 px-1 text-[9px] leading-relaxed text-fog/70">
+            Library stills are referenced in place — removing one here detaches it, it never
+            deletes the file.
+          </p>
+        </div>
+      )}
       {error && <p className="mt-1 text-[10px] text-[#e07a6b]">{error}</p>}
     </div>
   );

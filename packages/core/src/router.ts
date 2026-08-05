@@ -112,6 +112,20 @@ export const appRouter = router({
 
     retry: procedure.input(jobId).mutation(({ ctx, input }) => ctx.engine.retry(input.id)),
 
+    /** drop one finished job from the history (live jobs: cancel first) */
+    dismiss: procedure.input(jobId).mutation(({ ctx, input }) => ctx.engine.dismiss(input.id)),
+
+    /** drop the whole history; returns how many went */
+    clearFinished: procedure.mutation(({ ctx }) => ctx.engine.clearFinished()),
+
+    /** queue-level state the Job[] snapshot doesn't carry */
+    state: procedure.query(({ ctx }) => ({ paused: ctx.engine.isPaused })),
+
+    /** hold admission (running jobs are left to finish) or let it go again */
+    setPaused: procedure
+      .input(z.object({ paused: z.boolean() }))
+      .mutation(({ ctx, input }) => ({ paused: ctx.engine.setPaused(input.paused) })),
+
     /** full-queue snapshots; small N, so no delta protocol yet */
     onSnapshot: procedure.subscription(async function* ({ ctx, signal }) {
       yield ctx.engine.snapshot();

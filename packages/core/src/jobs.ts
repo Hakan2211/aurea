@@ -52,6 +52,9 @@ interface TrackedJob extends Job {
   seq: number;
 }
 
+/** the wait reason a queued job shows while the queue is held */
+const PAUSED_STAGE = "Queue paused";
+
 /** how many finished jobs the persisted history keeps */
 const HISTORY_CAP = 100;
 const SAVE_DEBOUNCE_MS = 300;
@@ -78,6 +81,8 @@ export class JobEngine extends EventEmitter {
   private adapters: EngineAdapter[];
   private saveTimer: NodeJS.Timeout | undefined;
   private scheduler: GpuScheduler;
+  /** admission is held; running jobs finish */
+  private paused = false;
 
   constructor(private opts: JobEngineOptions = {}) {
     super();
@@ -132,6 +137,51 @@ export class JobEngine extends EventEmitter {
     job.eta = undefined;
     this.publish();
     return this.find(id);
+  }
+
+  /** Drop a finished job out of the history — the queue's delete key. A live
+   * job has to be canceled first: deleting one would strand its adapter run
+   * with nothing left to record the result on. */
+  dismiss(id: string): boolean {
+    const job = this.jobs.get(id);
+    if (!job || job.status === "queued" || job.status === "running") return false;
+    this.jobs.delete(id);
+    this.publish();
+    return true;
+  }
+
+  /** clear the whole history in one go; live jobs stay */
+  clearFinished(): number {
+    let removed = 0;
+    for (const [id, job] of this.jobs) {
+      if (job.status === "completed" || job.status === "failed") {
+        this.jobs.delete(id);
+        removed++;
+      }
+    }
+    if (removed) this.publish();
+    return removed;
+  }
+
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  /** Hold the line: queued jobs stop being admitted, whatever is already
+   * running is left alone (a half-rendered take is worth more than an idle
+   * GPU). Deliberately not persisted — a restart always comes back running. */
+  setPaused(paused: boolean): boolean {
+    if (this.paused === paused) return this.paused;
+    this.paused = paused;
+    if (!paused) {
+      // the badge is ours, so it's ours to take off — a real wait reason gets
+      // rewritten by the next admission pass anyway
+      for (const job of this.jobs.values()) {
+        if (job.status === "queued" && job.stage === PAUSED_STAGE) job.stage = undefined;
+      }
+    }
+    this.publish();
+    return this.paused;
   }
 
   retry(id: string): Job | undefined {
@@ -227,6 +277,16 @@ export class JobEngine extends EventEmitter {
     const queued = [...this.jobs.values()]
       .filter((j) => j.status === "queued")
       .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.seq - b.seq);
+    if (this.paused) {
+      for (const job of queued) {
+        if (job.stage !== PAUSED_STAGE) {
+          job.stage = PAUSED_STAGE;
+          changed = true;
+        }
+      }
+      if (changed) this.publish();
+      return;
+    }
     const runningRes = running.map((j) => this.resourcesFor(j).res);
     const blocked = new Set<ResourceClass>();
     for (const next of queued) {

@@ -39,7 +39,7 @@ export const videofastPayloadSchema = z.object({
   /** target runtime, seconds — scales the writer's word budget + scene count;
    * the finished video lands within ~±15% (durations retime to the spoken VO).
    * Omitted → the account's targetDurationSec, else the natural 25-45s. */
-  durationSec: z.number().int().min(15).max(180).optional(),
+  durationSec: z.number().int().min(15).max(300).optional(),
   /** hand-authored blend: becomes the video's StyleBrief verbatim (the
    * strategist pass is skipped). The adapter fills schema-required fields the
    * caller leaves out and normalizes the mix shares to sum to 1. */
@@ -71,17 +71,32 @@ export const imagePayloadSchema = z.object({
   /** style preset name folded into the prompt by the adapter */
   preset: z.string().optional(),
   seed: z.number().int().optional(),
-  /** explicit output size — overrides the aspect bucket when both are set */
-  width: z.number().int().min(512).max(2048).multipleOf(16).optional(),
-  height: z.number().int().min(512).max(2048).multipleOf(16).optional(),
+  /** explicit output size — overrides the aspect bucket when both are set.
+   * The outer bound is the cloud models' 4K; local ComfyUI models cap at 2048
+   * (labs.imageCatalog().advanced.sizeMax), which is what the UI enforces. */
+  width: z.number().int().min(512).max(4096).multipleOf(16).optional(),
+  height: z.number().int().min(512).max(4096).multipleOf(16).optional(),
   /** sampler overrides; absent → per-model proven defaults in graphs.ts */
   steps: z.number().int().min(1).max(50).optional(),
   cfg: z.number().min(0).max(15).optional(),
   /** images per run — each lands as its own asset */
   count: z.number().int().min(1).max(4).default(1),
-  /** dataRoot-relative reference images (qwen-edit): subject first, then
-   * scene/prop/style — the QIE multi-ref consistency stack */
-  refs: z.array(z.string()).max(3).default([]),
+  /** dataRoot-relative reference images, most important first. The usable
+   * ceiling is per-model (labs.imageCatalog().refsMax): qwen-edit takes 3 —
+   * subject, then scene/prop, then style — while gpt-image-2 takes 16. This
+   * cap is only the outer bound; the adapter rejects anything its model
+   * can't actually encode. */
+  refs: z.array(z.string()).max(16).default([]),
+  /** dataRoot-relative inpainting mask — white marks the region to redraw.
+   * Cloud edit models only; local graphs ignore it. */
+  mask: z.string().optional(),
+  /** cloud-only knobs (gpt-image-2). Local ComfyUI models ignore all three:
+   * their equivalents are the steps/cfg sampler overrides above. */
+  quality: z.enum(["auto", "low", "medium", "high"]).optional(),
+  outputFormat: z.enum(["png", "jpeg", "webp"]).optional(),
+  /** "auto" lets the model infer output size from the references, which is
+   * usually what you want for an edit; "aspect" uses aspect/width/height. */
+  sizeMode: z.enum(["auto", "aspect"]).optional(),
   /** storyboard delivery: attach finished stills to this shot's keyframes */
   board: z.object({ shotId: z.string().min(1) }).optional(),
 });
@@ -1498,6 +1513,7 @@ export const portFileSchema = z.object({
 });
 export type PortFile = z.infer<typeof portFileSchema>;
 
+export * from "./falImage.js";
 export * from "./storyboard.js";
 export * from "./cinematographyBank.js";
 export * from "./refSheet.js";

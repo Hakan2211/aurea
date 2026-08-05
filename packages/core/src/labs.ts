@@ -6,13 +6,21 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { MAX_SHEET_REFS, OPEN_AIR_WARN_SEC, type EnqueueJobResolved, type JobPayload } from "@aurea/shared";
+import {
+  FAL_SIZE_RULES,
+  falImageEstimate,
+  MAX_SHEET_REFS,
+  OPEN_AIR_WARN_SEC,
+  type EnqueueJobResolved,
+  type JobPayload,
+} from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
 import type { ComfyService } from "./comfy/service.js";
 import { probeVideoCapabilities, type VideoCapabilities } from "./comfy/capabilities.js";
 import { seedanceEstimate } from "./adapters/seedance.js";
+import { GPT_IMAGE_2_MAX_REFS } from "./adapters/fal-image.js";
 import { RVC_CONVERT_ESTIMATE, RVC_TRAIN_ESTIMATE, rvcModelPath } from "./adapters/replicate-rvc.js";
 
 export interface LabEngine {
@@ -63,7 +71,8 @@ export class Labs {
   }
 
   imageCatalog() {
-    const managed = this.settings.get().engines.comfyMode === "managed";
+    const { engines, providers } = this.settings.get();
+    const managed = engines.comfyMode === "managed";
     // "ready" spans a copy we downloaded and one linked from the user's own
     // model library — the picker must not say "not installed" about weights
     // that are sitting right there
@@ -104,16 +113,58 @@ export class Labs {
               installed("qwen-image-edit-2509-gguf")
             : true,
         },
-      ] satisfies (LabEngine & { role?: "generate" | "edit" })[],
+        {
+          id: "gpt-image-2",
+          label: "GPT Image 2 · cloud",
+          note: providers.falApiKey
+            ? `text-to-image or up to ${GPT_IMAGE_2_MAX_REFS} references · paid per image`
+            : "needs a fal.ai API key",
+          // the one model on both tabs: fal routes a prompt-only run to
+          // openai/gpt-image-2 and a referenced one to .../edit
+          role: "both",
+          // nothing to install — the render happens on fal's hardware
+          available: !!providers.falApiKey,
+        },
+      ] satisfies (LabEngine & { role?: "generate" | "edit" | "both" })[],
       aspects: ["1:1", "3:2", "16:9", "4:3", "9:16"],
       presets: ["Cinematic", "Photographic", "Concept Art", "Minimal", "Moody", "Vintage", "Fantasy"],
       promptMax: 1000,
-      refsMax: 3,
+      /** outer bound across every model — the UI enforces refsMaxByModel */
+      refsMax: GPT_IMAGE_2_MAX_REFS,
+      /** what each edit model can actually encode. Local qwen-edit is stuck at
+       * 3 because ComfyUI's TextEncodeQwenImageEditPlus only declares
+       * image1..image3; the cloud model has no such ceiling. */
+      refsMaxByModel: {
+        "qwen-edit": 3,
+        "gpt-image-2": GPT_IMAGE_2_MAX_REFS,
+      } as Record<string, number>,
+      /** models that bill per image — the UI shows an estimate before spend */
+      cloudModels: ["gpt-image-2"],
+      modelNotes: {
+        "qwen-edit": "Renders on your GPU — $0.00 · 3 references max",
+        "gpt-image-2": providers.falApiKey
+          ? `Cloud render on your fal.ai account — ≈ $0.015/image at low quality, ≈ $0.22 at high`
+          : "Add your fal.ai API key in Settings → AI Providers to enable",
+      } as Record<string, string>,
+      /** decks stay local: a 40-prompt run on a paid model is a $9 button, and
+       * the deck adapter path is t2i-on-Comfy only */
+      deckModels: ["z-image", "krea2"],
       countMax: 4,
+      /** gpt-image-2 knobs; absent for the local graphs, which use steps/cfg */
+      qualities: ["auto", "low", "medium", "high"],
+      outputFormats: ["png", "jpeg", "webp"],
+      /** models that can infer the output size from their references */
+      autoSizeModels: ["gpt-image-2"],
+      /** models that accept an inpainting mask alongside the references */
+      maskModels: ["gpt-image-2"],
       advanced: {
         sizeMin: 512,
         sizeMax: 2048,
         sizeStep: 16,
+        /** cloud renders aren't bounded by this GPU's VRAM — but they are
+         * bounded by fal's own rules (max edge 3840, and a minimum total
+         * pixel count, both enforced in falSizeError) */
+        sizeMaxByModel: { "gpt-image-2": FAL_SIZE_RULES.maxEdge } as Record<string, number>,
         stepsMax: 50,
         cfgMax: 15,
         /** per-model proven defaults (graphs.ts) shown as placeholders */
@@ -452,7 +503,26 @@ export class Labs {
         "15 seconds",
         "20 seconds",
       ],
-      resolutions: ["704 × 896 (portrait)", "896 × 704 (landscape)", "1280 × 720 (16:9)"],
+      // Every side here MUST divide by 64, not 32. The x2 spatial upscaler runs
+      // the base pass at half resolution, so 32 is the latent stride but 64 is
+      // the pipeline's real constraint — ComfyUI silently floors anything else
+      // and the take comes back a size nobody chose. Measured 2026-08-02: a
+      // 608 × 1088 request rendered 576 × 1088 (608 = 64 × 9.5), which is how
+      // this was found. Aurea never sees the snap, so a wrong preset here is
+      // invisible until you ffprobe the output.
+      //
+      // 576 × 1088 was also not the 9:16 it claimed (0.529). 576 × 1024 is
+      // exact 9:16, costs less (590k vs 627k px), and because the start frame
+      // is centre-cropped to the render aspect, it keeps 98.4% of a 768 × 1344
+      // keyframe's width where 576 × 1088 kept 92.6%. It is the only true 9:16
+      // on the 64 grid at a sane cost — the next one up is 1152 × 2048, 4× the
+      // pixels.
+      resolutions: [
+        "704 × 896 (portrait)",
+        "576 × 1024 (9:16 vertical)",
+        "896 × 704 (landscape)",
+        "1280 × 704 (16:9)",
+      ],
       promptMax: 1000,
       tip: "The start frame anchors identity — generate it in the Image lab first, then describe the motion here.",
       /** The Shot Director surface, stated rather than discovered: what a spec
@@ -502,7 +572,8 @@ const title = (text: string, max = 44) => {
 export function labEnqueue(payload: JobPayload, project: string): EnqueueJobResolved {
   const base = { priority: "interactive" as const, project: `/${project}`, payload };
   switch (payload.type) {
-    case "image":
+    case "image": {
+      const cloud = payload.model === "gpt-image-2";
       return {
         ...base,
         title: title(payload.prompt),
@@ -512,9 +583,28 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
             ? "z-image-turbo"
             : payload.model === "qwen-edit"
               ? "Qwen Edit 2509"
-              : "Krea 2",
-        detail: `${payload.aspect} · ${payload.count} image${payload.count === 1 ? "" : "s"}${payload.preset ? ` · ${payload.preset}` : ""}`,
+              : cloud
+                ? "GPT Image 2 · fal.ai"
+                : "Krea 2",
+        detail: [
+          // an auto-sized cloud edit has no aspect of its own — it inherits
+          // the references', so claiming one on the card would be a lie
+          cloud && payload.sizeMode === "auto" ? "auto size" : payload.aspect,
+          `${payload.count} image${payload.count === 1 ? "" : "s"}`,
+          payload.refs.length
+            ? `${payload.refs.length} ref${payload.refs.length === 1 ? "" : "s"}`
+            : "",
+          payload.mask ? "masked" : "",
+          cloud ? payload.quality ?? "high" : "",
+          payload.preset ?? "",
+          cloud
+            ? falImageEstimate(payload.quality, payload.count, payload.width, payload.height)
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
       };
+    }
     case "imageDeck":
       return {
         ...base,

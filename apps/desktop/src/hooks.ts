@@ -101,10 +101,33 @@ export function useAssets() {
   }, [live, media]);
 }
 
+/** LIVE — the queue plus the verbs that act on it. The snapshot itself is kept
+ * fresh by the LiveSync subscriber, so every mutation here is fire-and-forget;
+ * the invalidate is only insurance for a dropped stream. */
 export function useJobs() {
   const jobsQuery = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs });
   const vramQuery = trpc.system.vram.useQuery(undefined, { placeholderData: vram });
-  return { jobs: jobsQuery.data ?? jobs, vram: vramQuery.data ?? vram };
+  const stateQuery = trpc.jobs.state.useQuery(undefined, { placeholderData: { paused: false } });
+  const utils = trpc.useUtils();
+  const invalidate = { onSuccess: () => void utils.jobs.invalidate() };
+  const { mutate: cancel } = trpc.jobs.cancel.useMutation(invalidate);
+  const { mutate: retry } = trpc.jobs.retry.useMutation(invalidate);
+  const { mutate: dismiss } = trpc.jobs.dismiss.useMutation(invalidate);
+  const { mutate: clearFinished } = trpc.jobs.clearFinished.useMutation(invalidate);
+  const { mutate: setPaused } = trpc.jobs.setPaused.useMutation(invalidate);
+  return {
+    jobs: jobsQuery.data ?? jobs,
+    vram: vramQuery.data ?? vram,
+    paused: stateQuery.data?.paused ?? false,
+    /** the core is answering. On sample data the verbs below do nothing, and a
+     * button that does nothing should say so rather than pretend. */
+    live: !!jobsQuery.data && !jobsQuery.isPlaceholderData,
+    cancel: (id: string) => cancel({ id }),
+    retry: (id: string) => retry({ id }),
+    dismiss: (id: string) => dismiss({ id }),
+    clearFinished: () => clearFinished(),
+    setPaused: (paused: boolean) => setPaused({ paused }),
+  };
 }
 
 export function useSystem() {
@@ -503,6 +526,8 @@ const IMAGE_ADVANCED_FALLBACK = {
   sizeMin: 512,
   sizeMax: 2048,
   sizeStep: 16,
+  /** cloud models render off this GPU, so they aren't held to sizeMax */
+  sizeMaxByModel: {} as Record<string, number>,
   stepsMax: 50,
   cfgMax: 15,
   defaults: {} as Record<string, { steps: number; cfg: number }>,
@@ -570,12 +595,30 @@ export function useImageLab() {
       upscaling: [] as string[],
       decks: [] as DeckProgress[],
       refsMax: 3,
+      /** per-model ref ceilings — local qwen-edit 3, cloud gpt-image-2 16 */
+      refsMaxByModel: {} as Record<string, number>,
+      cloudModels: [] as string[],
+      /** models a bulk deck may use — cloud models are excluded on purpose */
+      deckModels: [] as string[],
+      modelNotes: {} as Record<string, string>,
+      qualities: [] as string[],
+      outputFormats: [] as string[],
+      autoSizeModels: [] as string[],
+      maskModels: [] as string[],
       countMax: 4,
       deckMax: 100,
       advancedCfg: IMAGE_ADVANCED_FALLBACK,
     };
     if (!catalog || !kindAssets) return { ...imageLab, ...extras, generate, busy: false };
     extras.refsMax = catalog.refsMax ?? 3;
+    extras.refsMaxByModel = catalog.refsMaxByModel ?? {};
+    extras.cloudModels = catalog.cloudModels ?? [];
+    extras.deckModels = catalog.deckModels ?? [];
+    extras.modelNotes = catalog.modelNotes ?? {};
+    extras.qualities = catalog.qualities ?? [];
+    extras.outputFormats = catalog.outputFormats ?? [];
+    extras.autoSizeModels = catalog.autoSizeModels ?? [];
+    extras.maskModels = catalog.maskModels ?? [];
     extras.countMax = catalog.countMax ?? 4;
     extras.advancedCfg = catalog.advanced ?? IMAGE_ADVANCED_FALLBACK;
 
@@ -1370,6 +1413,10 @@ export function useBible() {
   const utils = trpc.useUtils();
   const query = trpc.studio.bible.get.useQuery({ project }, { enabled: !!project });
   const voices = trpc.labs.voice.catalog.useQuery().data?.voices;
+  // the project's own generated stills, newest first — so a set plate boarded in
+  // the Image lab can be attached as a reference without a round-trip through
+  // the filesystem. These stay library paths, never staged copies.
+  const libraryAssets = trpc.library.list.useQuery().data?.assets;
 
   const sync = { onSuccess: (b: Bible) => utils.studio.bible.get.setData({ project }, b) };
   const upsertCharMutation = trpc.studio.bible.upsertCharacter.useMutation(sync);
@@ -1410,6 +1457,12 @@ export function useBible() {
       /** preview URL for a bible ref relPath (null without a live core) */
       refUrl: (relPath: string | null | undefined) =>
         relPath && media ? media(mediaRoute(relPath)) : undefined,
+      /** every generated still in this project, newest first — the source list
+       * for "Choose from library" on a character's or location's references */
+      libraryImages: (libraryAssets ?? [])
+        .filter((a) => a.kind === "image" && a.project === project)
+        .slice()
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       /** cloned-voice roster for the voice picker */
       voices: voices ?? [],
       /** playable ref-clip URL for a roster voice (studio-owned clips only) */
@@ -1440,7 +1493,7 @@ export function useBible() {
       seedResult: seedMutation.data,
       seedError: seedMutation.error?.message,
     }),
-    [project, query.data, voices, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, importCine, cineMutation.isPending, addRefAsync, addRefMutation.isPending, removeFiles, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
+    [project, query.data, voices, libraryAssets, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, importCine, cineMutation.isPending, addRefAsync, addRefMutation.isPending, removeFiles, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
   );
 }
 

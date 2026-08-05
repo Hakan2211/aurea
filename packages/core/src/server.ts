@@ -26,6 +26,7 @@ import { EngineRuntime } from "./runtime/runtime.js";
 import { ComfyService } from "./comfy/service.js";
 import { VideofastAdapter } from "./adapters/videofast.js";
 import { ComfyImageAdapter } from "./adapters/comfy-image.js";
+import { FalImageAdapter } from "./adapters/fal-image.js";
 import { TtsAdapter } from "./adapters/tts.js";
 import { DramaboxAdapter } from "./adapters/dramabox.js";
 import { MusicAdapter } from "./adapters/music.js";
@@ -83,6 +84,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     adapters: [
       new VideofastAdapter(settings),
       new ComfyImageAdapter(settings, comfy, runtime, models),
+      new FalImageAdapter(settings),
       new TtsAdapter(settings, runtime, models),
       new DramaboxAdapter(settings),
       new MusicAdapter(settings, runtime, models),

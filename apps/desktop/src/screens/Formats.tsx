@@ -235,7 +235,10 @@ function ParadigmChip({
 
 /** target-runtime picker — Auto defers to the channel preset (else the
  * writer's natural 25-45s); a number scales word budget + scene count */
-const DURATIONS = [30, 45, 60, 90] as const;
+const DURATIONS = [30, 45, 60, 90, 180, 300] as const;
+
+/** chips read as minutes once a target passes a minute — "180s" scans slower */
+const durationLabel = (d: number) => (d >= 120 ? `${d / 60}m` : `${d}s`);
 
 function DurationChips({
   value,
@@ -258,14 +261,15 @@ function DurationChips({
                 : "border-cream/10 text-cream/70 hover:border-gold/35 hover:text-cream",
             )}
           >
-            {d === null ? "Auto" : `${d}s`}
+            {d === null ? "Auto" : durationLabel(d)}
           </button>
         ))}
       </div>
       <p className="mt-1.5 text-[10px] leading-relaxed text-fog">
         {value === null
           ? "Auto — the channel preset decides, else the writer's natural 25-45s."
-          : `Script and scene count scale to ~${value}s; the render lands within ~±15% (narration rules the clock).`}
+          : `Script and scene count scale to ~${durationLabel(value)}; the render lands within ~±15% (narration rules the clock).` +
+            (value >= 180 ? " Long-form: expect a proportionally longer write and render." : "")}
       </p>
     </>
   );

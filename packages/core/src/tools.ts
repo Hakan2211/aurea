@@ -509,12 +509,12 @@ export function buildTools(api: StudiodApi): AureaTool[] {
           .number()
           .int()
           .min(15)
-          .max(180)
+          .max(300)
           .optional()
           .describe(
-            "target runtime in seconds (word budget + scene count scale to it; lands within ~±15% " +
-              "since scenes retime to the spoken VO). Omit for the channel's default, else the " +
-              "writer's natural 25-45s.",
+            "target runtime in seconds, 15-300 (word budget + scene count scale to it; lands within " +
+              "~±15% since scenes retime to the spoken VO). Long-form targets exist: 180 = 3 min, " +
+              "300 = 5 min. Omit for the channel's default, else the writer's natural 25-45s.",
           ),
         narrativeArc: z
           .enum(["problem-shift-payoff", "myth-bust", "countdown", "metaphor-journey", "data-story"])

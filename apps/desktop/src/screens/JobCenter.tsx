@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -9,6 +10,7 @@ import {
   HardDrive,
   Lightbulb,
   Pause,
+  Play,
   RotateCcw,
   X,
 } from "lucide-react";
@@ -110,35 +112,111 @@ function TempSparkline({ tempC }: { tempC: number }) {
 
 /* ---------- job table ---------- */
 
-function JobActions({ job }: { job: Job }) {
+/** the verbs a row can perform, handed down from the screen's useJobs() */
+interface JobControls {
+  live: boolean;
+  cancel: (id: string) => void;
+  retry: (id: string) => void;
+  dismiss: (id: string) => void;
+}
+
+const DEAD_CORE = "studiod isn't answering — reconnect to control the queue";
+
+function JobActions({ job, ctl }: { job: Job; ctl: JobControls }) {
+  /* Stopping a render throws away real GPU minutes, so a running job asks
+   * twice. A queued one has nothing to lose and goes on the first click. */
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4_000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
   if (job.status === "completed")
     return (
-      <span className="flex items-center gap-1 text-[12px] text-sage">
-        <Check size={12} /> View result
-      </span>
+      <div className="flex items-center gap-2">
+        <a
+          href="#/assets"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-sage/25 px-3 py-1.5 text-[12px] font-medium text-sage transition hover:border-sage/60"
+        >
+          <Check size={12} /> View result
+        </a>
+        <GhostButton
+          title={ctl.live ? "Remove from history" : DEAD_CORE}
+          disabled={!ctl.live}
+          onClick={() => ctl.dismiss(job.id)}
+        >
+          <X size={11} />
+        </GhostButton>
+      </div>
     );
+
   if (job.status === "failed")
     return (
       <div className="flex items-center gap-2">
-        <GhostButton className="border-gold/30 text-gold">
+        <GhostButton
+          className="border-gold/30 text-gold"
+          title={ctl.live ? "Run this job again" : DEAD_CORE}
+          disabled={!ctl.live}
+          onClick={() => ctl.retry(job.id)}
+        >
           <RotateCcw size={11} /> Retry
         </GhostButton>
-        <GhostButton>
+        <GhostButton
+          title={ctl.live ? "Remove from history" : DEAD_CORE}
+          disabled={!ctl.live}
+          onClick={() => ctl.dismiss(job.id)}
+        >
           <X size={11} /> Dismiss
         </GhostButton>
       </div>
     );
+
+  const running = job.status === "running";
   return (
-    <GhostButton>
-      <X size={11} /> Cancel
+    <GhostButton
+      className={cx(
+        armed
+          ? "border-ember/60 bg-ember/12 text-[#e07a6b] hover:border-ember hover:text-[#e07a6b]"
+          : "hover:border-ember/50 hover:text-[#e07a6b]",
+      )}
+      disabled={!ctl.live}
+      title={
+        !ctl.live
+          ? DEAD_CORE
+          : running
+            ? "Stop this render — the GPU work so far is lost"
+            : "Take this job out of the queue"
+      }
+      onClick={() => {
+        if (running && !armed) {
+          setArmed(true);
+          return;
+        }
+        setArmed(false);
+        ctl.cancel(job.id);
+      }}
+    >
+      {armed ? (
+        <>
+          <AlertTriangle size={11} /> Stop it?
+        </>
+      ) : (
+        <>
+          <X size={11} /> Cancel
+        </>
+      )}
     </GhostButton>
   );
 }
 
-function JobTableRow({ job }: { job: Job }) {
+function JobTableRow({ job, ctl }: { job: Job; ctl: JobControls }) {
   const Icon = kindIcon[job.kind];
   const running = job.status === "running";
   const failed = job.status === "failed";
+  // the engine has no "canceled" status — a stopped job is a failed one whose
+  // reason is the cancel. Reading it back keeps the row from crying wolf.
+  const canceled = failed && /^cancel(l)?ed/i.test(job.error ?? "");
   const prio = priorityChip[job.priority];
 
   return (
@@ -153,10 +231,20 @@ function JobTableRow({ job }: { job: Job }) {
       <div
         className={cx(
           "flex h-11 w-11 items-center justify-center rounded-lg border",
-          failed ? "border-ember/40 text-[#e07a6b]" : "border-cream/10 text-gold/80",
+          canceled
+            ? "border-cream/10 text-fog"
+            : failed
+              ? "border-ember/40 text-[#e07a6b]"
+              : "border-cream/10 text-gold/80",
         )}
       >
-        {failed ? <AlertTriangle size={17} strokeWidth={1.5} /> : <Icon size={17} strokeWidth={1.5} />}
+        {canceled ? (
+          <X size={17} strokeWidth={1.5} />
+        ) : failed ? (
+          <AlertTriangle size={17} strokeWidth={1.5} />
+        ) : (
+          <Icon size={17} strokeWidth={1.5} />
+        )}
       </div>
 
       <div className="min-w-0">
@@ -197,14 +285,16 @@ function JobTableRow({ job }: { job: Job }) {
         ) : (
           <>
             <div className="text-[13px] tabular-nums text-cream/85">{job.elapsed}</div>
-            <div className={cx("text-[11px]", failed ? "text-[#e07a6b]" : "text-fog/70")}>
-              {running ? `ETA ${job.eta}` : failed ? job.error : "Completed"}
+            <div
+              className={cx("text-[11px]", failed && !canceled ? "text-[#e07a6b]" : "text-fog/70")}
+            >
+              {running ? `ETA ${job.eta}` : canceled ? "Canceled" : failed ? job.error : "Completed"}
             </div>
           </>
         )}
       </div>
 
-      <JobActions job={job} />
+      <JobActions job={job} ctl={ctl} />
     </div>
   );
 }
@@ -278,14 +368,16 @@ function RightRail() {
 /* ---------- screen ---------- */
 
 export function JobCenter() {
-  const { jobs, vram } = useJobs();
+  const { jobs, vram, paused, live, cancel, retry, dismiss, clearFinished, setPaused } = useJobs();
   const { system } = useSystem();
-  const inQueue = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
+  const ctl: JobControls = { live, cancel, retry, dismiss };
   // the stream lists finished jobs oldest-first; the queue reads better with
   // active work on top and the most recent history right under it
   const active = jobs.filter((j) => j.status === "running" || j.status === "queued");
   const history = jobs.filter((j) => j.status !== "running" && j.status !== "queued").reverse();
   const shown = [...active, ...history];
+  const inQueue = active.length;
+  const queued = active.filter((j) => j.status === "queued");
 
   return (
     <div className="flex h-full">
@@ -307,10 +399,31 @@ export function JobCenter() {
             <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
               Queue status
             </span>
-            <button className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-b from-gold to-gold-deep px-3 py-1.5 text-[12px] font-semibold text-ink transition hover:brightness-110">
-              <Pause size={12} /> Pause queue
+            <button
+              disabled={!live}
+              onClick={() => setPaused(!paused)}
+              title={
+                !live
+                  ? DEAD_CORE
+                  : paused
+                    ? "Start admitting queued jobs again"
+                    : "Hold queued jobs — anything already rendering finishes"
+              }
+              className={cx(
+                "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition",
+                "disabled:cursor-not-allowed disabled:opacity-40",
+                paused
+                  ? "border border-gold/40 bg-gold/12 text-gold hover:bg-gold/20"
+                  : "bg-gradient-to-b from-gold to-gold-deep text-ink hover:brightness-110",
+              )}
+            >
+              {paused ? <Play size={12} /> : <Pause size={12} />}
+              {paused ? "Resume queue" : "Pause queue"}
             </button>
-            <span className="text-[11px] text-fog">{inQueue} jobs in queue</span>
+            <span className="text-[11px] text-fog">
+              {inQueue} job{inQueue === 1 ? "" : "s"} in queue
+              {paused && <span className="text-gold"> · held</span>}
+            </span>
           </div>
         </header>
 
@@ -323,14 +436,38 @@ export function JobCenter() {
 
         <div className="flex-1 space-y-2 overflow-y-auto px-6 pb-4 pt-1">
           {shown.map((j) => (
-            <JobTableRow key={j.id} job={j} />
+            <JobTableRow key={j.id} job={j} ctl={ctl} />
           ))}
+          {shown.length === 0 && (
+            <p className="py-16 text-center text-[12px] text-fog">The queue is empty.</p>
+          )}
         </div>
 
-        <footer className="flex items-center justify-between border-t hairline px-6 py-2.5 text-[11px] text-fog">
+        <footer className="flex items-center gap-4 border-t hairline px-6 py-2.5 text-[11px] text-fog">
           <span>{jobs.length} jobs</span>
-          <span className="flex items-center gap-1.5">
-            <i className="h-1.5 w-1.5 rounded-full bg-sage" /> All systems operational
+          {queued.length > 0 && (
+            <button
+              disabled={!live}
+              onClick={() => queued.forEach((j) => cancel(j.id))}
+              title="Take every waiting job out of the queue — running jobs are untouched"
+              className="text-fog transition hover:text-[#e07a6b] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Cancel {queued.length} queued
+            </button>
+          )}
+          {history.length > 0 && (
+            <button
+              disabled={!live}
+              onClick={() => clearFinished()}
+              title="Empty the finished-jobs history"
+              className="text-fog transition hover:text-cream disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Clear history
+            </button>
+          )}
+          <span className="ml-auto flex items-center gap-1.5">
+            <i className={cx("h-1.5 w-1.5 rounded-full", paused ? "bg-gold" : "bg-sage")} />
+            {paused ? "Queue paused" : "All systems operational"}
           </span>
         </footer>
       </section>

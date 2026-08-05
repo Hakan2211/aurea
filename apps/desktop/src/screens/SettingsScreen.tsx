@@ -287,8 +287,9 @@ function ProvidersSection() {
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
         <div className="text-[13px] font-medium text-cream">fal.ai API key</div>
         <div className="mt-0.5 text-[10px] text-fog">
-          Unlocks the Seedance cloud video engine in the Video Lab. Clips bill to your fal account —
-          the estimated cost shows before every render.
+          Unlocks the Seedance cloud video engine in the Video Lab and GPT Image 2 in the Image Lab —
+          the one edit model that takes up to 16 references, where local Qwen-Edit stops at 3. Both
+          bill to your fal account; the estimated cost shows before every render.
         </div>
         <input
           type="password"
