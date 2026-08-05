@@ -34,6 +34,7 @@ import { SeedVcAdapter } from "./adapters/seedvc.js";
 import { ReplicateRvcAdapter, rvcModelPath } from "./adapters/replicate-rvc.js";
 import { labEnqueue } from "./labs.js";
 import { ComfyVideoAdapter } from "./adapters/comfy-video.js";
+import { MinimaxVideoAdapter } from "./adapters/minimax-video.js";
 import { SeedanceAdapter } from "./adapters/seedance.js";
 import { FfmpegExportAdapter } from "./adapters/ffmpeg-export.js";
 import { serveFile, serveMedia } from "./media.js";
@@ -91,6 +92,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new ReplicateRvcAdapter(settings),
       new SeedVcAdapter(settings, runtime),
       new ComfyVideoAdapter(settings, comfy, models),
+      new MinimaxVideoAdapter(settings, models),
       new SeedanceAdapter(settings),
       new FfmpegExportAdapter(settings),
     ],

@@ -346,9 +346,14 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       name: "generate_video",
       title: "Generate video clip",
       description:
-        "Enqueue a local LTX-2 video clip. startFrame (library relPath from list_assets) anchors identity " +
-        "(i2v); adding audio (relPath of a speech take) switches to lip-sync (ia2v). Returns the job — " +
-        "wait_for_job for the mp4. Check lab_catalog('video') for resolutions/durations.",
+        "Enqueue a local video clip. Default engine 'ltx2': startFrame (library relPath from " +
+        "list_assets) anchors identity (i2v); adding audio (relPath of a speech take) switches to " +
+        "lip-sync (ia2v). engine 'minimax-h3' is the opposite trade — it writes and performs the " +
+        "dialogue, sound effects and music ITSELF in the same pass as the picture, so pass no " +
+        "audio and put the lines in the prompt under an 'Audio:' heading; 4-15s only, no Director " +
+        "timeline, and roughly 10x LTX's render time, so reserve it for a hero beat. Returns the " +
+        "job — wait_for_job for the mp4. Check lab_catalog('video') for which engines this machine " +
+        "can actually run, plus resolutions/durations.",
       schema: withProjectDefault(videoGenerateSchema.omit({ project: true })),
       handler: async ({ project, ...payload }) => {
         await requireProject(project);

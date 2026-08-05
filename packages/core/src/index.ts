@@ -20,5 +20,6 @@ export { EngineRuntime } from "./runtime/runtime.js";
 export { TtsAdapter } from "./adapters/tts.js";
 export { MusicAdapter } from "./adapters/music.js";
 export { ComfyVideoAdapter } from "./adapters/comfy-video.js";
+export { MinimaxVideoAdapter } from "./adapters/minimax-video.js";
 export type { EngineAdapter, AdapterRun, AdapterProgress } from "./adapters/types.js";
 export { readPortFile, writePortFile, clearPortFile, probeStudiod, AUREA_DIR, PORT_FILE } from "./portfile.js";

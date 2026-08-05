@@ -623,8 +623,11 @@ function EnginesSection() {
     setVideoMode,
     videoTuning,
     setVideoTuning,
+    minimaxUrl,
+    setMinimaxUrl,
   } = useSettings();
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
+  const [h3Draft, setH3Draft] = useState<string | null>(null);
   return (
     <div className="space-y-5">
       <SectionHeader
@@ -791,6 +794,28 @@ function EnginesSection() {
             </div>
           </div>
         </div>
+      </div>
+      <div className="rounded-2xl border hairline bg-surface/50 p-4">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium text-cream">MiniMax-H3 ComfyUI</div>
+          <div className="mt-0.5 text-[10px] leading-relaxed text-fog">
+            H3 renders dialogue, sound effects and music in the same pass as the picture, and
+            needs ComfyUI 0.30.0 or newer — a separate install from the one LTX 2.3 runs on.
+            Point this at that instance; leave it empty to keep the engine off.
+          </div>
+        </div>
+        <input
+          value={h3Draft ?? minimaxUrl}
+          onChange={(e) => setH3Draft(e.target.value)}
+          onBlur={() => {
+            if (h3Draft !== null && h3Draft !== minimaxUrl) setMinimaxUrl(h3Draft);
+            setH3Draft(null);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          spellCheck={false}
+          placeholder="http://127.0.0.1:8189"
+          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+        />
       </div>
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
         {engines.map((e) => (

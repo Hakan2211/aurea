@@ -1683,6 +1683,12 @@ export function useSettings() {
       setVideoMode(mode: Settings["engines"]["videoMode"]) {
         update({ engines: { videoMode: mode } });
       },
+      minimaxUrl: live?.engines.minimaxUrl ?? "",
+      // unlike comfyUrl, an empty value is meaningful here — it turns the H3
+      // engine off rather than leaving a stale address behind
+      setMinimaxUrl(url: string) {
+        update({ engines: { minimaxUrl: url.trim() } });
+      },
       videoTuning: live?.engines.videoTuning ?? {
         chunkFeedForward: true,
         sageAttention: false,

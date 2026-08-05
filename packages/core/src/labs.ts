@@ -476,6 +476,15 @@ export class Labs {
           available,
         },
         {
+          id: "minimax-h3",
+          label: "MiniMax-H3",
+          sub: "local · free",
+          note: "Speaks and scores itself",
+          // its own ComfyUI (0.30.0+) and its own weights — neither is implied
+          // by the LTX pipeline being set up
+          available: !!engines.minimaxUrl.trim() && this.models.ready("minimax-h3-gguf"),
+        },
+        {
           id: "seedance",
           label: "Seedance 1.0",
           sub: "cloud · paid",
@@ -485,6 +494,12 @@ export class Labs {
       ],
       engineNotes: {
         ltx2: "Renders on your GPU — $0.00",
+        "minimax-h3": !engines.minimaxUrl.trim()
+          ? "Needs a second ComfyUI on 0.30.0+ — set its URL in Settings → Engines"
+          : !this.models.ready("minimax-h3-gguf")
+            ? "Weights not installed — Settings → Models → MiniMax-H3 (GGUF)"
+            : "Renders picture AND its dialogue/SFX/music in one pass — $0.00, but " +
+              "roughly 10× LTX's render time. 4–15s, no voice takes, no Director timeline.",
         seedance: providers.falApiKey
           ? "Cloud render on your fal.ai account — ≈ $0.05/s at 720p, $0.15/s at 1080p"
           : "Add your fal.ai API key in Settings → AI Providers to enable",
@@ -517,11 +532,19 @@ export class Labs {
       // keyframe's width where 576 × 1088 kept 92.6%. It is the only true 9:16
       // on the 64 grid at a sane cost — the next one up is 1152 × 2048, 4× the
       // pixels.
+      //
+      // The last two are MiniMax-H3's native canvas — a 768 short edge, which
+      // is what it was trained on and what its own workflows ship. They are
+      // also both multiples of 64, so they stay legal for LTX; the reverse
+      // isn't a problem either, since H3 only needs multiples of 32 and every
+      // preset above already is one.
       resolutions: [
         "704 × 896 (portrait)",
         "576 × 1024 (9:16 vertical)",
         "896 × 704 (landscape)",
         "1280 × 704 (16:9)",
+        "1344 × 768 (16:9 · H3 native)",
+        "768 × 1344 (9:16 · H3 native)",
       ],
       promptMax: 1000,
       tip: "The start frame anchors identity — generate it in the Image lab first, then describe the motion here.",
@@ -548,6 +571,27 @@ export class Labs {
           `Keep open air between voice takes under ~${OPEN_AIR_WARN_SEC}s — LTX fills a longer gap with invented dialogue, not room tone (measured 2026-07-25).`,
           "Cast references and a motion reference share the single IC-LoRA slot: a shot can carry one or the other, never both.",
           "A retake re-renders one window of a finished take in place. It ignores keyframes, beats and the audio lane, takes its length/rate/size from the source, opens up to 8 frames early, and fixes artefacts rather than choreography.",
+        ],
+      },
+      /** MiniMax-H3's control surface is the prompt and nothing else — there
+       * is no timeline node, no audio lane, no IC-LoRA. Everything a caller
+       * can steer, it steers by writing it down, so the shape of a good H3
+       * prompt is part of the API rather than a style note. */
+      minimax: {
+        limits: {
+          durationSecMin: 4,
+          durationSecMax: 15,
+          fps: 24,
+          /** the canvas H3 was trained on; sides must be multiples of 32 */
+          shortEdge: 768,
+        },
+        rules: [
+          "Do NOT attach a voice take — H3 performs the dialogue itself. A take passed here is rejected, not mixed in.",
+          "Write the prompt as labelled blocks: a look/mood line, then 'Timeline:' with [0s-2.5s] style beats, then 'Camera:', then 'Audio:'.",
+          "The 'Audio:' block is the whole soundtrack — name the speaker and quote their line for dialogue, and describe the SFX and score in the same paragraph. Anything left unsaid, H3 invents.",
+          "Length snaps up to the model's 17k+5 frame grid at 24fps (5s = 124 frames); the request is never rounded short.",
+          "Both a first and a last frame are optional: none = text-to-video, first only = animate forward, both = the take must land on the last one.",
+          "Roughly 10x LTX-2.3's render time for the same length on the same card — budget it as a hero shot, not a draft.",
         ],
       },
     };
@@ -693,6 +737,7 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
       };
     case "video": {
       const seedance = payload.engine === "seedance";
+      const minimax = payload.engine === "minimax-h3";
       const d = payload.director;
       // a Director shot is a timeline, so the rail says what's on it rather
       // than the single "lip-sync" flag the one-take path could get away with
@@ -701,7 +746,7 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
         ...base,
         title: title(payload.prompt),
         kind: "video",
-        engine: seedance ? "Seedance" : "LTX-2.3",
+        engine: seedance ? "Seedance" : minimax ? "MiniMax-H3" : "LTX-2.3",
         detail: [
           payload.resolution,
           `${payload.durationSec}s`,
@@ -709,6 +754,9 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
           d && d.promptZones.length ? `${d.promptZones.length} beats` : "",
           voices ? (d ? `${voices} voice${voices === 1 ? "" : "s"}` : "lip-sync") : "",
           seedance ? seedanceEstimate(payload.durationSec, payload.resolution) : "",
+          // the reason to pick H3 is that the take arrives already scored —
+          // worth saying on the card, since nothing else here produces sound
+          minimax ? "native audio" : "",
         ]
           .filter(Boolean)
           .join(" · "),

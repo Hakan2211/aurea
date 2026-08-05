@@ -961,7 +961,11 @@ function ParamsPanel({
   const [frameRel, setFrameRel] = useState<string | null>(prefill?.startFrame ?? null);
   /** null = closed. "start" retargets the start frame; a number retargets that
    * Director keyframe — one picker, two jobs. */
-  const [picking, setPicking] = useState<"start" | number | null>(null);
+  const [picking, setPicking] = useState<"start" | "end" | number | null>(null);
+  /** MiniMax-H3's fl2va second anchor — the frame the take has to LAND on.
+   * LTX reaches the same idea through a Director keyframe at the end of the
+   * timeline, so this only surfaces for H3. */
+  const [endFrameRel, setEndFrameRel] = useState<string | null>(null);
   const pickerOpen = picking !== null;
   /** Shot Director: extra keyframes beyond the start frame, in seconds */
   const [directorOn, setDirectorOn] = useState(!!prefill);
@@ -1009,6 +1013,8 @@ function ParamsPanel({
    * render the newest image in the library instead of the one that was asked
    * for, so only the thumbnail degrades, never the render. */
   const effectiveRel = frameRel ?? defaultRel;
+  const endFrame = endFrameRel ? lab.frames.find((f) => f.relPath === endFrameRel) : undefined;
+  const endFrameUrl = endFrame?.url;
   const frameName = chosen?.name ?? (frameRel ? (frameRel.split("/").pop() ?? frameRel) : lab.startFrame.name);
   const frameMeta = chosen?.meta ?? (frameRel ? "start frame" : lab.startFrame.meta);
   const frameSwatch = chosen?.swatch ?? lab.startFrame.swatch;
@@ -1225,6 +1231,64 @@ function ParamsPanel({
           </button>
         </section>
 
+        {/* 2a · end frame — MiniMax-H3's fl2va only */}
+        {engineId === "minimax-h3" && !directorOn && !retake && (
+          <section>
+            <div className="flex items-center justify-between">
+              <PanelLabel hint>2a · End frame (optional)</PanelLabel>
+              {endFrameRel && (
+                <button
+                  onClick={() => setEndFrameRel(null)}
+                  className="inline-flex items-center gap-1 text-[10px] text-fog transition hover:text-red-400"
+                >
+                  <X size={10} /> Clear
+                </button>
+              )}
+            </div>
+            {endFrameRel ? (
+              <button
+                onClick={() => setPicking("end")}
+                title="Choose a different end frame"
+                className="group relative mt-2 block aspect-video w-full overflow-hidden rounded-xl border border-cream/10 text-left transition hover:border-gold/40"
+              >
+                <div className={cx("absolute inset-0", endFrame?.swatch ?? "bg-raised")} />
+                {endFrameUrl && (
+                  <img
+                    src={endFrameUrl}
+                    alt=""
+                    draggable={false}
+                    className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                  />
+                )}
+                <div className="absolute inset-0 flex items-center justify-center bg-ink/45 opacity-0 backdrop-blur-[1px] transition group-hover:opacity-100">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-cream/95 px-3 py-1 text-[10px] font-medium text-ink">
+                    <Maximize2 size={10} /> Browse stills
+                  </span>
+                </div>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/85 to-transparent px-2.5 pb-2 pt-5">
+                  <div className="truncate text-[11px] text-cream/90">
+                    {endFrame?.name ?? (endFrameRel.split("/").pop() ?? endFrameRel)}
+                  </div>
+                  <div className="text-[10px] text-fog">the take lands here</div>
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={() => setPicking("end")}
+                className="mt-2 flex w-full items-center gap-2 rounded-xl border border-dashed border-cream/15 px-3 py-2 text-[11px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+              >
+                <Replace size={13} />
+                <span className="flex-1 text-left">Pick a frame to land on…</span>
+              </button>
+            )}
+            <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+              {endFrameRel
+                ? "fl2va — H3 has to arrive at this frame by the last beat."
+                : "Leave empty and H3 animates forward freely from the start frame."}
+            </p>
+          </section>
+        )}
+
         {/* 2b · dialogue audio (optional — ia2v lip-sync) */}
         <section>
           <PanelLabel hint>2b · Dialogue audio (optional)</PanelLabel>
@@ -1236,6 +1300,12 @@ function ParamsPanel({
             <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
               Dialogue is on the Director's audio lane below — where a line can sit at any
               timecode, and two characters can each have their own.
+            </p>
+          ) : engineId === "minimax-h3" ? (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-fog/70">
+              H3 performs the dialogue itself — write the line into the prompt under an
+              &quot;Audio:&quot; heading and it comes back spoken, scored and in sync. There is no
+              take to attach.
             </p>
           ) : (
           <>
@@ -1761,6 +1831,18 @@ function ParamsPanel({
               Seedance only renders 5s or 10s — this queues as a 10-second clip.
             </p>
           )}
+          {engineId === "minimax-h3" && durationSec < 4 && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-gold/75">
+              H3 renders 4–15 second shots — pick 4s or longer, or switch to LTX-2.3 for this
+              beat.
+            </p>
+          )}
+          {engineId === "minimax-h3" && durationSec > 15 && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-gold/75">
+              Past 15s is outside what H3 was trained on — it will render, but quality is
+              untested and this is already the slow engine.
+            </p>
+          )}
           {engineId !== "seedance" && durationSec > 10 && (
             <p className="mt-1.5 text-[10px] leading-relaxed text-gold/75">
               Long clips scale VRAM and render time roughly linearly — drop the
@@ -1799,6 +1881,9 @@ function ParamsPanel({
               resolution,
               motionStrength: motion,
               startFrame: effectiveRel,
+              // fl2va is H3-only; on any other engine the field is dead weight
+              // that would survive an engine switch and confuse the payload
+              endFrame: engineId === "minimax-h3" ? (endFrameRel ?? undefined) : undefined,
               // the lane owns dialogue once the Director is on: leaving the
               // simple field set would put a take back at 0s that the user may
               // have just taken off the lane
@@ -1867,12 +1952,15 @@ function ParamsPanel({
           selectedRel={
             picking === "start"
               ? effectiveRel
-              : typeof picking === "number"
-                ? keyframes[picking]?.image
-                : undefined
+              : picking === "end"
+                ? (endFrameRel ?? undefined)
+                : typeof picking === "number"
+                  ? keyframes[picking]?.image
+                  : undefined
           }
           onPick={(rel) => {
             if (picking === "start") setFrameRel(rel);
+            else if (picking === "end") setEndFrameRel(rel);
             else if (typeof picking === "number") {
               setKeyframes((ks) => ks.map((k, j) => (j === picking ? { ...k, image: rel } : k)));
             }
@@ -1931,7 +2019,7 @@ function FramePicker({
   frames: PickerFrame[];
   /** "start" retargets the start frame; a number retargets that Director
    * keyframe — one picker, two jobs, so the copy has to say which */
-  mode: "start" | number;
+  mode: "start" | "end" | number;
   selectedRel?: string;
   onPick: (relPath: string) => void;
   onClose: () => void;
@@ -2035,8 +2123,18 @@ function FramePicker({
     if (hover === null) tileRefs.current[at]?.scrollIntoView({ block: "nearest" });
   }, [at, hover, size]);
 
-  const title = mode === "start" ? "Choose a start frame" : "Choose a keyframe still";
-  const cta = mode === "start" ? "Use as start frame" : "Use as keyframe";
+  const title =
+    mode === "start"
+      ? "Choose a start frame"
+      : mode === "end"
+        ? "Choose a frame to land on"
+        : "Choose a keyframe still";
+  const cta =
+    mode === "start"
+      ? "Use as start frame"
+      : mode === "end"
+        ? "Use as end frame"
+        : "Use as keyframe";
 
   return (
     <div

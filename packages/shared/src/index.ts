@@ -355,6 +355,10 @@ export const videoPayloadSchema = z.object({
   engine: z.string().default("ltx2"),
   /** start frame as a dataRoot-relative library path (i2v); required by LTX */
   startFrame: z.string().optional(),
+  /** the frame the take must LAND on — MiniMax-H3's fl2va mode, the "FL" in
+   * its name. LTX reaches the same idea through a Director keyframe at the end
+   * of the timeline, and ignores this. */
+  endFrame: z.string().optional(),
   /** dialogue audio as a dataRoot-relative library path (switches to ia2v lip-sync) */
   audio: z.string().optional(),
   /** LTX 2.3 has no fixed clip length — the ceiling here is VRAM headroom on a
@@ -588,6 +592,12 @@ export const settingsSchema = z.object({
        * to external); "external" = queue on comfyUrl, whose install already
        * has the LTX weights under their conventional names */
       videoMode: z.enum(["managed", "external"]).default("external"),
+      /** MiniMax-H3 needs ComfyUI 0.30.0+ (comfy/ldm/minimax landed there),
+       * while the proven LTX-2.3 pipeline runs on an older install with the
+       * WhatDreamsCost pack. Rather than force one install to be both, H3
+       * queues on its OWN ComfyUI — a side-by-side 0.30.x on another port.
+       * Empty = the engine is off and the Video lab says so. */
+      minimaxUrl: z.string().default(""),
       /** LTX render tuning — all opt-in, all needing comfyui-kjnodes. Defaults
        * keep the render byte-identical to the verified pipeline. */
       videoTuning: z
@@ -817,6 +827,13 @@ export const assetMetaSchema = z.object({
   bpm: z.number().optional(),
   /** musical key as requested, e.g. "C Major" */
   keyscale: z.string().optional(),
+  /** engine that rendered the file, when more than one could have ("ltx2",
+   * "minimax-h3") — the take's look and its limits both follow from this */
+  engine: z.string().optional(),
+  /** the video arrived with its soundtrack already in it (MiniMax-H3 scores
+   * picture and sound in one pass). Timeline and export treat such a take as
+   * finished audio rather than a mute clip waiting for a voice track. */
+  nativeAudio: z.boolean().optional(),
 });
 export type AssetMeta = z.infer<typeof assetMetaSchema>;
 

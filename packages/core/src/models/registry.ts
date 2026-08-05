@@ -89,6 +89,53 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: false,
   }),
   withSize({
+    id: "minimax-h3-gguf",
+    name: "MiniMax-H3 (GGUF)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3)",
+    description:
+      "MiniMax's omni-modal video model — the only engine here that generates dialogue, sound " +
+      "effects and music in the SAME pass as the picture, so a shot comes out already scored " +
+      "and lip-synced. First/last-frame mode (fl2va). Ampere-safe quantization: Q3_K_M unet + " +
+      "Q2_K Qwen3-VL-32B encoder, ~30 GB, loaded in sequence so the peak fits 24 GB. Expect " +
+      "roughly 10× LTX-2.3's render time — this is the hero-shot engine, not the daily one.",
+    files: [
+      {
+        name: "diffusion_models/MiniMax-H3-FL2VA-Q3_K_M.gguf",
+        url: "https://huggingface.co/realrebelai/MiniMax-H3_GGUFs/resolve/main/MiniMax-H3-FL2VA-Q3_K_M.gguf",
+        sizeBytes: 15577923360,
+        sha256: "d809c9e38999eb65dd425a32e034726d5c5c54dacf5d10791e46c49bf8d61be8",
+      },
+      {
+        // Q2_K, not Q4: the 32B encoder and the unet both have to fit the same
+        // 24 GB card, and Ampere can't run the NVFP4 encoder Comfy-Org ships
+        name: "text_encoders/qwen3vl-32B-MiniMax-H3-Q2_K.gguf",
+        url: "https://huggingface.co/realrebelai/MiniMax-H3_GGUFs/resolve/main/qwen3vl-32B-MiniMax-H3-Q2_K.gguf",
+        sizeBytes: 8487968160,
+        sha256: "5bbc11d0b3ef197c98df2ce8f05de8fbb8eb5917cd91c33d0b59f93759b34914",
+      },
+      {
+        name: "vae/minimax_h3_video_vae_fp16.safetensors",
+        url: "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors",
+        sizeBytes: 5207808496,
+        sha256: "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+      },
+      {
+        // separate from the video VAE — the audio track decodes on its own
+        name: "vae/minimax_h3_audio_vae_fp32.safetensors",
+        url: "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors",
+        sizeBytes: 605254808,
+        sha256: "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+      },
+    ],
+    license: {
+      name: "MiniMax H3 Community License Agreement",
+      url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
     id: "z-image-turbo",
     name: "Z-Image Turbo",
     use: "image",
