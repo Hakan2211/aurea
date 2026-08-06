@@ -2,6 +2,8 @@
  * tRPC surface (PRD Part 2): when the core lands, the hooks in src/hooks.ts swap
  * their return values for live queries without touching the screens. */
 
+import type { JobPayload } from "@aurea/shared";
+
 export type AssetKind = "image" | "video" | "audio" | "music";
 
 export interface Asset {
@@ -34,6 +36,10 @@ export interface Job {
   elapsed?: string;
   /** failure reason (status === "failed") */
   error?: string;
+  /** what the job was asked to make — screens bucket their own runs by it
+   * (the Formats gallery reads the videofast shape). The core's own union, so
+   * a sample job stays assignable wherever a live one goes. */
+  payload?: JobPayload;
 }
 
 export type ChatCard =
@@ -129,6 +135,36 @@ export const jobs: Job[] = [
     project: "/animal-sitcom/s01e04",
     elapsed: "00:07:52",
     error: "Out of VRAM",
+  },
+  /* two videofast runs so the Formats gallery has something to draw its
+   * on-tile progress and "Recent runs" strip with when the core is dead */
+  {
+    id: "j6",
+    title: "Why small teams out-ship big ones",
+    kind: "video",
+    engine: "videofast",
+    status: "running",
+    progress: 62,
+    stage: "Render",
+    eta: "00:02:00",
+    priority: "batch",
+    detail: "strategy-pro · dataStory · kurzFlat · full pipeline",
+    project: "/shorts",
+    elapsed: "00:06:40",
+    payload: { type: "videofast", account: "strategy-pro", topic: "Why small teams out-ship big ones", format: "dataStory", stylePack: "kurzFlat" },
+  },
+  {
+    id: "j7",
+    title: "The compounding cost of context switching",
+    kind: "video",
+    engine: "videofast",
+    status: "completed",
+    progress: 100,
+    priority: "batch",
+    detail: "strategy-pro · dataStory · blueprintSchematic · full pipeline",
+    project: "/shorts",
+    elapsed: "00:19:04",
+    payload: { type: "videofast", account: "strategy-pro", topic: "The compounding cost of context switching", format: "dataStory", stylePack: "blueprintSchematic" },
   },
 ];
 
@@ -228,7 +264,10 @@ export interface Voice {
 export interface VoiceTake {
   id: string;
   label: string;
+  /** clip length "m:ss" — "" until the row probes the file's metadata */
   duration: string;
+  /** file size, shown as secondary metadata (never as the length) */
+  sizeLabel?: string;
   rating: number; // 0..5 stars
   waveSeed: number;
   /** the take loaded in the player */
@@ -291,7 +330,15 @@ export interface MusicTrack {
   waveSeed: number;
   swatch: string;
   arrangement: "instrumental" | "vocals";
-  starred?: boolean;
+  /** style chips the take was asked for — off the sidecar, so tracks made
+   * before the studio kept them separately from the caption have none */
+  styles?: string[];
+  /** when the file landed (ISO) — the rail prints date *and* time, because
+   * an evening of composing produces a dozen tracks with the same date */
+  createdAt?: string;
+  /** cover art drawn for the track, as a playable media URL. Absent until the
+   * chained image job lands, which is when the gradient tile stops standing in. */
+  coverUrl?: string;
   /** the track loaded in the inspector */
   selected?: boolean;
   generating?: { progress: number; stage: string };
@@ -338,7 +385,6 @@ export const musicLab = {
       waveSeed: 34,
       swatch: s("from-[#2a3a2e]", "to-[#0b110d]"),
       arrangement: "instrumental",
-      starred: true,
       selected: true,
     },
     {
@@ -361,7 +407,6 @@ export const musicLab = {
       waveSeed: 58,
       swatch: s("from-[#54422a]", "to-[#171008]"),
       arrangement: "instrumental",
-      starred: true,
     },
     {
       id: "mt4",
@@ -696,6 +741,9 @@ export interface VideoTake {
   url?: string;
   /** dataRoot-relative path — the handle for star/download/delete/timeline */
   relPath?: string;
+  /** engine that rendered it, off the asset's sidecar — the preview slate
+   * names it, and only when the file actually recorded one */
+  engine?: string;
 }
 
 export interface VideoStage {

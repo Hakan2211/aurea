@@ -46,6 +46,24 @@ export const CATEGORIES: { id: FormatCategory | "all"; label: string }[] = [
   { id: "strategist", label: "Strategist" },
 ];
 
+/** What the create panel asks the person for. Every format writes the same
+ * two CSV cells (topic + an optional third), but *what to put in them* differs
+ * per format — the quote format wants a quote and its attribution, the data
+ * story wants a claim. Naming the field is the whole point: a silently swapped
+ * input reads as a glitch, a labelled one reads as intent. */
+export interface FormatAsk {
+  /** label over the main field — becomes the run's topic either way */
+  label: string;
+  placeholder: string;
+  /** optional second field — becomes the run's titleHint (third CSV cell) */
+  extra?: { label: string; placeholder: string };
+}
+
+const ASK_TOPIC: FormatAsk = {
+  label: "Topic",
+  placeholder: "What should this video be about? Leave empty and the Director will pitch ideas.",
+};
+
 export interface FormatCard {
   id: string;
   name: string;
@@ -63,6 +81,8 @@ export interface FormatCard {
   packs: readonly string[];
   /** poster headline (real exit-video titles where we have them) */
   poster: string;
+  /** the labelled input block — defaults to a plain Topic field */
+  asks?: FormatAsk;
   featured?: boolean;
 }
 
@@ -82,6 +102,10 @@ export const FORMATS: FormatCard[] = [
     paradigms: ["jsx2d", "svgChoreo", "d3Data", "p5Canvas", "r3f3d", "parallax25d", "manimClip"],
     packs: ["noirLuxury", "kurzFlat", "neuronGlow", "chalkboardManim", "therapyMinimal", "gradientMeshSoft"],
     poster: "One brief. Seven paradigms.",
+    asks: {
+      label: "Theme for the batch",
+      placeholder: "A territory the brief can range over — e.g. how small teams out-ship big ones",
+    },
     featured: true,
   },
   {
@@ -95,6 +119,10 @@ export const FORMATS: FormatCard[] = [
     stages: STANDARD,
     packs: ["noirLuxury", "emberNoir"],
     poster: "DISCIPLINE TODAY. FREEDOM TOMORROW.",
+    asks: {
+      label: "Topic",
+      placeholder: "The idea to hit hard — e.g. why discipline outlives motivation",
+    },
   },
   {
     id: "quote",
@@ -107,6 +135,11 @@ export const FORMATS: FormatCard[] = [
     stages: STANDARD,
     packs: ["noirLuxury", "editorialMagazine"],
     poster: "“We suffer more in imagination than in reality.”",
+    asks: {
+      label: "The quote",
+      placeholder: "“We suffer more in imagination than in reality.”",
+      extra: { label: "Attribution", placeholder: "Seneca" },
+    },
   },
   {
     id: "imageMotion",
@@ -119,6 +152,10 @@ export const FORMATS: FormatCard[] = [
     stages: WITH_ASSETS,
     packs: ["noirLuxury", "emberNoir", "gradientMeshSoft"],
     poster: "Beyond the Horizon",
+    asks: {
+      label: "Topic",
+      placeholder: "A scene-led idea — the writer turns each beat into an image prompt",
+    },
   },
   {
     id: "metaphor",
@@ -132,6 +169,10 @@ export const FORMATS: FormatCard[] = [
     paradigms: ["jsx2d", "svgChoreo"],
     packs: ["therapyMinimal", "kurzFlat"],
     poster: "The Boulder You Keep Pushing",
+    asks: {
+      label: "The idea to make felt",
+      placeholder: "An abstract experience to dramatise — e.g. carrying an old resentment",
+    },
   },
   {
     id: "dataStory",
@@ -145,6 +186,10 @@ export const FORMATS: FormatCard[] = [
     paradigms: ["d3Data", "jsx2d"],
     packs: ["kurzFlat", "blueprintSchematic", "chalkboardManim"],
     poster: "The Numbers Don't Lie.",
+    asks: {
+      label: "The claim",
+      placeholder: "One quantitative claim, with the numbers if you have them",
+    },
   },
   {
     id: "mathExplainer",
@@ -158,6 +203,10 @@ export const FORMATS: FormatCard[] = [
     paradigms: ["manimClip", "d3Data", "jsx2d"],
     packs: ["chalkboardManim", "blueprintSchematic"],
     poster: "E = mc²",
+    asks: {
+      label: "The maths",
+      placeholder: "A result or proof worth animating — e.g. why 0.999… equals 1",
+    },
   },
   {
     id: "generative",
@@ -171,6 +220,10 @@ export const FORMATS: FormatCard[] = [
     paradigms: ["p5Canvas", "jsx2d"],
     packs: ["neuronGlow", "gradientMeshSoft"],
     poster: "Neurons in Action",
+    asks: {
+      label: "The mood",
+      placeholder: "A texture of thought — e.g. how attention narrows under pressure",
+    },
   },
   {
     id: "cinematic",
@@ -184,6 +237,10 @@ export const FORMATS: FormatCard[] = [
     paradigms: ["r3f3d", "parallax25d", "jsx2d"],
     packs: ["neuronGlow", "noirLuxury", "gradientMeshSoft"],
     poster: "The Door You Never Tried",
+    asks: {
+      label: "The subject",
+      placeholder: "One image-led idea — e.g. the door you never tried",
+    },
   },
   {
     id: "whiteboard",
@@ -196,6 +253,10 @@ export const FORMATS: FormatCard[] = [
     stages: STANDARD,
     packs: ["sketchbook", "therapyMinimal", "paperCollage"],
     poster: "The Vicious Cycle",
+    asks: {
+      label: "The explanation",
+      placeholder: "A process to draw step by step — e.g. how a habit loop closes",
+    },
   },
 ];
 
@@ -232,6 +293,9 @@ export const NARRATIVE_ARCS = [
   "data-story",
 ] as const;
 export type NarrativeArc = (typeof NARRATIVE_ARCS)[number];
+
+/** the input block for a format — every format has one, most are just a topic */
+export const asksFor = (format: FormatCard): FormatAsk => format.asks ?? ASK_TOPIC;
 
 export const STAGE_LABELS: Record<string, string> = {
   generate: "Generate",
