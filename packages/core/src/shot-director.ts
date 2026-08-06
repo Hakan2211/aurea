@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  cameraMoveToLora,
   composeShotSpec,
   type ComposedShot,
   type ShotCompose,
@@ -89,13 +90,26 @@ export async function composeShotFromBoard(
    * a shot that asks for a sheet the ComfyUI can't render, so composing one
    * would hand back a spec that fails at queue time. An explicit `refs` wins —
    * a caller who says no wants the start frame to carry the shot. */
+  const caps = await deps.labs.videoCapabilities().catch(() => null);
   let refs = input.refs;
   if (refs === undefined) {
-    const caps = await deps.labs.videoCapabilities().catch(() => null);
     refs = caps?.multiRef ?? false;
     if (caps && !caps.multiRef && caps.reachable && shot.characters.length > 1) {
       notes.push(caps.note ?? "This ComfyUI can't render cast references.");
     }
+  }
+
+  /* The bank's camera move doubles as a camera-control LoRA when this install
+   * actually has the weight (none ship for the 22b model yet). The prose
+   * clause stays in the prompt either way — the LoRA steers, the prompt
+   * describes. */
+  const loraMove = cameraMoveToLora(shot.camera.move);
+  const cameraLora =
+    loraMove && caps?.cameraLoras?.[loraMove] ? { move: loraMove, strength: 1 } : undefined;
+  if (cameraLora) {
+    notes.push(
+      `Camera move "${shot.camera.move}" also rides the ${loraMove} camera-control LoRA on this install.`,
+    );
   }
 
   const composed = composeShotSpec(shot, scene, bible, {
@@ -117,6 +131,11 @@ export async function composeShotFromBoard(
       startFrame: composed.startFrame ?? undefined,
       durationSec: composed.durationSec,
       resolution: "896 × 704 (landscape)",
+      fps: 24 as const,
+      fast: false,
+      keyframes: [],
+      loras: [],
+      cameraLora,
       director: composed.director,
       board: { shotId: shot.id },
     },

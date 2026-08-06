@@ -39,6 +39,9 @@ import {
   productionUpdateSceneSchema,
   productionUpdateSchema,
   productionUpdateShotSchema,
+  promptDeckSaveSchema,
+  promptEnhanceSchema,
+  promptPresetSaveSchema,
   composeKeyframePrompt,
   resolveKeyframeRefs,
   shotComposeSchema,
@@ -65,7 +68,7 @@ import {
 import { describeExport, sequenceEnd } from "./adapters/ffmpeg-export.js";
 import { composeShotFromBoard } from "./shot-director.js";
 import { labEnqueue } from "./labs.js";
-import { removeAssets, scanLibrary } from "./library.js";
+import { removeAssets, scanLibrary, transcodeAsset } from "./library.js";
 import { listVideofastAccounts } from "./videofast.js";
 import { procedure, router, type Context } from "./trpc.js";
 
@@ -163,6 +166,17 @@ export const appRouter = router({
     remove: procedure.input(libraryRemoveSchema).mutation(({ ctx, input }) => ({
       removed: removeAssets(ctx.settings.get().storage.dataRoot, input.relPaths),
     })),
+
+    /** hand a file back in another format — a track as .mp3 to send someone.
+     * Lands in <dataRoot>/exports/, which the scanner doesn't walk, so a copy
+     * of a track never shows up as a second track. */
+    transcode: procedure
+      .input(z.object({ relPath: z.string().min(1), format: z.enum(["mp3"]) }))
+      .mutation(({ ctx, input }) =>
+        transcodeAsset(ctx.settings.get().storage.dataRoot, input.relPath, input.format).then(
+          (relPath) => ({ relPath }),
+        ),
+      ),
   }),
 
   labs: router({
@@ -273,6 +287,24 @@ export const appRouter = router({
         const { project, ...payload } = input;
         return generate(ctx, { type: "music", ...payload }, project);
       }),
+      /** Draw this track's cover again. Covers are generated unasked when a
+       * song finishes, so there has to be a way to say "not that one" —
+       * and a way to get one at all for the tracks that predate them. */
+      cover: procedure
+        .input(z.object({ relPath: z.string().min(1), project: z.string().min(1) }))
+        .mutation(({ ctx, input }) => {
+          requireProject(ctx, input.project);
+          const meta = ctx.projects.assetMeta(input.relPath);
+          const job = ctx.labs.coverArtJob(input.relPath, input.project, {
+            // a track with no sidecar still has a filename to draw from
+            title: meta?.title ?? input.relPath.split("/").pop()?.replace(/\.[^.]+$/, ""),
+            prompt: meta?.prompt,
+            styles: meta?.styles,
+          });
+          if (!job) throw new Error("No local image engine installed — Settings → Engines");
+          // a re-roll is something you're waiting on, unlike the automatic one
+          return ctx.engine.enqueue({ ...job, priority: "interactive" });
+        }),
     }),
     video: router({
       catalog: procedure.query(({ ctx }) => ctx.labs.videoCatalog()),
@@ -281,6 +313,77 @@ export const appRouter = router({
         const { project, ...payload } = input;
         return generate(ctx, { type: "video", ...payload }, project);
       }),
+    }),
+  }),
+
+  /* ---------- prompt library ---------- */
+  prompts: router({
+    /** presets visible to a project (global + its own), sorted by category */
+    list: procedure
+      .input(z.object({ project: z.string().optional() }).default({}))
+      .query(({ ctx, input }) => ctx.prompts.presets(input.project)),
+
+    save: procedure.input(promptPresetSaveSchema).mutation(({ ctx, input }) => {
+      try {
+        return ctx.prompts.savePreset(input);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
+    }),
+
+    remove: procedure
+      .input(z.object({ id: z.string().min(1) }))
+      .mutation(({ ctx, input }) => ctx.prompts.removePreset(input.id)),
+
+    /** shipped packs + the live "from the bible" pack for the project */
+    packs: procedure
+      .input(z.object({ project: z.string().optional() }).default({}))
+      .query(({ ctx, input }) =>
+        ctx.prompts.packs(
+          input.project,
+          input.project ? ctx.studio.getBible(input.project) : null,
+        ),
+      ),
+
+    deckList: procedure.query(({ ctx }) => ctx.prompts.decks()),
+
+    deckSave: procedure.input(promptDeckSaveSchema).mutation(({ ctx, input }) => {
+      try {
+        return ctx.prompts.saveDeck(input);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: String((err as Error).message) });
+      }
+    }),
+
+    deckRemove: procedure
+      .input(z.object({ id: z.string().min(1) }))
+      .mutation(({ ctx, input }) => ctx.prompts.removeDeck(input.id)),
+
+    /** one-shot agent expansion of a prompt, steered by the project's art
+     * direction — runs on the same local Claude login the Director uses */
+    enhance: procedure.input(promptEnhanceSchema).mutation(async ({ ctx, input }) => {
+      const bible = input.projectId ? ctx.studio.getBible(input.projectId) : null;
+      const art = bible?.style.artDirection.trim();
+      const negative = bible?.style.negativePrompt.trim();
+      const system =
+        `You expand terse ${input.intent} prompts into rich, specific, render-ready prompts ` +
+        "for diffusion models. Keep the user's subject and intent exactly; add concrete " +
+        "visual language — lighting, lens, materials, composition, palette. One paragraph, " +
+        "no lists, no preamble, no quotes. Return ONLY the improved prompt." +
+        (art ? `\n\nThis project's locked art direction (respect it):\n${art}` : "") +
+        (negative ? `\n\nNever include: ${negative}` : "") +
+        (input.intent === "video"
+          ? "\n\nThis prompt drives a video model: describe ONE continuous shot — staging, " +
+            "motion and camera move — not a series of cuts."
+          : "");
+      try {
+        return { enhanced: await ctx.director.oneShot(input.prompt, system) };
+      } catch (err) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: String((err as Error).message),
+        });
+      }
     }),
   }),
 

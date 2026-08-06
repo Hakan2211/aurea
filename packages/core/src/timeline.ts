@@ -79,6 +79,15 @@ export class TimelineStore {
   update(project: string, timeline: Timeline): Timeline {
     const file = this.file(project);
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // Keep the document this one replaces. The editor saves whole documents on
+    // a debounce, so one bad save (a stale doc, a client editing the wrong
+    // project) silently costs an entire cut with nothing to restore from —
+    // timeline.json.bak is the last version that was on disk.
+    try {
+      if (fs.existsSync(file)) fs.copyFileSync(file, `${file}.bak`);
+    } catch {
+      // a missing backup must never block the save itself
+    }
     const tmp = `${file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(timeline, null, 2));
     fs.renameSync(tmp, file);

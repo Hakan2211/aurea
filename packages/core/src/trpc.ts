@@ -9,6 +9,7 @@ import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
 import type { TimelineStore } from "./timeline.js";
 import type { StudioStore } from "./studio.js";
+import type { PromptLibrary } from "./promptlib.js";
 
 export interface Context {
   /** did the request present the boot token (HTTP bearer / WS connectionParams)? */
@@ -23,6 +24,7 @@ export interface Context {
   runtime: EngineRuntime;
   timelines: TimelineStore;
   studio: StudioStore;
+  prompts: PromptLibrary;
 }
 
 const t = initTRPC.context<Context>().create();

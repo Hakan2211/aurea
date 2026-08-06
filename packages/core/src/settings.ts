@@ -93,8 +93,12 @@ export class SettingsStore extends EventEmitter {
       engines: {
         ...this.settings.engines,
         ...patch.engines,
-        // nested object — merge so a one-knob patch keeps the other knobs
+        // nested objects — merge so a one-knob patch keeps the other knobs
         videoTuning: { ...this.settings.engines.videoTuning, ...patch.engines?.videoTuning },
+        minimaxTuning: {
+          ...this.settings.engines.minimaxTuning,
+          ...patch.engines?.minimaxTuning,
+        },
       },
       providers: { ...this.settings.providers, ...patch.providers },
       general: { ...this.settings.general, ...patch.general },

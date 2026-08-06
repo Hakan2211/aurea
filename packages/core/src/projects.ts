@@ -48,6 +48,21 @@ const slugify = (name: string) =>
 const fmtDay = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+/** A music brief reduced to a track name: the first sentence, and never cut
+ * mid-word. "A punchy sitcom sting — retro funk brass over tight drums,
+ * walking bassline…" becomes "A punchy sitcom sting". */
+function trackTitle(description: string, max = 52): string {
+  const clean = description.replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  // stop at the first sentence or clause break that leaves something to read
+  const brk = clean.search(/[.;—]|,\s/);
+  const head = (brk > 12 ? clean.slice(0, brk) : clean).trim();
+  if (head.length <= max) return head;
+  const cut = head.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${space > 20 ? cut.slice(0, space) : cut}…`;
+}
+
 /** provenance recorded next to an imported output — what the scanner can't
  * recover from the file alone (job history is capped, so it can't be asked) */
 function assetMetaFor(job: Job): AssetMeta | null {
@@ -56,10 +71,22 @@ function assetMetaFor(job: Job): AssetMeta | null {
   switch (p.type) {
     case "imageUpscale":
       return { origin: p.type, source: p.source };
+    case "image":
+      // a cover is a byproduct of a music run, not a still you set out to
+      // make — the Image lab's roll filters on this origin so album tiles
+      // don't turn up among your work. It stays a normal file in Assets.
+      return p.cover ? { origin: "musicCover", source: p.cover } : null;
     case "music":
       return {
         origin: p.type,
         arrangement: p.arrangement,
+        // the filename is this description slugified; keep the readable one,
+        // because a slug is not a title and every list was printing the slug.
+        // Cut on its own rather than reusing job.title: that one is clipped to
+        // fit a queue row, mid-word ("…cheerful sitc…"), and this string is
+        // the name of the track everywhere from here on.
+        title: trackTitle(p.description) || job.title || undefined,
+        ...(p.styles.length ? { styles: p.styles } : {}),
         // words you wrote yourself are known without asking the engine; the
         // adapter fills these in when the model wrote them instead
         ...(p.arrangement === "vocals" && p.lyrics?.trim() ? { lyrics: p.lyrics.trim() } : {}),
@@ -68,6 +95,9 @@ function assetMetaFor(job: Job): AssetMeta | null {
       };
     case "voiceConvert":
       return { origin: p.type, source: p.source, ...(p.mode === "sing" ? { arrangement: "vocals" as const } : {}) };
+    case "tts":
+      // the spoken line, kept with the file — the timeline prints it on the clip
+      return { origin: p.type, text: p.text, voice: p.voice };
     default:
       return null;
   }
@@ -243,15 +273,23 @@ export class ProjectStore {
     // request left a field open (the lyrics ACE-Step wrote for you)
     const meta = fromJob || adapterMeta ? { ...fromJob, ...adapterMeta } : null;
     if (!meta) return;
-    // a re-voiced song is the same song — carry the words (and tempo, and key)
-    // across the conversion rather than handing back a track with no lyrics
-    if (meta.source) {
+    // A re-voiced song is the same song — carry the words (and tempo, and key)
+    // across the conversion rather than handing back a track with no lyrics.
+    // Only that case: `source` also means "the still this was enlarged from"
+    // and "the track this picture is art for", and cover art that inherits a
+    // song's lyrics is a PNG claiming to have a second verse.
+    if (meta.source && meta.origin === "voiceConvert") {
       const inherited = this.readMeta(meta.source);
       if (inherited) {
         meta.lyrics ??= inherited.lyrics;
         meta.prompt ??= inherited.prompt;
         meta.bpm ??= inherited.bpm;
         meta.keyscale ??= inherited.keyscale;
+        // …and its name, its styles and the cover art already drawn for it —
+        // "Convert to Hakan" is a worse title for the song than the song's own
+        meta.title ??= inherited.title;
+        meta.styles ??= inherited.styles;
+        meta.cover ??= inherited.cover;
       }
     }
     try {
@@ -262,6 +300,27 @@ export class ProjectStore {
     } catch {
       // provenance is best-effort — the asset itself already landed
     }
+  }
+
+  /** Merge fields into an already-written sidecar, addressed the way the rest
+   * of the studio addresses files (dataRoot-relative). Provenance is normally
+   * written once, at import; cover art is the exception — the picture is a
+   * separate job that lands minutes after the track it belongs to. */
+  patchMeta(relPath: string, patch: Partial<AssetMeta>): void {
+    const file = path.join(this.settings.get().storage.dataRoot, relPath);
+    if (!fs.existsSync(file)) return;
+    const sidecar = path.join(path.dirname(file), `.${path.basename(file)}.meta.json`);
+    try {
+      fs.writeFileSync(sidecar, JSON.stringify({ ...this.readMeta(relPath), ...patch }));
+    } catch {
+      // best-effort, as everywhere else provenance is written
+    }
+  }
+
+  /** a file's provenance, by dataRoot-relative path — what the chained jobs
+   * ask when they need the brief behind a file they didn't create */
+  assetMeta(relPath: string): AssetMeta | undefined {
+    return this.readMeta(relPath);
   }
 
   /** read back a sidecar by dataRoot-relative path (the shape meta.source uses) */

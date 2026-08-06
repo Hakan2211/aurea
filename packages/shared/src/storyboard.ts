@@ -92,6 +92,39 @@ function resolveLighting(cine: BibleCinematography, value: string): string | und
   return undefined;
 }
 
+/** Bank move ids that have a camera-control LoRA counterpart. Only the moves
+ * with an unambiguous physical translation map — "tracking" has no direction
+ * and "orbit" has no LoRA, so they stay prompt-only. The prose clause always
+ * stays in the prompt regardless: the LoRA steers, the prompt describes, and
+ * on installs without camera weights (all of them, until Lightricks ships a
+ * 22b set) the prompt is the whole mechanism. */
+export function cameraMoveToLora(
+  moveId: string,
+):
+  | "dolly-in"
+  | "dolly-out"
+  | "dolly-left"
+  | "dolly-right"
+  | "jib-up"
+  | "jib-down"
+  | "static"
+  | null {
+  switch (moveId) {
+    case "push-in":
+      return "dolly-in";
+    case "pull-back":
+      return "dolly-out";
+    case "crane-up":
+      return "jib-up";
+    case "crane-down":
+      return "jib-down";
+    case "static":
+      return "static";
+    default:
+      return null;
+  }
+}
+
 /** Expand a camera spec's bank references to full clauses (free text passes
  * through). `move` resolves too — S-P2 video prompts consume it; the keyframe
  * still never does (the still owns framing/light, motion is the video's job). */

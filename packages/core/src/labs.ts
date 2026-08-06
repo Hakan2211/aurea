@@ -9,6 +9,7 @@ import path from "node:path";
 import {
   FAL_SIZE_RULES,
   falImageEstimate,
+  hasMinimaxRefs,
   MAX_SHEET_REFS,
   OPEN_AIR_WARN_SEC,
   type EnqueueJobResolved,
@@ -18,7 +19,13 @@ import type { SettingsStore } from "./settings.js";
 import type { ModelManager } from "./models/manager.js";
 import type { EngineRuntime } from "./runtime/runtime.js";
 import type { ComfyService } from "./comfy/service.js";
-import { probeVideoCapabilities, type VideoCapabilities } from "./comfy/capabilities.js";
+import {
+  probeMinimaxCapabilities,
+  probeVideoCapabilities,
+  type MinimaxCapabilities,
+  type VideoCapabilities,
+} from "./comfy/capabilities.js";
+import { PromptLibrary } from "./promptlib.js";
 import { seedanceEstimate } from "./adapters/seedance.js";
 import { GPT_IMAGE_2_MAX_REFS } from "./adapters/fal-image.js";
 import { RVC_CONVERT_ESTIMATE, RVC_TRAIN_ESTIMATE, rvcModelPath } from "./adapters/replicate-rvc.js";
@@ -58,16 +65,119 @@ const voiceName = (id: string) => id.split(/[-_]+/).filter(Boolean).map(cap).joi
 const VOICE_ID = /^[a-z0-9][a-z0-9-]*$/;
 const VOICE_MAX_BYTES = 64 * 1024 * 1024;
 
+/* Video canvas presets. Every LTX side MUST divide by 64 (see the measured
+ * 608→576 incident in videoCatalog's comment) and every H3 side by 32. The HD
+ * tier uses 1088 because 1080 is not on the 64 grid (1080/64 = 16.875) — it
+ * doubles as H3's 2K canvas (÷32 too). Exported so a unit test can hold the
+ * grid rule against every entry forever. */
+export const VIDEO_RESOLUTIONS = [
+  "704 × 896 (portrait)",
+  "576 × 1024 (9:16 vertical)",
+  "896 × 704 (landscape)",
+  "1280 × 704 (16:9)",
+  "1344 × 768 (16:9 · H3 native)",
+  "768 × 1344 (9:16 · H3 native)",
+  "1920 × 1088 (16:9 · HD)",
+  "1088 × 1920 (9:16 · HD vertical)",
+];
+
+/** Engines don't share a canvas: Seedance's API takes named tiers (its
+ * adapter matches on "1080"), and the HD tier is a real VRAM commitment on
+ * LTX past short durations. The flat list above stays for old callers. */
+export const VIDEO_RESOLUTIONS_BY_ENGINE: Record<string, string[]> = {
+  ltx2: [
+    "704 × 896 (portrait)",
+    "576 × 1024 (9:16 vertical)",
+    "896 × 704 (landscape)",
+    "1280 × 704 (16:9)",
+    "1344 × 768 (16:9)",
+    "768 × 1344 (9:16)",
+    "1920 × 1088 (16:9 · HD)",
+    "1088 × 1920 (9:16 · HD vertical)",
+  ],
+  "minimax-h3": [
+    "1344 × 768 (16:9 · native)",
+    "768 × 1344 (9:16 · native)",
+    "1024 × 1024 (1:1)",
+    "1920 × 1088 (16:9 · 2K)",
+    "1088 × 1920 (9:16 · 2K)",
+  ],
+  // Seedance 2.0's four billing tiers. 4k is a real option here but a costly
+  // one — the adapter's estimate prices each tier from fal's token formula, so
+  // the jump is visible on the button before it is spent.
+  seedance: [
+    "854 × 480 (480p)",
+    "1280 × 720 (720p)",
+    "1920 × 1080 (1080p)",
+    "3840 × 2160 (4K)",
+  ],
+};
+
 export class Labs {
+  /** stateless over files, so Labs may own its own instance even though the
+   * router carries another — they read the same promptlib/ folder */
+  private promptlib: PromptLibrary;
+
   constructor(
     private settings: SettingsStore,
     private models: ModelManager,
     private runtime: EngineRuntime,
     private comfy: ComfyService,
-  ) {}
+  ) {
+    this.promptlib = new PromptLibrary(settings);
+  }
 
   private vf(): string | null {
     return this.settings.get().paths.videofastDir;
+  }
+
+  /** The cover-art run chained onto a finished song. Returns null when this
+   * machine can't draw one right now — a cover is a nicety, and a failed job
+   * card in the rail is a worse outcome than a track that keeps its gradient
+   * tile. Enqueued at `batch` priority: it must never make you wait behind
+   * your own picture for the next thing you actually asked for. */
+  coverArtJob(
+    trackRelPath: string,
+    project: string,
+    brief: { title?: string; prompt?: string; styles?: string[] },
+  ): EnqueueJobResolved | null {
+    // whichever local generator is installed; the fast one first, since this
+    // is a 240px thumbnail and nobody is pixel-peeping an album tile
+    const model = this.imageCatalog()
+      .models.filter((m) => m.role === "generate" && m.available)
+      .map((m) => m.id)
+      .find((id) => id === "z-image" || id === "krea2");
+    if (!model) return null;
+    const subject = brief.prompt?.trim() || brief.title?.trim();
+    if (!subject) return null;
+    const styles = (brief.styles ?? []).map((s) => s.toLowerCase()).join(", ");
+    return {
+      ...labEnqueue(
+        {
+          type: "image",
+          // no lettering: an image model writing a band name produces the
+          // misspelled-poster look, and the track already has a real title
+          prompt: [
+            `Album cover art. ${subject}.`,
+            styles && `Genre: ${styles}.`,
+            "Square album sleeve, evocative and atmospheric, rich colour, cinematic lighting,",
+            "no text, no lettering, no typography, no words, no watermark.",
+          ]
+            .filter(Boolean)
+            .join(" "),
+          model,
+          aspect: "1:1",
+          count: 1,
+          refs: [],
+          cover: trackRelPath,
+        },
+        project,
+      ),
+      // a track with no sidecar hands us its filename, which is a slug —
+      // the queue row shouldn't be the one place that shows it raw
+      title: `Cover — ${brief.title?.replace(/[-_]+/g, " ") ?? "track"}`,
+      priority: "batch",
+    };
   }
 
   imageCatalog() {
@@ -127,7 +237,16 @@ export class Labs {
         },
       ] satisfies (LabEngine & { role?: "generate" | "edit" | "both" })[],
       aspects: ["1:1", "3:2", "16:9", "4:3", "9:16"],
-      presets: ["Cinematic", "Photographic", "Concept Art", "Minimal", "Moody", "Vintage", "Fantasy"],
+      /** style-preset TITLES — now read from the prompt library (which seeds
+       * the legacy seven), so a user-saved style shows up here too. The
+       * adapters keep folding the picked title as ", <title> style". */
+      presets: this.promptlib
+        .presets()
+        .filter((p) => p.category === "style")
+        .map((p) => p.title),
+      /** the full library (categories, packs, decks, enhance) lives under the
+       * `prompts` router — this flag tells the UI to offer it */
+      promptLibrary: true,
       promptMax: 1000,
       /** outer bound across every model — the UI enforces refsMaxByModel */
       refsMax: GPT_IMAGE_2_MAX_REFS,
@@ -482,11 +601,13 @@ export class Labs {
           note: "Speaks and scores itself",
           // its own ComfyUI (0.30.0+) and its own weights — neither is implied
           // by the LTX pipeline being set up
-          available: !!engines.minimaxUrl.trim() && this.models.ready("minimax-h3-gguf"),
+          // an empty minimaxUrl no longer means "unconfigured" — it means H3
+          // shares the LTX ComfyUI, which is the normal setup on core 0.30+
+          available: !!this.comfy.minimaxUrl() && this.models.ready("minimax-h3-gguf"),
         },
         {
           id: "seedance",
-          label: "Seedance 1.0",
+          label: "Seedance 2.0",
           sub: "cloud · paid",
           note: "Quality fallback via fal.ai",
           available: !!providers.falApiKey,
@@ -494,14 +615,21 @@ export class Labs {
       ],
       engineNotes: {
         ltx2: "Renders on your GPU — $0.00",
-        "minimax-h3": !engines.minimaxUrl.trim()
-          ? "Needs a second ComfyUI on 0.30.0+ — set its URL in Settings → Engines"
+        "minimax-h3": !this.comfy.minimaxUrl()
+          ? "Needs a ComfyUI on 0.30.0+ — the same one LTX uses will do (its core carries the " +
+            "MiniMaxH3 nodes). Start it, or give H3 its own URL in Settings → Engines"
           : !this.models.ready("minimax-h3-gguf")
             ? "Weights not installed — Settings → Models → MiniMax-H3 (GGUF)"
             : "Renders picture AND its dialogue/SFX/music in one pass — $0.00, but " +
-              "roughly 10× LTX's render time. 4–15s, no voice takes, no Director timeline.",
+              "roughly 10× LTX's render time. 4–15s, no voice takes, no Director timeline." +
+              (this.models.ready("minimax-h3-ref-gguf")
+                ? " References are on: stills, clips and sound it carries forward."
+                : " Add MiniMax-H3 Reference (GGUF) in Settings → Models to reference stills, " +
+                  "clips and voices — and to edit a clip."),
         seedance: providers.falApiKey
-          ? "Cloud render on your fal.ai account — ≈ $0.05/s at 720p, $0.15/s at 1080p"
+          ? "Cloud render on your fal.ai account — 4–15s, optional start/end frame, or no " +
+            "start frame at all. Priced by pixel volume: ≈ $0.13/s at 480p, $0.30/s at 720p, " +
+            "$0.68/s at 1080p, $1.56/s at 4K — the button carries the exact estimate."
           : "Add your fal.ai API key in Settings → AI Providers to enable",
       } as Record<string, string>,
       // LTX 2.3 is length-agnostic — the graph derives frames as duration*24+1,
@@ -538,14 +666,36 @@ export class Labs {
       // also both multiples of 64, so they stay legal for LTX; the reverse
       // isn't a problem either, since H3 only needs multiples of 32 and every
       // preset above already is one.
-      resolutions: [
-        "704 × 896 (portrait)",
-        "576 × 1024 (9:16 vertical)",
-        "896 × 704 (landscape)",
-        "1280 × 704 (16:9)",
-        "1344 × 768 (16:9 · H3 native)",
-        "768 × 1344 (9:16 · H3 native)",
-      ],
+      resolutions: VIDEO_RESOLUTIONS,
+      resolutionsByEngine: VIDEO_RESOLUTIONS_BY_ENGINE,
+      /** the LTX-only control surface, stated so the UI and the Director draw
+       * from one place; whether THIS install can do each of them is the live
+       * question labs.video.capabilities answers */
+      ltx: {
+        /** 48 doubles frames for the same seconds — smoother, ~2× render time */
+        fpsOptions: [24, 48],
+        /** draft skips the ×2 upscale + refine stage: half-size picture in
+         * well under half the time, for blocking a shot rather than keeping it */
+        draft: true,
+        /** simple-path guide frames: an end frame the take lands on, plus up
+         * to 8 mid-shot anchors (the Director timeline has its own lane) */
+        keyframesMax: 8,
+        /** stackable adapter LoRAs per render */
+        lorasMax: 3,
+        /** camera-control moves the payload can name. Weights for the 22b
+         * model have not shipped — capabilities.cameraLoras says which (if
+         * any) are installed; until then the cinematography bank's prose
+         * carries the move. */
+        cameraMoves: [
+          "dolly-in",
+          "dolly-out",
+          "dolly-left",
+          "dolly-right",
+          "jib-up",
+          "jib-down",
+          "static",
+        ],
+      },
       promptMax: 1000,
       tip: "The start frame anchors identity — generate it in the Image lab first, then describe the motion here.",
       /** The Shot Director surface, stated rather than discovered: what a spec
@@ -584,6 +734,9 @@ export class Labs {
           fps: 24,
           /** the canvas H3 was trained on; sides must be multiples of 32 */
           shortEdge: 768,
+          /** the 2K ceiling — ~2.1 MP frames render, at roughly 2.4× the
+           * native tier's time and VRAM; the training canvas is still 768 */
+          maxMegapixels: 2.1,
         },
         rules: [
           "Do NOT attach a voice take — H3 performs the dialogue itself. A take passed here is rejected, not mixed in.",
@@ -592,17 +745,64 @@ export class Labs {
           "Length snaps up to the model's 17k+5 frame grid at 24fps (5s = 124 frames); the request is never rounded short.",
           "Both a first and a last frame are optional: none = text-to-video, first only = animate forward, both = the take must land on the last one.",
           "Roughly 10x LTX-2.3's render time for the same length on the same card — budget it as a hero shot, not a draft.",
+          "The 2K presets render ~2.4× the pixels of the native 768-edge canvas — sharper stills-like frames, but the model was trained at 768, so treat 2K as a finishing choice and expect the wait to scale with the pixels.",
+          "SageAttention (Settings → Engines → MiniMax-H3 tuning) roughly halves the render time when the `sageattention` package is installed in that ComfyUI's python; the toggle is dropped silently when the node is missing.",
         ],
+        /** H3's OTHER head. Same model, different checkpoint and node: instead
+         * of a first frame it takes things to carry forward — stills, clips,
+         * sound — and that is also the only way to edit an existing clip on
+         * this engine. Gated on its own 15.6 GB download. */
+        reference: {
+          available: this.models.ready("minimax-h3-ref-gguf"),
+          limits: {
+            images: 9,
+            videos: 3,
+            /** standalone sound clips, on top of any clip soundtracks */
+            audios: 3,
+            /** per reference clip; longer than the take itself is thrown away */
+            videoLengthSecMax: 15,
+          },
+          rules: [
+            "Pass references as payload.minimaxRefs — { images: [relPath], videos: [{ video, startSec, lengthSec, useItsAudio }], audios: [relPath], imageSize }.",
+            "The prompt MUST name them: references are presented as <Picture 1>…, <Video 1>…, <Audio 1>… and an unnamed reference conditions the shot without ever being given a role.",
+            "Ordinals are 1-based per type, and a clip's own soundtrack takes an <Audio> number of its OWN, before any standalone sound — one clip-with-audio plus one voice clip means the voice is <Audio 2>.",
+            "There are no keyframes in this mode. A still that must open the shot goes in as a reference image, not as startFrame — passing one is an error.",
+            "To EDIT a clip, reference the clip and describe the change ('keep <Video 1>'s staging and camera, restyle it as…'). The take is regenerated, not composited, so expect a new performance of the same idea.",
+            "Reference frames are re-encoded to 24fps and ride through every sampling step — keep clips to a few seconds; 15s of reference costs like a second render.",
+            "A reference clip raises peak VRAM by a few GB over the same shot with stills (measured: 2.9 GB for 3 seconds), which is why the render starts by clearing the ComfyUI's memory. Expect the weights to reload.",
+            "imageSize 'match' scales stills to the render's pixel area; 'max' uses a 2048px short edge for stronger identity and is several times slower.",
+          ],
+        },
       },
     };
   }
 
   /** Which LTX features the video engine can reach right now (Director
-   * timeline, attention patches, multi-subject refs). Probed live against the
-   * ComfyUI that videoMode points at — never boots one to find out. */
-  videoCapabilities(): Promise<VideoCapabilities> {
-    const mode = this.settings.get().engines.videoMode;
-    return probeVideoCapabilities(this.comfy.idleUrl(mode), mode);
+   * timeline, attention patches, multi-subject refs, end-frame guides,
+   * adapter LoRAs). Probed live against the ComfyUI that videoMode points at —
+   * never boots one to find out. The MiniMax instance is probed separately;
+   * it is a different install and shares nothing with the LTX one. */
+  async videoCapabilities(): Promise<VideoCapabilities & { minimax: MinimaxCapabilities }> {
+    const { engines } = this.settings.get();
+    const mode = engines.videoMode;
+    const url = await this.comfy.idleUrlResolved(mode);
+    const [ltx, minimax] = await Promise.all([
+      probeVideoCapabilities(url, mode),
+      probeMinimaxCapabilities(await this.comfy.minimaxUrlResolved()),
+    ]);
+    // discovery is a silent override otherwise: say so, so the setting that no
+    // longer matches reality is visible rather than mysterious
+    const configured = engines.comfyUrl.replace(/\/$/, "");
+    if (mode === "external" && url && url !== configured) {
+      ltx.note = [`Using the ComfyUI on ${url} — nothing answered at ${configured}.`, ltx.note]
+        .filter(Boolean)
+        .join(" ");
+    }
+    // nothing usable found, but something WAS listening — say which, so the
+    // lab reads as "wrong ComfyUI" rather than "half the features vanished"
+    const why = mode === "external" && !url ? this.comfy.lastDiscoveryNote() : null;
+    if (why) ltx.note = why;
+    return { ...ltx, minimax };
   }
 }
 
@@ -639,6 +839,8 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
             ? `${payload.refs.length} ref${payload.refs.length === 1 ? "" : "s"}`
             : "",
           payload.mask ? "masked" : "",
+          // says why a picture nobody asked for is in the queue
+          payload.cover ? "cover art" : "",
           cloud ? payload.quality ?? "high" : "",
           payload.preset ?? "",
           cloud
@@ -750,6 +952,17 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
         detail: [
           payload.resolution,
           `${payload.durationSec}s`,
+          payload.fps !== 24 ? `${payload.fps}fps` : "",
+          payload.fast ? "draft · half-size" : "",
+          payload.endFrame && !minimax ? "end frame" : "",
+          payload.keyframes.length
+            ? `${payload.keyframes.length} anchor${payload.keyframes.length === 1 ? "" : "s"}`
+            : "",
+          payload.loras.length || payload.cameraLora
+            ? `${payload.loras.length + (payload.cameraLora ? 1 : 0)} LoRA${
+                payload.loras.length + (payload.cameraLora ? 1 : 0) === 1 ? "" : "s"
+              }`
+            : "",
           d ? `Director · ${d.keyframes.length} keyframe${d.keyframes.length === 1 ? "" : "s"}` : "",
           d && d.promptZones.length ? `${d.promptZones.length} beats` : "",
           voices ? (d ? `${voices} voice${voices === 1 ? "" : "s"}` : "lip-sync") : "",
@@ -757,6 +970,14 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
           // the reason to pick H3 is that the take arrives already scored —
           // worth saying on the card, since nothing else here produces sound
           minimax ? "native audio" : "",
+          // and which of H3's two heads is running, since they cost differently
+          minimax && hasMinimaxRefs(payload.minimaxRefs)
+            ? `${
+                payload.minimaxRefs!.images.length +
+                payload.minimaxRefs!.videos.length +
+                payload.minimaxRefs!.audios.length
+              } refs`
+            : "",
         ]
           .filter(Boolean)
           .join(" · "),

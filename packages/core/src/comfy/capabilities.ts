@@ -65,6 +65,48 @@ const INGREDIENTS_LORA = /ic-lora.*ingredient/i;
 /** the IC-LoRAs that carry motion onto a keyframe */
 const IC_LORA = /ic-lora.*(union-control|motion-track)/i;
 
+/* --- adapter LoRAs (regular model LoRAs, not IC) --------------------------
+ * Everything in the LoraLoaderModelOnly combo that is NOT plumbing: the
+ * distilled LoRA is the pipeline itself, IC-LoRAs ride the guide track, and
+ * the Gemma LoRA belongs to the prompt-enhance branch. What is left is what a
+ * user may stack on the model — style/subject adapters, and (when Lightricks
+ * ships 22b versions) the camera-control set. */
+const INFRA_LORA = /ic-lora|distilled|gemma/i;
+
+/** camera-control LoRAs, keyed by move. As of 2026-08 Lightricks has only
+ * published these for the 19b base model — a 19b LoRA does not load on the
+ * 22b 2.3 transformer, so this probe is expected to find nothing today. The
+ * moment compatible weights land in the lora folder, the moves light up. */
+export const CAMERA_MOVES = [
+  "dolly-in",
+  "dolly-out",
+  "dolly-left",
+  "dolly-right",
+  "jib-up",
+  "jib-down",
+  "static",
+] as const;
+export type CameraMove = (typeof CAMERA_MOVES)[number];
+const CAMERA_LORA_MARKER: Record<CameraMove, RegExp> = {
+  "dolly-in": /camera.control.dolly.in(?!.*out)/i,
+  "dolly-out": /camera.control.dolly.out/i,
+  "dolly-left": /camera.control.dolly.left/i,
+  "dolly-right": /camera.control.dolly.right/i,
+  "jib-up": /camera.control.jib.up/i,
+  "jib-down": /camera.control.jib.down/i,
+  static: /camera.control.static/i,
+};
+
+/** which camera moves this install has weights for (usually {} — see above) */
+export function resolveCameraLoras(loraOptions: string[]): Partial<Record<CameraMove, string>> {
+  const found: Partial<Record<CameraMove, string>> = {};
+  for (const move of CAMERA_MOVES) {
+    const hit = loraOptions.find((o) => CAMERA_LORA_MARKER[move].test(o));
+    if (hit) found[move] = hit;
+  }
+  return found;
+}
+
 /** which behaviour each IC-LoRA carries: `union` control follows the reference
  * loosely (a whole scene's staging), `motionTrack` tracks its movement closely
  * (a dance, a specific gesture) */
@@ -122,6 +164,12 @@ export interface VideoCapabilities {
   multiRef: boolean;
   /** motion transfer weights are present */
   icLora: boolean;
+  /** end-frame / mid-shot keyframe guides (core LTXVAddGuide path) */
+  endFrame: boolean;
+  /** stackable adapter LoRAs the user may pick from (infra filtered out) */
+  availableLoras: string[];
+  /** camera-control weights present, by move — see resolveCameraLoras */
+  cameraLoras: Partial<Record<CameraMove, string>>;
   /** one line for the UI when something is missing */
   note?: string;
 }
@@ -132,6 +180,9 @@ const NONE = {
   nag: false,
   multiRef: false,
   icLora: false,
+  endFrame: false,
+  availableLoras: [] as string[],
+  cameraLoras: {} as Partial<Record<CameraMove, string>>,
 } as const;
 
 export async function probeVideoCapabilities(
@@ -160,12 +211,15 @@ export async function probeVideoCapabilities(
     };
   }
 
-  const [director, perfPatches, nag, refTrack, loras] = await Promise.all([
+  const [director, perfPatches, nag, refTrack, loras, endFrame] = await Promise.all([
     client.hasNodes(DIRECTOR_NODES),
     client.hasNodes(PERF_NODES),
     client.hasNodes(NAG_NODES),
     hasRefTrack(client),
     client.comboOptions("LoraLoaderModelOnly", "lora_name"),
+    // core LTX nodes — present on any install with the LTX pipeline at all,
+    // but probed rather than assumed so a stripped install degrades politely
+    client.hasNodes(["LTXVAddGuide", "LTXVCropGuides"]),
   ]);
 
   const hasIngredients = loras.some((l) => INGREDIENTS_LORA.test(l));
@@ -177,10 +231,14 @@ export async function probeVideoCapabilities(
     nag,
     multiRef: refTrack && hasIngredients,
     icLora: loras.some((l) => IC_LORA.test(l)),
+    endFrame,
+    availableLoras: loras.filter((l) => !INFRA_LORA.test(l)),
+    cameraLoras: resolveCameraLoras(loras),
   };
 
   const missing: string[] = [];
   if (!director) missing.push("WhatDreamsCost-ComfyUI (Director timeline)");
+  if (!endFrame) missing.push("core LTX video nodes (end-frame guides)");
   if (!perfPatches) missing.push("comfyui-kjnodes (attention patches)");
   // only worth mentioning to someone who has the Director at all
   if (director && !refTrack) missing.push("WhatDreamsCost-ComfyUI v2.0.4+ (cast references)");
@@ -188,4 +246,41 @@ export async function probeVideoCapabilities(
   if (missing.length) capabilities.note = `Not installed: ${missing.join(", ")}.`;
 
   return capabilities;
+}
+
+/* --- the MiniMax-H3 instance ------------------------------------------------
+ * H3 runs on its OWN ComfyUI (0.30+) — a separate install with a separate
+ * python, so nothing probed above says anything about it. The only optional
+ * capability there today is SageAttention, which the KJ patch node provides
+ * and which roughly doubles H3's render speed when the `sageattention`
+ * package is installed in THAT python. */
+
+export interface MinimaxCapabilities {
+  /** the H3 ComfyUI answered the probe */
+  reachable: boolean;
+  /** the KJ Sage patch node is present — the speed toggle can be offered */
+  sage: boolean;
+  note?: string;
+}
+
+export async function probeMinimaxCapabilities(url: string): Promise<MinimaxCapabilities> {
+  if (!url.trim()) {
+    return {
+      reachable: false,
+      sage: false,
+      note: "No MiniMax-H3 ComfyUI configured — set its URL in Settings → Engines.",
+    };
+  }
+  const client = new ComfyClient(url);
+  if (!(await client.health())) {
+    return { reachable: false, sage: false, note: `No ComfyUI answering at ${url}.` };
+  }
+  const sage = await client.hasNode("PathchSageAttentionKJ");
+  return {
+    reachable: true,
+    sage,
+    note: sage
+      ? undefined
+      : "comfyui-kjnodes is not installed on the MiniMax ComfyUI — the Sage speed toggle needs it.",
+  };
 }

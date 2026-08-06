@@ -99,6 +99,12 @@ export const imagePayloadSchema = z.object({
   sizeMode: z.enum(["auto", "aspect"]).optional(),
   /** storyboard delivery: attach finished stills to this shot's keyframes */
   board: z.object({ shotId: z.string().min(1) }).optional(),
+  /** cover-art delivery: the finished still becomes the cover of this music
+   * track (a dataRoot-relative wav path). Same shape as `board` above — a
+   * "where does this picture belong when it lands" address, not a render knob.
+   * Covers are a byproduct of a music run, so the Image lab's roll filters
+   * them out; they stay in the Assets library like any other real file. */
+  cover: z.string().optional(),
 });
 
 /** bulk deck — one job renders every prompt of a themed set into
@@ -349,16 +355,138 @@ export const directorSpecSchema = z.object({
 });
 export type DirectorSpec = z.infer<typeof directorSpecSchema>;
 
+/* ---------- MiniMax-H3 references (ref2va) ---------- */
+
+/* H3's second head reads REFERENCES rather than keyframes: stills, clips and
+ * sound it must carry forward into a new take. It is a different checkpoint
+ * (ref2va, not fl2va) and a different node, so a shot uses one mode or the
+ * other — a reference shot has no first/last frame at all.
+ *
+ * The tags are the whole interface. Each reference is presented to the model as
+ * <Picture i> / <Video k> / <Audio j>, and the prompt has to name them for them
+ * to mean anything: "use <Picture 1> as the character and <Video 1>'s camera
+ * move". minimaxRefLabels() computes those numbers, because the numbering has
+ * one trap in it — see there. */
+
+/** One reference clip: a window of a library video, and whether its own
+ * soundtrack rides along as a reference too. */
+export const minimaxRefVideoSchema = z.object({
+  /** library relPath of the clip */
+  video: z.string().min(1),
+  /** skip this far into it before the referenced window starts */
+  startSec: z.number().min(0).default(0),
+  /** how much of it to show the model. Reference frames are VAE-encoded and
+   * ride through every sampling step, so this is a real cost, not a pointer. */
+  lengthSec: z.number().min(0.3).max(15).default(3),
+  /** present its soundtrack as well — a voice to keep, a rhythm to match */
+  useItsAudio: z.boolean().default(false),
+});
+export type MinimaxRefVideo = z.infer<typeof minimaxRefVideoSchema>;
+
+export const minimaxRefsSchema = z.object({
+  /** library relPaths of stills — identity, wardrobe, style, a set */
+  images: z.array(z.string().min(1)).max(9).default([]),
+  videos: z.array(minimaxRefVideoSchema).max(3).default([]),
+  /** library relPaths of audio — a voice to clone, a piece of score */
+  audios: z.array(z.string().min(1)).max(3).default([]),
+  /** "match" scales each reference still to the render's pixel area; "max"
+   * gives it a 2048px short edge for stronger identity, several times slower
+   * because the extra tokens ride through every step. */
+  imageSize: z.enum(["match", "max"]).default("match"),
+});
+export type MinimaxRefs = z.infer<typeof minimaxRefsSchema>;
+
+export interface MinimaxRefLabels {
+  /** <Picture i> for each entry of refs.images, in order */
+  images: string[];
+  /** per reference clip: its own <Video k>, and its soundtrack's <Audio j> */
+  videos: { video: string; audio: string | null }[];
+  /** <Audio j> for each standalone clip in refs.audios */
+  audios: string[];
+  /** every tag that exists, in the order the model is shown them */
+  all: string[];
+}
+
+/** Which tag names this reference set will actually have.
+ *
+ * The trap: ordinals are 1-based PER TYPE, and a reference video's soundtrack
+ * counts as an <Audio j> of its own — emitted just before its <Video k>. So a
+ * shot with one clip-with-sound plus one standalone voice clip has the clip's
+ * sound as <Audio 1> and the voice as <Audio 2>, which is the opposite of the
+ * order they were authored in. Getting this wrong doesn't fail the render; it
+ * quietly points the prompt at the wrong reference. */
+export function minimaxRefLabels(refs: MinimaxRefs): MinimaxRefLabels {
+  const all: string[] = [];
+  const images = refs.images.map((_, i) => {
+    const tag = `<Picture ${i + 1}>`;
+    all.push(tag);
+    return tag;
+  });
+  let audioN = 0;
+  const videos = refs.videos.map((v, i) => {
+    const audio = v.useItsAudio ? `<Audio ${++audioN}>` : null;
+    if (audio) all.push(audio);
+    const video = `<Video ${i + 1}>`;
+    all.push(video);
+    return { video, audio };
+  });
+  const audios = refs.audios.map(() => {
+    const tag = `<Audio ${++audioN}>`;
+    all.push(tag);
+    return tag;
+  });
+  return { images, videos, audios, all };
+}
+
+/** Tags a prompt uses that this reference set doesn't have — a typo'd
+ * <Picture 3> when only two were attached, or an ordinal shifted by a
+ * soundtrack. The model is given nothing under that name. */
+export function unknownMinimaxRefTags(prompt: string, refs: MinimaxRefs): string[] {
+  const have = new Set(minimaxRefLabels(refs).all.map((t) => t.toLowerCase()));
+  /* The separator is \s* rather than \s+ on purpose: the tokenizer presents
+   * each reference as the literal text "<Picture 1>: ", so "<Picture1>" is not
+   * a formatting variant the model forgives — it is a different string, and
+   * saying so is more use than staying quiet. */
+  const used = prompt.match(/<\s*(?:picture|video|audio)\s*\d+\s*>/gi) ?? [];
+  const missing = new Set<string>();
+  for (const raw of used) {
+    const tag = raw.replace(/\s+/g, " ").replace(/<\s*/, "<").replace(/\s*>/, ">");
+    const norm = tag.toLowerCase();
+    if (!have.has(norm)) missing.add(tag.replace(/^<(\w)/, (_, c: string) => `<${c.toUpperCase()}`));
+  }
+  return [...missing];
+}
+
+/** Does this reference set carry anything at all? An empty one is not a
+ * reference shot — it would just be text-to-video on the wrong checkpoint. */
+export function hasMinimaxRefs(refs: MinimaxRefs | undefined | null): refs is MinimaxRefs {
+  return !!refs && refs.images.length + refs.videos.length + refs.audios.length > 0;
+}
+
 export const videoPayloadSchema = z.object({
   type: z.literal("video"),
   prompt: z.string().min(1),
   engine: z.string().default("ltx2"),
   /** start frame as a dataRoot-relative library path (i2v); required by LTX */
   startFrame: z.string().optional(),
-  /** the frame the take must LAND on — MiniMax-H3's fl2va mode, the "FL" in
-   * its name. LTX reaches the same idea through a Director keyframe at the end
-   * of the timeline, and ignores this. */
+  /** the frame the take must LAND on. MiniMax-H3's fl2va mode (the "FL" in
+   * its name), and — where the install carries the core guide nodes — LTX's
+   * end-frame guide. Seedance ignores it. */
   endFrame: z.string().optional(),
+  /** mid-shot anchor frames for the LTX simple path — each image is imposed at
+   * its time on the way to (or instead of) an end frame. The Director timeline
+   * has its own richer keyframe lane; this one is for quick lab renders. */
+  keyframes: z
+    .array(
+      z.object({
+        /** dataRoot-relative library path */
+        image: z.string().min(1),
+        atSec: z.number().min(0),
+        strength: z.number().min(0).max(1).default(1),
+      }),
+    )
+    .max(8)
+    .default([]),
   /** dialogue audio as a dataRoot-relative library path (switches to ia2v lip-sync) */
   audio: z.string().optional(),
   /** LTX 2.3 has no fixed clip length — the ceiling here is VRAM headroom on a
@@ -366,12 +494,53 @@ export const videoPayloadSchema = z.object({
   durationSec: z.number().min(1).max(30).default(5),
   /** "1280 × 720" style; adapter parses W/H */
   resolution: z.string().default("1280 × 720"),
+  /** LTX only: 24 is the trained default; 48 doubles the frame count for the
+   * same seconds — smoother, roughly double the render time and VRAM. */
+  fps: z.union([z.literal(24), z.literal(48)]).default(24),
+  /** LTX draft mode: stop after the base sampling pass and skip the ×2
+   * upscale + refine stage. Half the pixels, well under half the wait — for
+   * blocking a shot, not delivering it. */
+  fast: z.boolean().default(false),
+  /** stackable adapter LoRAs (LTX only) — names must come from the install's
+   * own list (capabilities.availableLoras); ComfyUI validates them verbatim */
+  loras: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        strength: z.number().min(-1).max(2).default(1),
+      }),
+    )
+    .max(3)
+    .default([]),
+  /** camera-control LoRA move (LTX only). Gated on capabilities.cameraLoras —
+   * Lightricks has not yet shipped 22b/2.3 camera weights, so this stays
+   * hidden until a compatible set lands in the lora folder. */
+  cameraLora: z
+    .object({
+      move: z.enum([
+        "dolly-in",
+        "dolly-out",
+        "dolly-left",
+        "dolly-right",
+        "jib-up",
+        "jib-down",
+        "static",
+      ]),
+      strength: z.number().min(0).max(1.5).default(1),
+    })
+    .optional(),
   motionStrength: z.number().min(0).max(1).optional(),
   seed: z.number().int().optional(),
   /** Shot Director timeline. Omitted = the single-keyframe render this lab
    * has always done; present = the Director graph (external ComfyUI with the
    * WhatDreamsCost pack, or managed once its node spec is installed). */
   director: directorSpecSchema.optional(),
+  /** MiniMax-H3's reference mode. Present and non-empty = the take renders on
+   * the ref2va checkpoint against these references instead of fl2va, which is
+   * also how a clip gets EDITED: reference the clip, describe the change.
+   * There are no keyframes in this mode — the ref2va node has no first/last
+   * frame input, so a still that must be in the shot goes in as a reference. */
+  minimaxRefs: minimaxRefsSchema.optional(),
   /** storyboard delivery: attach the finished take to this shot's videoTakes
    * (and move a boarded shot to "generated"), the way a finished keyframe
    * attaches to its shot's keyframes */
@@ -623,6 +792,15 @@ export const settingsSchema = z.object({
           nag: z.boolean().default(false),
         })
         .default({}),
+      /** MiniMax-H3 tuning — a DIFFERENT ComfyUI install with a different
+       * python, so its knobs are separate from videoTuning on purpose. */
+      minimaxTuning: z
+        .object({
+          /** the KJ Sage patch on the H3 instance — roughly doubles H3's
+           * render speed, needs `sageattention` in THAT install's python */
+          sageAttention: z.boolean().default(false),
+        })
+        .default({}),
       /** python.exe of the Chatterbox TTS venv (character voices) */
       chatterboxPython: z.string().nullable().default(null),
       /** python.exe of the Qwen3-TTS venv (narrator voices) */
@@ -677,6 +855,11 @@ export const settingsUpdateSchema = z.object({
       videoTuning: settingsSchema.shape.engines
         .removeDefault()
         .shape.videoTuning.removeDefault()
+        .partial()
+        .optional(),
+      minimaxTuning: settingsSchema.shape.engines
+        .removeDefault()
+        .shape.minimaxTuning.removeDefault()
         .partial()
         .optional(),
     })
@@ -824,6 +1007,17 @@ export const assetMetaSchema = z.object({
   lyrics: z.string().optional(),
   /** the brief the take was generated from (music: description + styles) */
   prompt: z.string().optional(),
+  /** the take's name as a person would write it. Filenames are slugified on
+   * import ("german-party-rock-duet-male-and-female-voc-2"), and a slug is
+   * what every list was printing — this keeps the readable original. */
+  title: z.string().optional(),
+  /** the style chips a music take was asked for, kept apart from the caption
+   * so a track row can show them as chips instead of one run-on sentence */
+  styles: z.array(z.string()).optional(),
+  /** dataRoot-relative cover art generated for a music take. Written after
+   * the fact: the picture is a separate, lower-priority job that finishes
+   * well after the track, so it patches the sidecar rather than being in it. */
+  cover: z.string().optional(),
   bpm: z.number().optional(),
   /** musical key as requested, e.g. "C Major" */
   keyscale: z.string().optional(),
@@ -834,6 +1028,10 @@ export const assetMetaSchema = z.object({
    * picture and sound in one pass). Timeline and export treat such a take as
    * finished audio rather than a mute clip waiting for a voice track. */
   nativeAudio: z.boolean().optional(),
+  /** the words a voice take speaks — the timeline prints them on the clip */
+  text: z.string().optional(),
+  /** voice/character id the take was spoken with */
+  voice: z.string().optional(),
 });
 export type AssetMeta = z.infer<typeof assetMetaSchema>;
 
@@ -1147,6 +1345,9 @@ export const bibleCharacterSchema = z.object({
   id: z.string(),
   name: z.string(),
   species: z.string().default(""),
+  /** the character's job in the story ("Lead", "Antagonist", "Comic engine") —
+   * the orienting line under the name in the Bible cast rail */
+  role: z.string().default(""),
   /** structured appearance slots (character-sheets-v2 fill values) */
   build: z.string().default(""),
   face: z.string().default(""),
@@ -1347,6 +1548,8 @@ export const directorToolCallSchema = z.object({
   name: z.string(),
   /** compact one-line rendering of the tool input */
   summary: z.string(),
+  /** scalar tool-input fields, rendered as the card's parameter table */
+  params: z.record(z.string(), z.string()).optional(),
   status: z.enum(["running", "done", "error"]),
   /** set when the tool enqueued a job — the UI attaches live progress from the jobs stream */
   jobId: z.string().optional(),
@@ -1529,6 +1732,83 @@ export const portFileSchema = z.object({
   pid: z.number().int(),
 });
 export type PortFile = z.infer<typeof portFileSchema>;
+
+/* ---------- prompt library ---------- */
+
+/** what a preset contributes to a prompt — the builder colours chips by it
+ * and the composer knows negatives go to the negative prompt, not the end
+ * of the positive one */
+export const promptCategorySchema = z.enum([
+  "style",
+  "subject",
+  "lighting",
+  "camera",
+  "mood",
+  "negative",
+]);
+export type PromptCategory = z.infer<typeof promptCategorySchema>;
+
+/** One saved prompt fragment. `builtin` presets ship with Aurea (and reseed
+ * if deleted wrongly — see PromptLibrary.seed); user presets are files the
+ * same shape under <dataRoot>/promptlib/presets/. */
+export const promptPresetSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1).max(80),
+  category: promptCategorySchema,
+  /** the fragment itself — composed into the prompt verbatim */
+  text: z.string().min(1).max(2000),
+  tags: z.array(z.string()).default([]),
+  /** present = only offered inside this project */
+  projectId: z.string().optional(),
+  builtin: z.boolean().default(false),
+  createdAt: z.string(),
+});
+export type PromptPreset = z.infer<typeof promptPresetSchema>;
+
+/** A themed set of presets — Zoo Logic's art direction, a lighting kit. The
+ * per-project pack derived live from a bible has `fromBible: true` and no
+ * file on disk. */
+export const stylePackSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1).max(80),
+  description: z.string().default(""),
+  projectId: z.string().optional(),
+  fromBible: z.boolean().default(false),
+  presets: z.array(promptPresetSchema).default([]),
+  /** pack-level negative prompt, applied when the pack seeds a prompt */
+  negative: z.string().optional(),
+});
+export type StylePack = z.infer<typeof stylePackSchema>;
+
+/** A persisted deck — the Image lab's bulk prompt list, which used to be
+ * ephemeral component state and vanished with the screen. */
+export const promptDeckSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1).max(80),
+  prompts: z.array(z.string()).max(100).default([]),
+  model: z.string().default("z-image"),
+  updatedAt: z.string(),
+});
+export type PromptDeck = z.infer<typeof promptDeckSchema>;
+
+export const promptPresetSaveSchema = promptPresetSchema
+  .omit({ id: true, createdAt: true, builtin: true })
+  .extend({ id: z.string().optional() });
+export type PromptPresetSave = z.input<typeof promptPresetSaveSchema>;
+
+export const promptDeckSaveSchema = promptDeckSchema
+  .omit({ id: true, updatedAt: true })
+  .extend({ id: z.string().optional() });
+export type PromptDeckSave = z.input<typeof promptDeckSaveSchema>;
+
+/** prompts.enhance input — one-shot agent expansion of a prompt using the
+ * project's art direction */
+export const promptEnhanceSchema = z.object({
+  prompt: z.string().min(1).max(4000),
+  projectId: z.string().optional(),
+  intent: z.enum(["image", "video"]).default("image"),
+});
+export type PromptEnhance = z.input<typeof promptEnhanceSchema>;
 
 export * from "./falImage.js";
 export * from "./storyboard.js";

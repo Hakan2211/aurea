@@ -16,6 +16,7 @@ import {
   imageGenerateSchema,
   jobStatusSchema,
   libraryKindSchema,
+  minimaxRefVideoSchema,
   musicGenerateSchema,
   productionAddEpisodeSchema,
   productionAddSceneSchema,
@@ -285,6 +286,23 @@ export function buildTools(api: StudiodApi): AureaTool[] {
     }),
 
     defineTool({
+      name: "prompt_library",
+      title: "Prompt library",
+      description:
+        "The user's saved prompt fragments and style packs (Zoo Logic, Animal Sitcom, and a " +
+        "live pack derived from the project's bible). Read it before composing image/video " +
+        "prompts so your language matches the looks the user already curated — categories are " +
+        "style/subject/lighting/camera/mood/negative, and a pack's `negative` belongs in the " +
+        "negative prompt, not appended to the positive one.",
+      schema: { project: z.string().default("playground") },
+      handler: async ({ project }) =>
+        json({
+          presets: await api.prompts.list.query({ project }),
+          packs: await api.prompts.packs.query({ project }),
+        }),
+    }),
+
+    defineTool({
       name: "generate_image",
       title: "Generate image",
       description:
@@ -348,12 +366,21 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       description:
         "Enqueue a local video clip. Default engine 'ltx2': startFrame (library relPath from " +
         "list_assets) anchors identity (i2v); adding audio (relPath of a speech take) switches to " +
-        "lip-sync (ia2v). engine 'minimax-h3' is the opposite trade — it writes and performs the " +
+        "lip-sync (ia2v). LTX-only extras: endFrame (the take lands on it), keyframes " +
+        "([{image, atSec, strength}] mid-shot anchors, ≤8), fps 48 (smoother, ~2× time), " +
+        "fast:true (draft — skips the refine pass, HALF-size picture in far less time; block " +
+        "with drafts, deliver without), loras ([{name, strength}] ≤3, names verbatim from " +
+        "lab_catalog capabilities.availableLoras), and cameraLora ({move, strength} — gated on " +
+        "capabilities.cameraLoras; no 22b camera weights ship yet, so normally keep the move in " +
+        "the prompt). engine 'minimax-h3' is the opposite trade — it writes and performs the " +
         "dialogue, sound effects and music ITSELF in the same pass as the picture, so pass no " +
-        "audio and put the lines in the prompt under an 'Audio:' heading; 4-15s only, no Director " +
-        "timeline, and roughly 10x LTX's render time, so reserve it for a hero beat. Returns the " +
+        "audio and put the lines in the prompt under an 'Audio:' heading; 4-15s only, 24fps only, " +
+        "no Director timeline, and roughly 10x LTX's render time, so reserve it for a hero beat; " +
+        "its 2K presets cost ~2.4× the native canvas. On H3, " +
+        "minimaxRefs carries stills/clips/sound the shot must keep — see reference_video, which " +
+        "is the same thing with the tag rules stated. Returns the " +
         "job — wait_for_job for the mp4. Check lab_catalog('video') for which engines this machine " +
-        "can actually run, plus resolutions/durations.",
+        "can actually run, plus resolutionsByEngine/durations and the ltx block's option surface.",
       schema: withProjectDefault(videoGenerateSchema.omit({ project: true })),
       handler: async ({ project, ...payload }) => {
         await requireProject(project);
@@ -370,7 +397,9 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         "frame: keyframes pinned at times (a start frame at 0s, an end frame the take morphs " +
         "into), prompt beats that change the action or camera mid-take, cloned-voice takes locked " +
         "to timecodes so each character lip-syncs their own line, a motion reference, or cast " +
-        "references that hold an ensemble on-model. Everything is authored in SECONDS. Read " +
+        "references that hold an ensemble on-model. The payload's loras/cameraLora ride a " +
+        "Director shot too (chained before the timeline patches the model). Everything is " +
+        "authored in SECONDS. Read " +
         "lab_catalog('video').director first: it carries the limits, the rules that are measured " +
         "facts about LTX (beat wording, gap length, the one IC-LoRA slot), and whether this " +
         "machine can run Director shots at all. Returns the job — wait_for_job for the mp4.",
@@ -384,6 +413,71 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       handler: async ({ project, ...payload }) => {
         await requireProject(project);
         return json(await api.labs.video.generate.mutate({ ...payload, project }));
+      },
+    }),
+
+    defineTool({
+      name: "reference_video",
+      title: "Render or edit a clip from references",
+      description:
+        "Render on MiniMax-H3's REFERENCE head (ref2va): a take conditioned on things you hand " +
+        "it — up to 9 stills, 3 clips (optionally with their own sound) and 3 sound clips — " +
+        "instead of on a start frame. Two jobs, one tool. (1) Carry something forward: a " +
+        "character's face, a set, a voice, a camera move, held across a new shot the way a start " +
+        "frame can't. (2) EDIT a clip: reference the clip and describe the change ('keep " +
+        "<Video 1>'s staging and blocking, restyle it as a night scene'). The result is " +
+        "regenerated, not composited — a new performance of the same idea, with its own audio, " +
+        "so it is the right tool for a restyle or a redirect and the wrong one for a two-second " +
+        "artefact (use shot_retake for that). " +
+        "THE PROMPT MUST NAME THE REFERENCES: they are presented as <Picture 1>…, <Video 1>…, " +
+        "<Audio 1>… in that order, ordinals 1-based per type, and a clip's own soundtrack takes " +
+        "an <Audio> number of its own BEFORE any standalone sound. Naming a tag that doesn't " +
+        "exist is rejected rather than ignored. Needs the ref2va weights — check " +
+        "lab_catalog('video').minimax.reference.available first. Returns the job.",
+      schema: {
+        project: z.string().default("playground"),
+        prompt: z
+          .string()
+          .min(1)
+          .describe("the shot, naming its references by tag; H3 also performs whatever the " +
+            "'Audio:' block describes"),
+        images: z
+          .array(z.string().min(1))
+          .max(9)
+          .default([])
+          .describe("library relPaths of stills — these become <Picture 1>…<Picture 9>"),
+        videos: z
+          .array(minimaxRefVideoSchema)
+          .max(3)
+          .default([])
+          .describe(
+            "reference clips — { video: relPath, startSec, lengthSec, useItsAudio }. Keep each " +
+              "to a few seconds: reference frames ride through every sampling step.",
+          ),
+        audios: z
+          .array(z.string().min(1))
+          .max(3)
+          .default([])
+          .describe("library relPaths of sound — a voice to keep, a piece of score to match"),
+        imageSize: z
+          .enum(["match", "max"])
+          .default("match")
+          .describe("'max' holds identity harder at several times the cost"),
+        durationSec: z.number().min(4).max(15).default(5),
+        resolution: z.string().default("1344 × 768"),
+        seed: z.number().int().optional(),
+      },
+      handler: async ({ project, prompt, images, videos, audios, imageSize, ...rest }) => {
+        await requireProject(project);
+        return json(
+          await api.labs.video.generate.mutate({
+            ...rest,
+            project,
+            prompt,
+            engine: "minimax-h3",
+            minimaxRefs: { images, videos, audios, imageSize },
+          }),
+        );
       },
     }),
 

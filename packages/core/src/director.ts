@@ -165,6 +165,21 @@ function summarize(input: unknown): string {
   return line.length > 120 ? `${line.slice(0, 119)}…` : line;
 }
 
+/** the same input as a key→value table for the chat's tool-call card —
+ * scalars only, capped so a huge prompt field can't flood the card */
+function paramsOf(input: unknown): Record<string, string> | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (typeof v === "object") continue;
+    const s = String(v);
+    out[k] = s.length > 80 ? `${s.slice(0, 79)}…` : s;
+    if (Object.keys(out).length >= 8) break;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** a tool result that is a Job means the tool enqueued something trackable */
 function extractJobId(raw: string): string | undefined {
   try {
@@ -229,6 +244,41 @@ export class DirectorService extends EventEmitter {
       this.emitState(project);
     });
     return this.state(project);
+  }
+
+  /** One question, one answer, no tools, no chat thread — the plumbing behind
+   * prompts.enhance. Runs on the same local Claude Code login as the Director;
+   * failures surface as thrown errors for the caller's UI to show inline. */
+  async oneShot(prompt: string, system: string, timeoutMs = 120_000): Promise<string> {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), timeoutMs);
+    try {
+      let text = "";
+      const q = query({
+        prompt,
+        options: {
+          abortController: abort,
+          systemPrompt: system,
+          model: this.settings.get().providers.claudeModel,
+          maxTurns: 1,
+        },
+      });
+      for await (const message of q) {
+        if (message.type === "result") {
+          if (message.subtype !== "success") {
+            throw new Error(`the enhance run stopped early (${message.subtype})`);
+          }
+          text = message.result;
+        }
+      }
+      if (!text.trim()) throw new Error("the enhance run returned nothing");
+      return text.trim();
+    } catch (err) {
+      if (abort.signal.aborted) throw new Error("the enhance run timed out");
+      throw err instanceof Error ? err : new Error(String(err));
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** abort the in-flight run, if any — the thread gets a "Stopped." note, not an error */
@@ -416,6 +466,7 @@ export class DirectorService extends EventEmitter {
             tool: {
               name: block.name.replace(/^mcp__aurea__/, ""),
               summary: summarize(block.input),
+              params: paramsOf(block.input),
               status: "running",
             },
           });

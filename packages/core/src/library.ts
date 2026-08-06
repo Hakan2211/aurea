@@ -4,6 +4,7 @@
  * is no index to keep consistent. Kind comes from the assets/<kind>/ subfolder
  * when the file lives in one, else from the extension. */
 
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { assetMetaSchema, type AssetMeta, type LibraryAsset, type LibraryKind, type Project } from "@aurea/shared";
@@ -126,4 +127,66 @@ function walk(
       ...(meta ? { meta } : {}),
     });
   }
+}
+
+/* ---------- transcode ---------- */
+
+/** what a `.wav` can be handed to you as, beyond itself */
+const TRANSCODE: Record<string, { ext: string; args: string[] }> = {
+  // -q:a 2 is LAME's VBR ~190kbps: transparent for a music bounce, and a
+  // third the size of the wav, which is the reason to want an mp3 at all
+  mp3: { ext: "mp3", args: ["-codec:a", "libmp3lame", "-q:a", "2"] },
+};
+
+/** Convert a library file into another format and return the dataRoot-relative
+ * path of the result.
+ *
+ * The output lands in `<dataRoot>/exports/`, deliberately outside the
+ * `projects/*\/assets` tree the scanner walks: an mp3 of a track you already
+ * have is a copy for sending someone, not a second take, and filing it as an
+ * asset would put a duplicate row in the Music lab under a track's own name.
+ * It's a cache — a second request for the same file reuses it. */
+export function transcodeAsset(
+  dataRoot: string,
+  relPath: string,
+  format: string,
+): Promise<string> {
+  const spec = TRANSCODE[format];
+  if (!spec) throw new Error(`unsupported format "${format}"`);
+  const source = resolveDeletable(dataRoot, relPath);
+  if (!source) throw new Error("file not found");
+
+  const outDir = path.join(dataRoot, "exports");
+  fs.mkdirSync(outDir, { recursive: true });
+  const dest = path.join(outDir, `${path.basename(source, path.extname(source))}.${spec.ext}`);
+  const rel = path.relative(dataRoot, dest).split(path.sep).join("/");
+
+  // reuse unless the source has moved on since (a re-render under the same name)
+  try {
+    if (fs.statSync(dest).mtimeMs >= fs.statSync(source).mtimeMs) return Promise.resolve(rel);
+  } catch {
+    // not converted yet
+  }
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffmpeg",
+      ["-hide_banner", "-loglevel", "error", "-y", "-i", source, ...spec.args, dest],
+      (err, _out, stderr) => {
+        if (err) {
+          // the one failure worth naming: ffmpeg has to be on PATH, and on a
+          // fresh machine it isn't — the message otherwise reads as ENOENT
+          reject(
+            new Error(
+              (err as NodeJS.ErrnoException).code === "ENOENT"
+                ? "ffmpeg not found on PATH — install it to export other formats"
+                : stderr.trim() || err.message,
+            ),
+          );
+          return;
+        }
+        resolve(rel);
+      },
+    );
+  });
 }

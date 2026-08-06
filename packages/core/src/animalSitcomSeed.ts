@@ -31,6 +31,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "sterling",
     name: "Sterling",
     species: "lion",
+    role: "Lead",
     build: "medium-tall, broad chest, full flowing golden mane",
     face: "warm tan muzzle, amber eyes, tufted rounded ears, confident charming look",
     wardrobe:
@@ -57,6 +58,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "grant",
     name: "Grant",
     species: "giraffe",
+    role: "Coach",
     build: "very tall, long neck and long legs, upright posture",
     face: "long gentle face, calm dark eyes behind round glasses, two ossicones, tan-and-cream giraffe patches",
     wardrobe:
@@ -81,6 +83,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "milo",
     name: "Milo",
     species: "meerkat",
+    role: "Comic engine",
     build: "small, wiry, alert twitchy posture",
     face: "big watchful dark-ringed eyes, small pointed snout, sandy fur, dark eye-patches",
     wardrobe:
@@ -106,6 +109,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "bruno",
     name: "Bruno",
     species: "gorilla",
+    role: "Gentle giant",
     build: "huge and muscular with broad shoulders and a gentle, shy stoop",
     face: "kind soft dark eyes, gentle heavy brow, shy warm half-smile",
     wardrobe: "a soft mint pastel hoodie, rolled-up paint-splattered denim overalls, big chunky sneakers",
@@ -127,6 +131,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "jax",
     name: "Jax",
     species: "eagle",
+    role: "Visionary",
     build: "lean and upright, folded wings that work as arms",
     face: "sharp confident gaze, golden hooked beak, white head feathers, piercing amber eyes",
     wardrobe: "a sleek slate bomber jacket with geometric orange patterns, fitted cargo pants, fingerless gloves",
@@ -149,6 +154,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "barney",
     name: "Barney",
     species: "snake",
+    role: "Sarcastic foil",
     build: "a long body and expressive upper coils that gesture like arms",
     face: "sly half-lidded smirk, subtle iridescent green scale shimmer, slit pupils",
     wardrobe:
@@ -174,6 +180,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "alli",
     name: "Allistaire",
     species: "emperor penguin",
+    role: "Strategist",
     build:
       "compact and barrel-chested, short strong flippers that work as arms, upright military " +
       "posture, webbed orange feet",
@@ -207,6 +214,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "silas",
     name: "Silas",
     species: "tiger",
+    role: "Guarded survivor",
     build: "lean and athletic with wide shoulders and a slouched hands-in-pockets stance",
     face:
       "broad orange-and-black striped face, cream muzzle and cheek ruff, guarded jade-green eyes, " +
@@ -237,6 +245,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "valentino",
     name: "Valentino",
     species: "hippo",
+    role: "Diva",
     build: "big and rounded with a broad soft frame and a grand sweeping posture",
     face:
       "wide soft muzzle, long lashes, warm hazel eyes, small round ears, dewy well-moisturised skin " +
@@ -271,6 +280,7 @@ export const ANIMAL_SITCOM_CHARACTERS: SeedCharacter[] = [
     id: "omar",
     name: "Omar",
     species: "elephant",
+    role: "Wise elder",
     build:
       "large and slow-moving with a heavy rounded frame, a gently curled trunk, broad fanning ears " +
       "and slightly stooped shoulders",

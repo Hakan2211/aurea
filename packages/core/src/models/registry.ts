@@ -136,6 +136,35 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: false,
   }),
   withSize({
+    id: "minimax-h3-ref-gguf",
+    name: "MiniMax-H3 Reference (GGUF)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · references)",
+    description:
+      "H3's reference head (ref2va) — the same model conditioned on things you give it rather " +
+      "than on a first frame: up to 9 stills, 3 clips (with their sound) and 3 sound clips, each " +
+      "named in the prompt as <Picture 1>, <Video 1>, <Audio 1>. It is how a character, a voice " +
+      "or a camera move is carried from one shot into the next, and how a clip is EDITED — " +
+      "reference the clip, describe the change. A second 15.6 GB checkpoint that shares the " +
+      "base entry's text encoder and both VAEs, so install MiniMax-H3 (GGUF) as well.",
+    files: [
+      {
+        // same Q3_K_M trade as the fl2va head, for the same reason: the 32B
+        // encoder and this unet have to take turns in the same 24 GB
+        name: "diffusion_models/MiniMax-H3-REF2VA-Q3_K_M.gguf",
+        url: "https://huggingface.co/realrebelai/MiniMax-H3_GGUFs/resolve/main/MiniMax-H3-REF2VA-Q3_K_M.gguf",
+        sizeBytes: 15577923264,
+        sha256: "ada8452ece22ef84497f7f6f7ad07708c4754066127a6ad2c10fab8ae9eee596",
+      },
+    ],
+    license: {
+      name: "MiniMax H3 Community License Agreement",
+      url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
     id: "z-image-turbo",
     name: "Z-Image Turbo",
     use: "image",

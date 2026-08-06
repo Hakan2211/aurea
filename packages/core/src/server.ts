@@ -20,6 +20,7 @@ import { ProjectStore } from "./projects.js";
 import { Labs } from "./labs.js";
 import { DirectorService } from "./director.js";
 import { TimelineStore } from "./timeline.js";
+import { PromptLibrary } from "./promptlib.js";
 import { StudioStore } from "./studio.js";
 import { ModelManager } from "./models/manager.js";
 import { EngineRuntime } from "./runtime/runtime.js";
@@ -92,7 +93,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new ReplicateRvcAdapter(settings),
       new SeedVcAdapter(settings, runtime),
       new ComfyVideoAdapter(settings, comfy, models),
-      new MinimaxVideoAdapter(settings, models),
+      new MinimaxVideoAdapter(settings, models, comfy),
       new SeedanceAdapter(settings),
       new FfmpegExportAdapter(settings),
     ],
@@ -124,6 +125,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       // freshly imported track (the "convert after render" pass). A trained
       // RVC model + Replicate token wins over local Seed-VC — that per-voice
       // trained path is audibly better.
+      let revoicing = false;
       if (
         job.payload?.type === "music" &&
         job.payload.arrangement === "vocals" &&
@@ -138,6 +140,7 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
           fs.existsSync(rvcModelPath(dataRoot, job.payload.singVoice));
         if (rvc || runtime.componentReady("seedvc")) {
           const source = path.relative(dataRoot, imported.primary).split(path.sep).join("/");
+          revoicing = true;
           engine.enqueue(
             labEnqueue(
               {
@@ -160,6 +163,35 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
           );
         }
       }
+
+      // cover art: a finished song gets a picture drawn for it, at batch
+      // priority so it queues behind anything you actually asked for. Fired
+      // for whichever file is the *finished* song — when a re-voice pass is
+      // chained above, that pass's own import is the one that lands here, and
+      // the sidecar it inherits already carries the brief to draw from.
+      const finishedSong =
+        job.payload?.type === "music" ||
+        (job.payload?.type === "voiceConvert" && job.payload.context === "music");
+      if (finishedSong && !revoicing && job.project && imported.primary) {
+        const projectId = job.project.replace(/^\//, "").split("/")[0];
+        const dataRoot = settings.get().storage.dataRoot;
+        const rel = path.relative(dataRoot, imported.primary).split(path.sep).join("/");
+        const sidecar = projects.assetMeta(rel);
+        const cover = labs.coverArtJob(rel, projectId, {
+          title: sidecar?.title ?? job.title,
+          prompt: sidecar?.prompt,
+          styles: sidecar?.styles,
+        });
+        if (cover) engine.enqueue(cover);
+      }
+
+      // …and the picture, when it lands, attaches itself to that song
+      if (job.payload?.type === "image" && job.payload.cover && imported.primary) {
+        const dataRoot = settings.get().storage.dataRoot;
+        projects.patchMeta(job.payload.cover, {
+          cover: path.relative(dataRoot, imported.primary).split(path.sep).join("/"),
+        });
+      }
       return imported.primary;
     },
     scheduler,
@@ -172,7 +204,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
     return selfCoords;
   });
   const timelines = new TimelineStore(settings);
-  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime, timelines, studio };
+  const prompts = new PromptLibrary(settings);
+  const base: Omit<Context, "authed"> = { engine, monitor, settings, projects, labs, director, models, runtime, timelines, studio, prompts };
 
   const trpcHandler = createHTTPHandler({
     router: appRouter,

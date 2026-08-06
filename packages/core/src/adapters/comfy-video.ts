@@ -20,7 +20,13 @@ import type { SettingsStore } from "../settings.js";
 import type { ComfyService } from "../comfy/service.js";
 import type { ModelManager } from "../models/manager.js";
 import { ComfyClient } from "../comfy/client.js";
-import { LTX23_MANAGED, ltx23Graph, silentWav } from "../comfy/video-graphs.js";
+import {
+  LTX23_MANAGED,
+  ltx23Graph,
+  silentWav,
+  solidPng,
+  PLACEHOLDER_FRAME,
+} from "../comfy/video-graphs.js";
 import { directorGraph } from "../comfy/director-graph.js";
 import {
   buildTimelineData,
@@ -32,6 +38,7 @@ import {
 import {
   DIRECTOR_NODES,
   hasRefTrack,
+  resolveCameraLoras,
   resolveIcLora,
   resolveIngredientsLora,
   resolveTuning,
@@ -95,6 +102,42 @@ export class ComfyVideoAdapter implements EngineAdapter {
     return managed && this.models.managedCopy("ltx-23-22b-fp8") ? LTX23_MANAGED : null;
   }
 
+  /** payload LoRAs → verbatim combo names this install accepts. ComfyUI
+   * validates combo inputs against its own directory walk, so a name it
+   * hasn't got fails HERE with something actionable, not deep in the queue.
+   * The camera move resolves to a weight the same way — and none ship for
+   * the 22b model yet (see resolveCameraLoras), so that arm mostly explains
+   * itself politely. */
+  private async resolveAdapterLoras(
+    client: ComfyClient,
+    payload: { cameraLora?: { move: string; strength: number }; loras: Array<{ name: string; strength: number }> },
+  ): Promise<Array<{ name: string; strength: number }>> {
+    if (!payload.cameraLora && !payload.loras.length) return [];
+    const options = await client.comboOptions("LoraLoaderModelOnly", "lora_name");
+    const loras: Array<{ name: string; strength: number }> = [];
+    if (payload.cameraLora) {
+      const weight = resolveCameraLoras(options)[payload.cameraLora.move as never];
+      if (!weight) {
+        throw new Error(
+          `No camera-control LoRA for "${payload.cameraLora.move}" on this install — ` +
+            "Lightricks has not shipped 22b camera weights yet; describe the move in " +
+            "the prompt instead (the cinematography bank already does).",
+        );
+      }
+      loras.push({ name: weight, strength: payload.cameraLora.strength });
+    }
+    for (const lora of payload.loras) {
+      if (!options.includes(lora.name)) {
+        throw new Error(
+          `LoRA "${lora.name}" is not in this ComfyUI's lora folder — ` +
+            "pick from the list the lab offers (it is read live from the install)",
+        );
+      }
+      loras.push(lora);
+    }
+    return loras;
+  }
+
   resources(job: Job): JobResources {
     // the 22B fp8 checkpoint plus offload headroom on the managed sidecar;
     // external ComfyUI owns its own memory — no estimate
@@ -112,13 +155,38 @@ export class ComfyVideoAdapter implements EngineAdapter {
       if (payload?.type !== "video") throw new Error("not a video job");
       const { storage } = this.settings.get();
       if (payload.director) return this.renderShot(job, payload.director, report, ctrl, managed);
-      if (!payload.startFrame) {
-        throw new Error("LTX needs a start frame — generate or pick an image first");
+      // no start frame = text-to-video (the template's own bypass switch)
+      const image = payload.startFrame
+        ? path.join(storage.dataRoot, payload.startFrame)
+        : undefined;
+      if (image && !fs.existsSync(image)) {
+        throw new Error(`start frame not found: ${payload.startFrame}`);
       }
-      const image = path.join(storage.dataRoot, payload.startFrame);
-      if (!fs.existsSync(image)) throw new Error(`start frame not found: ${payload.startFrame}`);
+      if (!image && payload.endFrame) {
+        // the end frame is a guide onto the start frame's latent; with nothing
+        // to leave from there is no journey to land
+        throw new Error(
+          "An end frame needs a start frame — add one, or clear the end frame to render " +
+            "from the prompt alone.",
+        );
+      }
       const audio = payload.audio ? path.join(storage.dataRoot, payload.audio) : undefined;
       if (audio && !fs.existsSync(audio)) throw new Error(`audio not found: ${payload.audio}`);
+      const endFrame = payload.endFrame ? path.join(storage.dataRoot, payload.endFrame) : undefined;
+      if (endFrame && !fs.existsSync(endFrame)) {
+        throw new Error(`end frame not found: ${payload.endFrame}`);
+      }
+      for (const kf of payload.keyframes) {
+        if (!fs.existsSync(path.join(storage.dataRoot, kf.image))) {
+          throw new Error(`keyframe not found: ${kf.image}`);
+        }
+        if (kf.atSec >= payload.durationSec) {
+          throw new Error(
+            `keyframe at ${kf.atSec}s is outside the ${payload.durationSec}s take — ` +
+              "move it earlier or use it as the end frame",
+          );
+        }
+      }
       if (managed && !this.models.ready("ltx-23-22b-fp8")) {
         throw new Error(
           "LTX 2.3 weights are not installed — Settings → Models → LTX 2.3 22B (fp8), " +
@@ -133,24 +201,52 @@ export class ComfyVideoAdapter implements EngineAdapter {
         const size = payload.resolution.match(/(\d+)\s*[×x]\s*(\d+)/);
         const [width, height] = size ? [Number(size[1]), Number(size[2])] : [704, 896];
 
+        const loras = await this.resolveAdapterLoras(client, payload);
+
         report({ progress: 2, stage: "Staging inputs" });
-        const imageName = await client.uploadInput(`${job.id}-frame${path.extname(image)}`, fs.readFileSync(image));
+        // t2v still needs a real staged image: LoadImage executes either way,
+        // and a name that isn't on disk makes ComfyUI silently drop the branch
+        const imageName = image
+          ? await client.uploadInput(`${job.id}-frame${path.extname(image)}`, fs.readFileSync(image))
+          : await client.uploadInput(`${job.id}-${PLACEHOLDER_FRAME}`, solidPng());
         const audioName = audio
           ? await client.uploadInput(`${job.id}-take${path.extname(audio)}`, fs.readFileSync(audio))
           : undefined;
-        if (!audio) {
-          // i2v still feeds LoadAudio something real; the freed mask ignores it
-          await client.uploadInput(`${job.id}-silence.wav`, silentWav(payload.durationSec));
-        }
+        // LoadAudio is on the executed path on EVERY render, so the silence is
+        // staged whether or not there is a take, and always wired up by name
+        const silenceName = await client.uploadInput(
+          `${job.id}-silence.wav`,
+          silentWav(payload.durationSec),
+        );
+        const endFrameName = endFrame
+          ? await client.uploadInput(`${job.id}-end${path.extname(endFrame)}`, fs.readFileSync(endFrame))
+          : undefined;
+        const guides = await Promise.all(
+          payload.keyframes.map(async (kf, i) => ({
+            imageName: await client.uploadInput(
+              `${job.id}-kf${i}${path.extname(kf.image)}`,
+              fs.readFileSync(path.join(storage.dataRoot, kf.image)),
+            ),
+            atSec: kf.atSec,
+            strength: kf.strength,
+          })),
+        );
 
         const graph = ltx23Graph({
           prompt: payload.prompt,
           imageName,
+          textToVideo: !image,
           audioName: audioName ?? undefined,
+          silenceName,
           durationSec: payload.durationSec,
           width,
           height,
           seed,
+          fps: payload.fps,
+          fast: payload.fast,
+          endFrameName,
+          guides,
+          loras,
           models: this.ltxModelNames(managed),
           tuning: await resolveTuning(client, this.settings.get().engines.videoTuning),
         });
@@ -171,7 +267,13 @@ export class ComfyVideoAdapter implements EngineAdapter {
             else if (classType === "LTXVAudioVAEEncode") report({ stage: "Encoding audio" });
             else if (classType === "SamplerCustomAdvanced") {
               pass += 1;
-              report({ stage: pass > 1 ? "Rendering — refine pass" : "Rendering — base pass" });
+              report({
+                stage: payload.fast
+                  ? "Rendering — draft pass"
+                  : pass > 1
+                    ? "Rendering — refine pass"
+                    : "Rendering — base pass",
+              });
             } else if (classType === "LTXVLatentUpsampler") report({ stage: "Upscaling latents" });
             else if (classType === "VAEDecodeTiled") report({ progress: 85, stage: "Decoding frames" });
             else if (classType === "CreateVideo" || classType === "SaveVideo") {
@@ -181,7 +283,9 @@ export class ComfyVideoAdapter implements EngineAdapter {
           onProgress: (value, max) => {
             if (max <= 0) return;
             const frac = value / max;
-            if (pass <= 1) report({ progress: 6 + frac * 49 });
+            // a draft render is a single pass — let it own the whole bar
+            if (payload.fast) report({ progress: 6 + frac * 79 });
+            else if (pass <= 1) report({ progress: 6 + frac * 49 });
             else report({ progress: 55 + frac * 30 });
           },
         }).catch((err: unknown) => {
@@ -436,6 +540,7 @@ export class ComfyVideoAdapter implements EngineAdapter {
         height,
         seed,
         epsilon: spec.epsilon,
+        loras: await this.resolveAdapterLoras(client, payload),
         hasCustomAudio: takes.length > 0,
         // a retake's audio comes from the take being fixed; inpainting frees
         // just the window, so "off" keeps the original line under the new

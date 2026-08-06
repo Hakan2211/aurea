@@ -144,6 +144,18 @@ export class ComfyClient {
 
   /* ---------- plumbing ---------- */
 
+  /** Drop whatever this server is holding resident. An external ComfyUI keeps
+   * the last model warm, which is usually what you want — but a graph whose
+   * peak is close to the card's limit has to start from an empty board. Best
+   * effort: a server that refuses is no reason not to try the render. */
+  async freeMemory(): Promise<void> {
+    try {
+      await this.post("/free", { unload_models: true, free_memory: true });
+    } catch {
+      /* it will either fit or it won't */
+    }
+  }
+
   private async post(pathname: string, payload: unknown): Promise<Response> {
     return fetch(`${this.baseUrl}${pathname}`, {
       method: "POST",

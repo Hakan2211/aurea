@@ -115,6 +115,9 @@ export interface DirectorGraphSpec {
    * sigma is 1/ln(1/epsilon), so 0.001 is a hard cut between beats and 0.5 a
    * long dissolve. Ignored when the shot has no prompt zones. */
   epsilon?: number;
+  /** adapter LoRAs chained after the distilled LoRA, before the Director
+   * patches the model — verbatim combo names from this install */
+  loras?: Array<{ name: string; strength: number }>;
   /** the shot has voice takes on its audio lane */
   hasCustomAudio: boolean;
   /** fill the gaps between takes with generated sound */
@@ -174,12 +177,25 @@ export function directorGraph(spec: DirectorGraphSpec): ComfyGraph {
     model: link(ID.ckpt, 0),
   });
 
+  /* adapter LoRAs — spliced between the distilled LoRA and the Director,
+   * which patches whatever model it is handed (prompt relay) */
+  let baseModel = link(ID.lora, 0);
+  (spec.loras ?? []).forEach((lora, i) => {
+    const id = `aurea:lora_${i}`;
+    node(id, "LoraLoaderModelOnly", {
+      lora_name: lora.name,
+      strength_model: lora.strength,
+      model: baseModel,
+    });
+    baseModel = link(id, 0);
+  });
+
   /* ---------- the timeline ----------
    * global_prompt is left empty on purpose: the node falls back to the one
    * inside timeline_data, which is where our builder already put it, and the
    * input is declared force_input so a literal would be the odd path. */
   node(ID.director, "LTXDirector", {
-    model: link(ID.lora, 0),
+    model: baseModel,
     clip: link(ID.textEncoder, 0),
     audio_vae: link(ID.audioVae, 0),
     global_prompt: "",

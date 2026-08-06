@@ -79,6 +79,94 @@ a native command's stderr in ErrorRecords, so ComfyUI's ordinary `[INFO]` lines
 become a `NativeCommandError` and kill the script under
 `$ErrorActionPreference = 'Stop'`.
 
+## Two heads: fl2va and ref2va
+
+H3 ships as two separately trained checkpoints on one text encoder and one pair
+of VAEs. They are not modes of a single file, and Aurea gates them separately.
+
+| | **fl2va** (`MiniMaxH3ImageToVideo`) | **ref2va** (`MiniMaxH3ReferenceToVideo`) |
+|---|---|---|
+| Conditioned on | a first and/or last frame | up to 9 stills, 3 clips, 3 sound clips |
+| Keyframes | that's the whole idea | **none** — the node has no frame input |
+| Model entry | `minimax-h3-gguf` | `minimax-h3-ref-gguf` (+15.6 GB) |
+| Aurea payload | `startFrame` / `endFrame` | `minimaxRefs` |
+
+`minimaxRefs` present and non-empty switches the render to ref2va. Passing a
+start frame at the same time is an error rather than a silent drop — there is
+nowhere for it to go.
+
+### The tags are the interface
+
+Every reference is presented to the model with a label, and the prompt has to
+name it:
+
+```
+Bold comic-book ink, night city.
+Use <Picture 1> as the boy and <Picture 2> as the kaiju, and hold
+<Video 1>'s camera move. He speaks in the voice of <Audio 2>.
+```
+
+The tags are not metadata — the text encoder literally prepends `"<Picture 1>: "`
+before each still's vision block and appends your prompt after all of them
+(`comfy/text_encoders/minimax.py`). So an unnamed reference still conditions the
+shot, but nothing tells H3 what part it plays, and `<Picture1>` is a different
+string rather than a forgiven variant. Referenced **audio never reaches the
+language model at all** — it gets a text label and goes straight to the DiT, so
+naming it in the prompt is the only handle you have on it. Aurea computes the tags in `minimaxRefLabels()` (shared, so the panel
+and the adapter agree) and **rejects a prompt that names a tag the shot doesn't
+have** — that failure is otherwise invisible until you watch the output.
+
+**The numbering trap.** Ordinals are 1-based *per type*, and a reference clip's
+own soundtrack takes an `<Audio j>` of its own, emitted immediately before its
+`<Video k>`. So one clip-with-sound plus one voice clip means the *voice* is
+`<Audio 2>` — the opposite of the order they were attached in. This is the one
+thing about ref2va that is guessed wrong every time, which is why it has its own
+test.
+
+### Editing a clip
+
+There is no separate edit mode: reference the clip and describe the change.
+
+```
+minimaxRefs: { videos: [{ video: "…/take.mp4", lengthSec: 3, useItsAudio: false }] }
+prompt: "Keep <Video 1>'s staging, blocking and camera exactly. Restyle it as
+         a night exterior lit by sodium streetlight."
+```
+
+The take is **regenerated, not composited** — a new performance of the same
+idea, with its own soundtrack. That makes it the right tool for a restyle or a
+redirect and the wrong one for a two-second artefact; LTX's `shot_retake` still
+owns in-place repair.
+
+### What it costs
+
+Reference frames are VAE-encoded and ride through **every** sampling step, so a
+reference is not a pointer — it is tokens. Aurea trims and retimes each clip
+with ffmpeg before upload (24 fps, a 768 short edge, the requested window) for
+three reasons that all fail quietly otherwise:
+
+- H3 reads a reference at 24 fps; hand it 30 fps footage and every motion it
+  copies runs 25% slow, with no error anywhere.
+- The node crops a reference to the take's own frame count, so anything past
+  that was decoded for nothing.
+- `ref_image_size: "max"` (2048px short edge) holds identity harder and costs
+  several times more. `"match"` is the default for a reason.
+
+**And it moves the VRAM ceiling.** Measured 2026-08-05 on the 3090 Ti: a 3-second
+reference clip OOM'd where the same shot with a reference *still* rendered fine
+— encoding the clip's frames through the video VAE asked for 2.9 GB on top of
+the 19.7 GB an external ComfyUI was still holding from the previous job. So the
+adapter frees the server's memory **before a render that carries a clip or
+2048px stills, and only then**. Stills at `"match"` rendered fine on the same
+warm card, and neither they nor fl2va should pay a 24 GB reload for a problem
+they don't have.
+
+The autogrow inputs are addressed by their **dotted path** in an API graph —
+`ref_images.ref_image_0`, 0-based and contiguous. Not a list, not a bare name.
+A wrong name here does not fail: ComfyUI accepts the prompt and renders with no
+references at all. `minimax-graphs.test.ts` pins the exact strings, and
+`scripts/test-minimax-h3-ref.mts` re-checks them against a live server.
+
 ## Weights (the Ampere-safe set)
 
 An RTX 3090 Ti is Ampere: no FP8 or FP4 tensor cores, so the NVFP4 text encoder
@@ -93,6 +181,13 @@ Comfy-Org publishes is off the table and **GGUF is the only viable path**.
 
 All four live under `D:\AIModels\Aurea-models\minimax-h3-gguf\` and are
 registered in the model manager as `minimax-h3-gguf`.
+
+The reference head is a fifth file under its own id, so the working fl2va setup
+never goes "not installed" because a second checkpoint appeared in the registry:
+
+| File | Size | Where |
+|---|---|---|
+| `MiniMax-H3-REF2VA-Q3_K_M.gguf` | 15.58 GB | `minimax-h3-ref-gguf/diffusion_models/` |
 
 Q2_K for the text encoder is not timidity: the 32B encoder and the 15.6 GB unet
 both have to fit the same 24 GB card. ComfyUI loads and frees them in sequence,
@@ -174,9 +269,13 @@ curl -X POST http://127.0.0.1:8189/free -H "Content-Type: application/json" \
 
 | What | Where |
 |---|---|
-| Graph builder | `packages/core/src/comfy/minimax-graphs.ts` |
+| Graph builders | `packages/core/src/comfy/minimax-graphs.ts` (`minimaxH3Graph`, `minimaxH3RefGraph`) |
 | Adapter | `packages/core/src/adapters/minimax-video.ts` |
 | Tests | `packages/core/src/comfy/minimax-graphs.test.ts` |
-| Registry entry | `packages/core/src/models/registry.ts` (`minimax-h3-gguf`) |
-| Catalog + rules | `packages/core/src/labs.ts` (`videoCatalog`) |
+| Reference tags | `packages/shared/src/index.ts` (`minimaxRefLabels`, `unknownMinimaxRefTags`) |
+| Registry entries | `packages/core/src/models/registry.ts` (`minimax-h3-gguf`, `minimax-h3-ref-gguf`) |
+| Catalog + rules | `packages/core/src/labs.ts` (`videoCatalog`, `.minimax.reference`) |
+| Video lab panel | `apps/desktop/src/screens/VideoLab.tsx` (`ReferenceLane`) |
+| MCP tool | `packages/core/src/tools.ts` (`reference_video`) |
+| Smoke tests | `scripts/test-minimax-h3.mts`, `scripts/test-minimax-h3-ref.mts` |
 | Settings field | `engines.minimaxUrl` |

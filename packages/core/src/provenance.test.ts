@@ -128,6 +128,61 @@ test("a re-voiced song carries the original's words across the conversion", () =
   assert.equal(meta.lyrics, "[verse]\nsame song, new voice");
 });
 
+test("a track keeps a readable name and its style chips, not the slug", () => {
+  const { dataRoot, settings } = scratch();
+  const projects = new ProjectStore(settings);
+  projects.create("Show");
+  const meta = sidecarFor(
+    projects.importJobOutput({
+      ...musicJob(dataRoot, {
+        description: "A short bright ukulele sting, cheerful sitcom button",
+        styles: ["Upbeat", "Sitcom brass"],
+      }),
+      project: "show",
+    })!,
+  );
+  // cut at the clause break, never mid-word the way the queue row's title is
+  assert.equal(meta.title, "A short bright ukulele sting");
+  assert.deepEqual(meta.styles, ["Upbeat", "Sitcom brass"]);
+});
+
+test("cover art attaches to its track without inheriting the song's words", () => {
+  const { dataRoot, settings } = scratch();
+  const projects = new ProjectStore(settings);
+  projects.create("Show");
+  const song = projects.importJobOutput({ ...musicJob(dataRoot), project: "show" }, {
+    lyrics: "[verse]\nwords that belong to the wav",
+  })!;
+  const songRel = path.relative(dataRoot, song).split(path.sep).join("/");
+
+  const png = path.join(dataRoot, "run3", "cover.png");
+  fs.mkdirSync(path.dirname(png), { recursive: true });
+  fs.writeFileSync(png, "PNG");
+  const coverJob = {
+    ...musicJob(dataRoot),
+    id: "j3",
+    kind: "image",
+    title: "Cover — Breakroom Blues",
+    output: png,
+    payload: { type: "image", prompt: "album art", model: "z-image", aspect: "1:1", count: 1, refs: [], cover: songRel },
+  } as unknown as Job;
+  const cover = projects.importJobOutput({ ...coverJob, project: "show" })!;
+  const coverRel = path.relative(dataRoot, cover).split(path.sep).join("/");
+
+  // the picture is filed as a byproduct, and stays a picture: a PNG that
+  // inherits the song's lyrics is a PNG claiming to have a second verse
+  const coverMeta = sidecarFor(cover);
+  assert.equal(coverMeta.origin, "musicCover");
+  assert.equal(coverMeta.source, songRel);
+  assert.equal(coverMeta.lyrics, undefined);
+
+  // and the track learns where its art is, after the fact
+  projects.patchMeta(songRel, { cover: coverRel });
+  const songMeta = sidecarFor(song);
+  assert.equal(songMeta.cover, coverRel);
+  assert.equal(songMeta.lyrics, "[verse]\nwords that belong to the wav");
+});
+
 test("a sequence saved without audio lanes gets them back on load", () => {
   const { dataRoot, settings } = scratch();
   const dir = path.join(dataRoot, "projects", "old");
