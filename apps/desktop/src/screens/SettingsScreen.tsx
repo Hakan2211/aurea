@@ -27,8 +27,9 @@ import {
 import type { ModelEntry } from "@aurea/shared";
 import { useModels, useRootPreview, useSettings } from "@/hooks";
 import type { Provider } from "@/data/sample";
-import { Chip, GhostButton, GoldButton, Progress, cx } from "@/components/ui";
+import { Chip, GhostButton, GoldButton, Progress, Toggle, cx } from "@/components/ui";
 import { RuntimeCard } from "@/components/RuntimeCard";
+import { trpc } from "@/trpc";
 
 /* Settings — UI-Design/settings.jpg. Sub-nav on the left (General, AI
  * Providers, Storage, Engines, Shortcuts, Advanced); AI Providers is the
@@ -47,24 +48,6 @@ const SECTIONS = [
 
 type SectionId = (typeof SECTIONS)[number]["id"];
 
-function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
-  return (
-    <button
-      onClick={onChange}
-      className={cx(
-        "relative h-5 w-9 shrink-0 rounded-full transition",
-        on ? "bg-gradient-to-b from-gold to-gold-deep" : "bg-cream/12",
-      )}
-    >
-      <span
-        className={cx(
-          "absolute top-0.5 h-4 w-4 rounded-full transition-all",
-          on ? "left-[18px] bg-ink" : "left-0.5 bg-cream/70",
-        )}
-      />
-    </button>
-  );
-}
 
 function SectionHeader({ title, sub }: { title: string; sub: string }) {
   return (
@@ -608,6 +591,28 @@ function ModelsSection() {
 
 /* ---------- engines ---------- */
 
+/** The H3 instance's one tuning knob. It talks to trpc.settings directly
+ * rather than through useSettings — minimaxTuning is a nested object like
+ * videoTuning, and the store merges partial patches the same way. */
+function MinimaxTuning() {
+  const live = trpc.settings.get.useQuery().data;
+  const utils = trpc.useUtils();
+  const { mutate } = trpc.settings.update.useMutation({
+    onSuccess: (next) => utils.settings.get.setData(undefined, next),
+  });
+  const on = live?.engines.minimaxTuning.sageAttention ?? false;
+  return (
+    <div className="mt-3 border-t border-cream/8 pt-3">
+      <TuningToggle
+        label="SageAttention (H3 instance)"
+        hint="Roughly halves H3's render time — needs comfyui-kjnodes AND `pip install sageattention` in the MiniMax ComfyUI's python. Dropped silently when the node is missing."
+        on={on}
+        onChange={(next) => mutate({ engines: { minimaxTuning: { sageAttention: next } } })}
+      />
+    </div>
+  );
+}
+
 function EnginesSection() {
   const {
     engines,
@@ -816,6 +821,7 @@ function EnginesSection() {
           placeholder="http://127.0.0.1:8189"
           className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
         />
+        <MinimaxTuning />
       </div>
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
         {engines.map((e) => (

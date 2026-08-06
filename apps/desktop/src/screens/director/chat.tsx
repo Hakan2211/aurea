@@ -1,5 +1,9 @@
+/* Director — the chat pane of the merged screen. Everything here was the old
+ * DirectorChat centre column; what changed in the merge is the context chip
+ * above the composer (the board's selected shot) and the loss of the asset
+ * rail, which is now only the paperclip popover. */
+
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router";
 import {
   AlertTriangle,
   Check,
@@ -10,10 +14,8 @@ import {
   FileVideo,
   Loader2,
   Paperclip,
-  Pause,
   Play,
   RefreshCw,
-  Search,
   Send,
   Sparkles,
   Square,
@@ -25,8 +27,6 @@ import {
   useAssets,
   useChat,
   useDirectorModel,
-  useJobs,
-  useProjects,
   type UiChatMessage,
   type UiToolCall,
 } from "@/hooks";
@@ -34,6 +34,7 @@ import type { Asset, Job } from "@/data/sample";
 import { composer } from "@/data/sample";
 import { Chip, GhostButton, GoldButton, Progress, Waveform, cx } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
+import type { ShotContext } from "./shared";
 
 const kindIcon = {
   image: FileImage,
@@ -45,73 +46,7 @@ const kindIcon = {
 const attachmentIcon = (kind: string) =>
   kindIcon[kind as keyof typeof kindIcon] ?? Paperclip;
 
-/* ---------- left rail: project + assets ---------- */
-
-function AssetRail({ onAttach }: { onAttach: (asset: Asset) => void }) {
-  const { projects } = useProjects();
-  const { assets } = useAssets();
-  const active = projects[0];
-
-  return (
-    <aside className="flex w-[264px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
-      <button className="m-3 flex items-center justify-between rounded-xl bg-surface p-3 text-left transition hover:bg-raised">
-        <div>
-          <div className="font-serif text-[15px] text-cream">{active.name}</div>
-          <div className="mt-0.5 text-[11px] text-fog">{active.meta}</div>
-        </div>
-        <ChevronDown size={14} className="text-fog" />
-      </button>
-
-      <div className="flex items-center justify-between px-4 pb-2 pt-1">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fog">
-          Assets
-        </span>
-        <Search size={13} className="text-fog" />
-      </div>
-
-      <div className="grid flex-1 auto-rows-min grid-cols-2 gap-2 overflow-y-auto px-3 pb-3">
-        {assets.map((a) => (
-          <AssetThumb key={a.id} asset={a} onAttach={onAttach} />
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function AssetThumb({ asset, onAttach }: { asset: Asset; onAttach: (asset: Asset) => void }) {
-  const Icon = kindIcon[asset.kind];
-  return (
-    <button
-      title={`Attach ${asset.name} to your next message`}
-      onClick={() => onAttach(asset)}
-      className="group relative aspect-square overflow-hidden rounded-lg border border-cream/5 transition hover:border-gold/40"
-    >
-      <div className={cx("absolute inset-0", asset.swatch)} />
-      {asset.url && asset.kind === "image" && (
-        <img src={asset.url} alt={asset.name} className="absolute inset-0 h-full w-full object-cover" />
-      )}
-      {asset.url && asset.kind === "video" && (
-        <video src={asset.url} preload="metadata" muted className="absolute inset-0 h-full w-full object-cover" />
-      )}
-      {(asset.kind === "audio" || asset.kind === "music") && (
-        <Waveform seed={asset.id.length * 5} bars={14} played={0} className="absolute inset-x-2 top-1/2 h-5 -translate-y-1/2" />
-      )}
-      <Icon size={13} className="absolute left-1.5 top-1.5 text-cream/70" />
-      {asset.duration && (
-        <span className="absolute bottom-1 right-1 rounded bg-ink/70 px-1 text-[10px] text-cream/80">
-          {asset.duration}
-        </span>
-      )}
-      <span className="absolute inset-0 hidden items-center justify-center bg-ink/55 group-hover:flex">
-        <Paperclip size={14} className="text-gold" />
-      </span>
-    </button>
-  );
-}
-
-/* ---------- center: chat thread ---------- */
-
-interface AttachApi {
+export interface AttachApi {
   pending: Asset[];
   onAttach: (asset: Asset) => void;
   onDetach: (id: string) => void;
@@ -125,7 +60,22 @@ export interface DirectorSeed {
   sentAt: number;
 }
 
-function Thread({ attach, seed }: { attach: AttachApi; seed: DirectorSeed | null }) {
+/** With a shot selected on the board the message says so out loud, rather than
+ * carrying invisible state: the Director reads the same line the user sent. */
+const withContext = (text: string, ctx: ShotContext | null) =>
+  ctx ? `[Shot ${ctx.code} · ${ctx.scene}${ctx.title ? ` · ${ctx.title}` : ""}]\n${text}` : text;
+
+export function ChatPane({
+  attach,
+  seed,
+  context,
+  clearContext,
+}: {
+  attach: AttachApi;
+  seed: DirectorSeed | null;
+  context: ShotContext | null;
+  clearContext: () => void;
+}) {
   const { messages, busy, send, stop } = useChat();
   const endRef = useRef<HTMLDivElement>(null);
   const last = messages[messages.length - 1];
@@ -137,23 +87,26 @@ function Thread({ attach, seed }: { attach: AttachApi; seed: DirectorSeed | null
   }, [messages.length, last?.text?.length, streamingNow, busy]);
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-2.5 border-b hairline px-6 py-3.5">
-        <Sparkles size={16} className="text-gold" />
-        <div>
-          <h1 className="font-serif text-[17px] leading-tight text-cream">AI Director</h1>
-          <p className="text-[11px] text-fog">Your creative partner in previsualization and production</p>
+    /* min-h-0: the pane is a column flex item now (the split wraps it), so
+       without it the thread's auto minimum height pushes the composer and the
+       header out of the layout entirely */
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex items-center gap-2.5 border-b hairline px-5 py-3">
+        <Sparkles size={15} className="shrink-0 text-gold" />
+        <div className="min-w-0">
+          <h1 className="font-serif text-[15px] leading-tight text-cream">Director</h1>
+          <p className="truncate text-[11px] text-fog">AI filmmaking copilot</p>
         </div>
       </header>
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
         {messages.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
             <Sparkles size={20} className="text-gold/60" />
             <p className="font-serif text-[15px] text-cream/80">The set is quiet.</p>
             <p className="max-w-[380px] text-[12px] leading-relaxed text-fog">
-              Ask the Director for keyframes, a voice take, a music cue, or a full videofast episode —
-              every job lands in the rail on the right and finishes in your library.
+              Ask the Director for keyframes, a voice take, a music cue, or a full videofast
+              episode — boarded shots appear on the canvas beside this thread.
             </p>
           </div>
         )}
@@ -174,9 +127,11 @@ function Thread({ attach, seed }: { attach: AttachApi; seed: DirectorSeed | null
         initialText={seed?.text}
         busy={busy}
         attach={attach}
+        context={context}
+        clearContext={clearContext}
         onSend={(text) => {
           send(
-            text,
+            withContext(text, context),
             attach.pending.map((a) => ({ kind: a.kind, name: a.name, relPath: a.id })),
           );
           attach.onClear();
@@ -256,7 +211,23 @@ function ToolCallCard({ tool }: { tool: UiToolCall }) {
           )}
         </span>
       </div>
-      {tool.summary && <p className="mt-1 truncate text-[11px] text-fog">{tool.summary}</p>}
+      {tool.params ? (
+        <div className="mt-2 border-t hairline pt-2">
+          <div className="pb-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-fog/60">
+            Parameters
+          </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5">
+            {Object.entries(tool.params).map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="font-mono text-[10px] text-fog">{k}</dt>
+                <dd className="truncate text-right font-mono text-[10px] text-cream/85">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : (
+        tool.summary && <p className="mt-1 truncate text-[11px] text-fog">{tool.summary}</p>
+      )}
       {tool.job && (tool.job.status === "running" || tool.job.status === "queued") && (
         <>
           <Progress value={tool.job.progress} className="mt-2" />
@@ -313,7 +284,7 @@ function VideoJobCard({ job, swatch }: { job: Job; swatch: string }) {
       <div className="relative aspect-video overflow-hidden rounded-lg">
         <div className={cx("absolute inset-0", swatch)} />
         <div className="absolute inset-0 flex items-center justify-center">
-          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-ink/60 backdrop-blur">
+          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-ink/60">
             <Play size={16} className="ml-0.5 text-cream" />
           </div>
         </div>
@@ -414,7 +385,8 @@ function ModelPicker() {
   );
 }
 
-/** the paperclip popover — the same library the left rail shows, as a compact list */
+/** the paperclip popover — since the merge this is the only asset browser on
+ * the screen, the board having taken the left rail's place */
 function AttachPicker({ attach }: { attach: AttachApi }) {
   const { assets } = useAssets();
   const [open, setOpen] = useState(false);
@@ -464,12 +436,16 @@ function AttachPicker({ attach }: { attach: AttachApi }) {
 function Composer({
   busy,
   attach,
+  context,
+  clearContext,
   onSend,
   onStop,
   initialText,
 }: {
   busy: boolean;
   attach: AttachApi;
+  context: ShotContext | null;
+  clearContext: () => void;
   onSend: (text: string) => void;
   onStop: () => void;
   initialText?: string;
@@ -483,7 +459,26 @@ function Composer({
   };
 
   return (
-    <footer className="border-t hairline px-6 py-4">
+    <footer className="border-t hairline px-5 py-4">
+      {context && (
+        <div className="mb-2 flex">
+          <span
+            title={`Messages act on ${context.code}. Click × to talk about the episode instead.`}
+            className="flex min-w-0 items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/8 px-2 py-1 text-[11px] text-cream/85"
+          >
+            <span className="font-mono text-gold/90">{context.code}</span>
+            <span className="text-fog">·</span>
+            <span className="max-w-[220px] truncate">{context.title || context.scene}</span>
+            <button
+              onClick={clearContext}
+              title="Drop the shot context"
+              className="text-fog transition hover:text-ember"
+            >
+              <X size={11} />
+            </button>
+          </span>
+        </div>
+      )}
       <div className="rounded-2xl border border-cream/10 bg-surface px-4 py-3 transition focus-within:border-gold/40">
         {attach.pending.length > 0 && (
           <div className="mb-2.5 flex flex-wrap gap-1.5">
@@ -518,13 +513,21 @@ function Composer({
               e.preventDefault();
               submit();
             }
+            // Esc in the composer clears the shot context, not the selection's
+            // slide-over — that one is handled on the screen
+            if (e.key === "Escape" && context) {
+              e.stopPropagation();
+              clearContext();
+            }
           }}
           placeholder={
             busy
               ? "The Director is working…"
-              : attach.pending.length
-                ? "What should the Director do with these?"
-                : "Message the Director…"
+              : context
+                ? `Ask the Director about ${context.code}…`
+                : attach.pending.length
+                  ? "What should the Director do with these?"
+                  : "Ask Director anything…"
           }
           className="w-full resize-none bg-transparent text-[13px] text-cream placeholder:text-fog focus:outline-none"
         />
@@ -557,118 +560,5 @@ function Composer({
         AI outputs can make mistakes. Review before use.
       </p>
     </footer>
-  );
-}
-
-/* ---------- right rail: job center ---------- */
-
-const statusChip: Record<Job["status"], { tone: "gold" | "muted" | "sage" | "ember"; label: string }> = {
-  running: { tone: "gold", label: "Running" },
-  queued: { tone: "muted", label: "Queued" },
-  completed: { tone: "sage", label: "Done" },
-  failed: { tone: "ember", label: "Failed" },
-};
-
-function JobRail() {
-  const { jobs, vram } = useJobs();
-  const usedPct = (vram.used / vram.total) * 100;
-  const allocPct = ((vram.allocated - vram.used) / vram.total) * 100;
-
-  return (
-    <aside className="flex w-[300px] shrink-0 flex-col border-l hairline bg-[#0e0e10]">
-      <header className="flex items-center justify-between px-4 py-3.5">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fog">
-          Job center
-        </span>
-        <button
-          title="Pause queue"
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-fog transition hover:bg-cream/5 hover:text-cream"
-        >
-          <Pause size={13} />
-        </button>
-      </header>
-
-      <div className="mx-3 rounded-xl bg-surface p-3">
-        <div className="flex items-baseline justify-between">
-          <span className="text-[11px] text-fog">VRAM</span>
-          <span className="text-[13px] text-cream">
-            <span className="font-semibold text-gold">{vram.used}</span>
-            <span className="text-fog"> / {vram.total} GB</span>
-          </span>
-        </div>
-        <div className="mt-2 flex h-1.5 gap-px overflow-hidden rounded-full bg-cream/8">
-          <div className="bg-gold" style={{ width: `${usedPct}%` }} />
-          <div className="bg-gold/35" style={{ width: `${allocPct}%` }} />
-        </div>
-        <div className="mt-1.5 flex gap-3 text-[10px] text-fog">
-          <span className="flex items-center gap-1">
-            <i className="h-1.5 w-1.5 rounded-full bg-gold" /> used
-          </span>
-          <span className="flex items-center gap-1">
-            <i className="h-1.5 w-1.5 rounded-full bg-gold/35" /> allocated
-          </span>
-          <span className="flex items-center gap-1">
-            <i className="h-1.5 w-1.5 rounded-full bg-cream/15" /> free
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-3 flex-1 space-y-2 overflow-y-auto px-3 pb-3">
-        {jobs.map((j) => (
-          <JobRow key={j.id} job={j} />
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function JobRow({ job }: { job: Job }) {
-  const chip = statusChip[job.status];
-  const Icon = kindIcon[job.kind === "tts" ? "audio" : job.kind === "music" ? "music" : job.kind];
-  return (
-    <div className="rounded-xl bg-surface p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon size={14} className="shrink-0 text-gold/70" />
-          <span className="truncate text-[12px] text-cream/90">{job.title}</span>
-        </div>
-        <Chip tone={chip.tone}>{chip.label}</Chip>
-      </div>
-      <div className="mt-1.5 text-[11px] text-fog">
-        {job.engine} · {job.priority}
-      </div>
-      {job.status === "running" && (
-        <>
-          <Progress value={job.progress} className="mt-2" />
-          <div className="mt-1 flex justify-between text-[10px] text-fog">
-            <span>{job.stage}</span>
-            <span>{job.eta}</span>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ---------- screen ---------- */
-
-export function DirectorChat() {
-  const seed = (useLocation().state as { seed?: DirectorSeed } | null)?.seed ?? null;
-  const [pending, setPending] = useState<Asset[]>([]);
-  const attach: AttachApi = {
-    pending,
-    onAttach: (asset) =>
-      setPending((prev) =>
-        prev.some((p) => p.id === asset.id) || prev.length >= 8 ? prev : [...prev, asset],
-      ),
-    onDetach: (id) => setPending((prev) => prev.filter((p) => p.id !== id)),
-    onClear: () => setPending([]),
-  };
-  return (
-    <div className="flex h-full">
-      <AssetRail onAttach={attach.onAttach} />
-      <Thread attach={attach} seed={seed} />
-      <JobRail />
-    </div>
   );
 }

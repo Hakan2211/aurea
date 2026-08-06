@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -12,7 +13,6 @@ import {
   Download,
   Expand,
   Heart,
-  HelpCircle,
   ImagePlus,
   Layers,
   Loader2,
@@ -20,7 +20,6 @@ import {
   MoreHorizontal,
   Pencil,
   RefreshCw,
-  Settings2,
   Sparkles,
   Trash2,
   X,
@@ -28,8 +27,15 @@ import {
 import { falImageEstimate, falSizeError } from "@aurea/shared";
 import { downloadAsset, useImageLab, useLikes, useSystem, useJobs } from "@/hooks";
 import type { ImageHistoryEntry, ImageTile } from "@/data/sample";
-import { Chip, cx } from "@/components/ui";
+import { Chip, SectionLabel, Segmented, StatusBar, cx } from "@/components/ui";
 import { fileToPngBase64 } from "@/components/imageFile";
+import { PromptBuilder } from "@/screens/image/PromptBuilder";
+import { PromptLibraryPanel } from "@/screens/image/PromptLibraryPanel";
+import { PromptLibraryRail } from "@/screens/image/PromptLibraryRail";
+import { LabHeader, type RollScope, type RollView } from "@/screens/image/LabHeader";
+import { PROMPT_MAX, usePromptState, type PromptState } from "@/screens/image/promptState";
+import { useEnhanceControl } from "@/screens/image/EnhanceButton";
+import { useActivePromptProject, usePromptDecks } from "@/screens/image/promptHooks";
 
 /* Image lab — UI-Design/Image Lab.jpg. Prompt-to-image with the real engine
  * roster (Krea 2 default, z-image-turbo drafts, Qwen-Edit reference edits);
@@ -37,7 +43,6 @@ import { fileToPngBase64 } from "@/components/imageFile";
  * through Qwen-Edit 2509 with up to 3 reference images (the QIE multi-ref
  * consistency stack — subject first, then scene/prop/style). */
 
-const PROMPT_MAX = 1000;
 /** seed of the batch on the canvas — what the refresh button restores */
 const LAST_SEED = 746583928;
 
@@ -53,6 +58,9 @@ const MODE_LABEL: Record<LabMode, string> = {
 /** stills the canvas renders before the "Show older" button takes over — the
  * roll can be hundreds deep, and mounting all of them costs a visible beat */
 const ROLL_PAGE = 60;
+
+/** what the Model picker starts on in generate/deck mode */
+const DEFAULT_GENERATOR = "krea2";
 
 const isoDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -126,12 +134,7 @@ export function parseDeckImport(text: string): string[] {
 /* ---------- left panel ---------- */
 
 function PanelLabel({ children, hint }: { children: React.ReactNode; hint?: boolean }) {
-  return (
-    <div className="flex items-center justify-between">
-      <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">{children}</h3>
-      {hint && <HelpCircle size={12} className="text-fog/50" />}
-    </div>
-  );
+  return <SectionLabel hint={hint}>{children}</SectionLabel>;
 }
 
 /** sample-data models carry no role — infer it from the id for those */
@@ -182,7 +185,19 @@ function NumberField({
   );
 }
 
-function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
+function ParamsPanel({
+  mode,
+  setMode,
+  refs,
+  editorId,
+  setEditorId,
+  refsMax,
+  ps,
+  libraryDocked,
+  setLibraryDocked,
+  libraryOpen,
+  setLibraryOpen,
+}: {
   mode: LabMode;
   setMode: (m: LabMode) => void;
   refs: RefImage[];
@@ -191,10 +206,21 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
   editorId: string;
   setEditorId: (id: string) => void;
   refsMax: number;
+  /** the prompt is owned by the screen — the docked library rail is a sibling
+   * column that composes into the same prompt */
+  ps: PromptState;
+  libraryDocked: boolean;
+  setLibraryDocked: (o: boolean) => void;
+  /** the full library modal — managing presets, not composing with them */
+  libraryOpen: boolean;
+  setLibraryOpen: (o: boolean) => void;
 }) {
   const lab = useImageLab();
-  const [prompt, setPrompt] = useState(lab.prompt);
-  const [modelId, setModelId] = useState(lab.models[0].id);
+  const { prompt, setPrompt, chips, commitChips, rawMode, toggleRaw } = ps;
+  /** Krea 2 is the house generator (photoreal heroes) — the catalog lists
+   * z-image first because it's the fast drafting model, but that is not what
+   * anyone wants pre-selected. Falls back to whatever IS runnable below. */
+  const [modelId, setModelId] = useState(DEFAULT_GENERATOR);
   const [modelOpen, setModelOpen] = useState(false);
   const [aspect, setAspect] = useState<Aspect>("3:2");
   /** no preset is the honest default — the prompt reaches the model unmodified
@@ -202,7 +228,7 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
   const [preset, setPreset] = useState<string | null>(null);
   const [seed, setSeed] = useState(String(lab.seed));
   const [count, setCount] = useState(1);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(true);
   const [width, setWidth] = useState("");
   const [height, setHeight] = useState("");
   const [steps, setSteps] = useState("");
@@ -219,6 +245,51 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
 
+  /* ---- prompt builder + library (Track B3) ---- */
+  const promptProject = useActivePromptProject();
+  /** shows/hides the docked library column — rendered in whichever section
+   * heads the panel for the current mode */
+  const libraryToggle = (
+    <button
+      onClick={() => setLibraryDocked(!libraryDocked)}
+      title={
+        libraryDocked
+          ? "Hide the prompt library column"
+          : "Show the prompt library column — saved fragments and style packs"
+      }
+      className={cx(
+        "flex items-center gap-1 rounded-pill border px-2 py-0.5 text-2xs font-medium transition duration-[var(--dur)]",
+        libraryDocked
+          ? "border-gold/50 bg-gold/12 text-gold"
+          : "border-cream/12 text-cream/75 hover:border-gold/40 hover:text-gold",
+      )}
+    >
+      <BookOpen size={10} /> Library
+    </button>
+  );
+
+  const enhanceCtl = useEnhanceControl({
+    prompt,
+    projectId: promptProject,
+    // collapse the accepted text back into chips on comma boundaries so the
+    // builder stays usable after an enhance
+    onAccept: ps.acceptText,
+  });
+
+  /* ---- deck persistence (prompts.deck*) ---- */
+  const deckStore = usePromptDecks();
+  const [deckId, setDeckId] = useState<string | null>(null);
+  const [deckPickOpen, setDeckPickOpen] = useState(false);
+  /** deck id armed for delete inside the picker — inline confirm, no dialogs */
+  const [deckArmed, setDeckArmed] = useState<string | null>(null);
+  /** load-newest runs once per screen visit, not on every deckList refetch */
+  const deckLoadedRef = useRef(false);
+  /** JSON of the last payload written — the autosave's "anything changed?" */
+  const deckSavedRef = useRef("");
+  /** serializes the FIRST save — two debounce fires before the server hands
+   * back an id would otherwise mint two deck files */
+  const deckCreatingRef = useRef(false);
+
   const deckLines = deckItems
     .map((l) => l.trim())
     .filter(Boolean)
@@ -231,6 +302,76 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
   const deckable = generators.filter((m) =>
     lab.deckModels.length ? lab.deckModels.includes(m.id) : true,
   );
+  /** the model a deck run (and the persisted deck) actually uses — a cloud
+   * model left selected on the generate tab can't run a deck, so fall back */
+  const deckModel = deckable.some((m) => m.id === modelId)
+    ? modelId
+    : (deckable[0]?.id ?? "z-image");
+
+  const loadDeck = (d: { id: string; title: string; prompts: string[]; model: string }) => {
+    setDeckId(d.id);
+    setDeckName(d.title);
+    setDeckItems(d.prompts.length ? d.prompts : [""]);
+    if (deckable.some((m) => m.id === d.model)) setModelId(d.model);
+    // mark the just-loaded state as saved, or the autosave would immediately
+    // rewrite the file it came from
+    deckSavedRef.current = JSON.stringify({ title: d.title, prompts: d.prompts, model: d.model });
+    setDeckPickOpen(false);
+    setDeckArmed(null);
+  };
+  const newDeck = () => {
+    setDeckId(null);
+    setDeckName(
+      `Deck — ${new Date().toLocaleDateString(undefined, { day: "numeric", month: "short" })}`,
+    );
+    setDeckItems([""]);
+    deckSavedRef.current = "";
+    setDeckPickOpen(false);
+    setDeckArmed(null);
+  };
+
+  // first visit to Deck mode: pick up the newest persisted deck, or start a
+  // fresh one titled by date — the deck used to be ephemeral component state
+  // and vanished with the screen
+  useEffect(() => {
+    if (mode !== "deck" || deckLoadedRef.current || !deckStore.ready) return;
+    deckLoadedRef.current = true;
+    const newest = deckStore.decks[0];
+    if (newest) loadDeck(newest);
+    else newDeck();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, deckStore.ready, deckStore.decks]);
+
+  // debounced autosave — every edit lands on disk ~800ms after typing stops.
+  // Empty untitled decks are never minted; the trimmed-prompt payload is what
+  // persists, matching what Generate would run.
+  useEffect(() => {
+    if (mode !== "deck" || !deckLoadedRef.current) return;
+    const title = deckName.trim();
+    const prompts = deckItems.map((s) => s.trim()).filter(Boolean);
+    if (!title) return;
+    if (!deckId && prompts.length === 0) return;
+    if (!deckId && deckCreatingRef.current) return; // first save still in flight
+    const key = JSON.stringify({ title, prompts, model: deckModel });
+    if (key === deckSavedRef.current) return;
+    const t = setTimeout(() => {
+      deckSavedRef.current = key;
+      if (!deckId) deckCreatingRef.current = true;
+      deckStore
+        .save({ id: deckId ?? undefined, title, prompts, model: deckModel })
+        .then((d) => {
+          deckCreatingRef.current = false;
+          setDeckId(d.id);
+        })
+        .catch(() => {
+          // failed write ≠ saved — clear the marker so the next edit retries
+          deckCreatingRef.current = false;
+          deckSavedRef.current = "";
+        });
+    }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, deckName, deckItems, deckModel, deckId]);
   /** more than one edit model now (local qwen-edit, cloud gpt-image-2), so
    * edit mode gets the same picker generate mode has */
   const editors = lab.models.filter((m) => modelDoes(m, "edit"));
@@ -238,9 +379,11 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
   const pickable = mode === "edit" ? editors : mode === "deck" ? deckable : generators;
   /** catalog says the model can't run — warn up front instead of letting the
    * job die in engine preflight with nothing visible in the lab */
-  const activeId = mode === "edit" ? (editor?.id ?? "qwen-edit") : modelId;
   const model =
     (mode === "edit" ? editor : generators.find((m) => m.id === modelId)) ?? generators[0];
+  /** resolved through `model`, never the raw state: the default id is a
+   * preference, and a catalog that doesn't offer it must not be sent it */
+  const activeId = mode === "edit" ? (editor?.id ?? "qwen-edit") : (model?.id ?? modelId);
   const editorMissing = mode !== "deck" && !!model && !modelAvailable(model);
 
   /** paid-per-image model — everything that can spend money shows a number.
@@ -280,15 +423,24 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
       : !!prompt.trim() && (mode === "generate" || refs.length > 0));
 
   return (
-    <aside className="flex w-[264px] shrink-0 flex-col gap-5 overflow-y-auto border-r hairline bg-[#0e0e10] p-4">
-      <section className="flex rounded-xl border border-cream/10 bg-surface p-1">
+    <aside className="flex w-[284px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">
+      {/* mode switch — the slider is a real element so the change reads as
+          movement, not a repaint */}
+      <section className="relative flex rounded-xl border border-cream/10 bg-surface p-1">
+        <span
+          className="absolute inset-y-1 w-[calc((100%-0.5rem)/3)] rounded-lg bg-gradient-to-b from-gold/22 to-gold/10 ring-1 ring-gold/35 transition-transform duration-[var(--dur)] ease-[var(--ease-spring)]"
+          style={{
+            transform: `translateX(${(["generate", "edit", "deck"] as const).indexOf(mode) * 100}%)`,
+          }}
+        />
         {(["generate", "edit", "deck"] as const).map((m) => (
           <button
             key={m}
             onClick={() => setMode(m)}
             className={cx(
-              "flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition",
-              mode === m ? "bg-gold/15 text-gold" : "text-fog hover:text-cream",
+              "relative flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition duration-[var(--dur)]",
+              mode === m ? "text-gold" : "text-fog hover:text-cream",
             )}
           >
             {MODE_LABEL[m]}
@@ -297,14 +449,106 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
       </section>
 
       {mode === "deck" ? (
-        <section>
-          <PanelLabel hint>Deck</PanelLabel>
+        <section className="relative">
+          {/* the toggle rides along here too — Deck mode replaces the Prompt
+              section, and that used to be the only place it lived */}
+          <SectionLabel right={libraryToggle}>Deck</SectionLabel>
           <input
             value={deckName}
             onChange={(e) => setDeckName(e.target.value.slice(0, 60))}
             placeholder="Deck name (folder name)"
             className="mt-2 w-full rounded-xl border border-cream/10 bg-surface px-3 py-2.5 text-[12px] text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
           />
+          {/* persistence strip — which saved deck this is, and its save state */}
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            {deckStore.decks.length > 0 ? (
+              <button
+                onClick={() => {
+                  setDeckPickOpen((o) => !o);
+                  setDeckArmed(null);
+                }}
+                className={cx(
+                  "flex items-center gap-1 text-[10px] transition",
+                  deckPickOpen ? "text-gold" : "text-fog/80 hover:text-gold",
+                )}
+              >
+                <Layers size={10} />
+                {deckStore.decks.length} saved deck{deckStore.decks.length === 1 ? "" : "s"}
+                <ChevronDown
+                  size={10}
+                  className={cx("transition-transform", deckPickOpen && "rotate-180")}
+                />
+              </button>
+            ) : (
+              <button
+                onClick={newDeck}
+                className="text-[10px] text-fog/80 transition hover:text-gold"
+              >
+                New deck
+              </button>
+            )}
+            <span className="text-[10px] text-fog/60">
+              {deckStore.saving
+                ? "Saving…"
+                : deckStore.saveError
+                  ? "Save failed — edits retry it"
+                  : deckId
+                    ? "Saved"
+                    : "Autosaves once it has a title + prompt"}
+            </span>
+          </div>
+          {deckPickOpen && (
+            <div className="absolute inset-x-0 z-10 mt-1 overflow-hidden rounded-xl border border-cream/12 bg-raised shadow-xl">
+              <button
+                onClick={newDeck}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-gold transition hover:bg-cream/5"
+              >
+                + New deck
+              </button>
+              {deckStore.decks.map((d) => (
+                <div
+                  key={d.id}
+                  className={cx(
+                    "flex w-full items-center gap-1.5 px-3 py-2 transition hover:bg-cream/5",
+                    d.id === deckId ? "text-gold" : "text-cream/85",
+                  )}
+                >
+                  <button onClick={() => loadDeck(d)} className="min-w-0 flex-1 text-left">
+                    <span className="block truncate text-[11px]">{d.title}</span>
+                    <span className="block text-[9px] text-fog">
+                      {d.prompts.length} prompt{d.prompts.length === 1 ? "" : "s"} · {d.model}
+                    </span>
+                  </button>
+                  {deckArmed === d.id ? (
+                    <button
+                      onClick={() => {
+                        deckStore.remove(d.id);
+                        setDeckArmed(null);
+                        // deleting the deck under your feet → keep the text
+                        // on screen but detach it, so the next edit saves a
+                        // fresh file instead of resurrecting the dead id
+                        if (d.id === deckId) {
+                          setDeckId(null);
+                          deckSavedRef.current = "";
+                        }
+                      }}
+                      className="shrink-0 rounded-lg bg-red-500/85 px-1.5 py-0.5 text-[9px] font-semibold text-cream transition hover:bg-red-500"
+                    >
+                      Sure?
+                    </button>
+                  ) : (
+                    <button
+                      title="Delete deck"
+                      onClick={() => setDeckArmed(d.id)}
+                      className="shrink-0 text-fog/50 transition hover:text-red-400"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mt-2 space-y-1.5">
             {deckItems.map((text, i) => (
               <div
@@ -397,21 +641,52 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
         </section>
       ) : (
         <section>
-          <PanelLabel hint>Prompt</PanelLabel>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value.slice(0, PROMPT_MAX))}
-            rows={7}
-            className="mt-2 w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 text-[12px] leading-relaxed text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
-            placeholder={
-              mode === "edit"
-                ? "Describe the new scene for the referenced subject…"
-                : "Describe the image…"
-            }
-          />
-          <div className="mt-1 text-right text-[10px] text-fog/70">
-            {prompt.length} / {PROMPT_MAX}
+          <div className="flex items-center justify-between">
+            <h3 className="text-2xs font-semibold uppercase tracking-[0.14em] text-fog">Prompt</h3>
+            <div className="flex items-center gap-1.5">
+              {enhanceCtl.button}
+              {libraryToggle}
+            </div>
           </div>
+          {rawMode ? (
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value.slice(0, PROMPT_MAX))}
+              rows={7}
+              className="mt-2 w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 text-[12px] leading-relaxed text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
+              placeholder={
+                mode === "edit"
+                  ? "Describe the new scene for the referenced subject…"
+                  : "Describe the image…"
+              }
+            />
+          ) : (
+            <div className="mt-2">
+              <PromptBuilder chips={chips} onChips={commitChips} />
+            </div>
+          )}
+          {/* the editor switch used to be a 10px text link that read as a
+              caption; it's a control, so it looks like one */}
+          <div className="mt-1.5 flex items-center justify-between">
+            <Segmented
+              value={rawMode ? "text" : "chips"}
+              onChange={(v) => {
+                if ((v === "text") !== rawMode) toggleRaw();
+              }}
+              options={[
+                { value: "text", label: "Text", title: "Write the prompt as free text" },
+                {
+                  value: "chips",
+                  label: "Chips",
+                  title: "Edit the prompt as reorderable chips, split on commas",
+                },
+              ]}
+            />
+            <span className="text-[10px] tabular-nums text-fog/70">
+              {prompt.length} / {PROMPT_MAX}
+            </span>
+          </div>
+          {enhanceCtl.card}
         </section>
       )}
 
@@ -748,7 +1023,12 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
         )}
       </section>
 
-      <div className="mt-auto space-y-2 pt-2">
+      </div>
+
+      {/* The commit bar. It used to sit at the end of the scrolling column, so
+          on a tall panel the one button that spends money scrolled out of
+          sight — it is pinned now, with the cost line docked to it. */}
+      <div className="shrink-0 space-y-2 border-t hairline bg-[#0e0e10]/95 p-3 backdrop-blur">
         <div className="flex gap-px">
         <button
           disabled={!canGenerate}
@@ -768,11 +1048,8 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
               lab.generateDeck({
                 deckName: deckName.trim(),
                 prompts: deckLines,
-                // a cloud model left selected from the generate tab can't run
-                // a deck — fall back rather than enqueue something that dies
-                model: deckable.some((m) => m.id === modelId)
-                  ? modelId
-                  : (deckable[0]?.id ?? "z-image"),
+                // same fallback the persisted deck stores — see deckModel
+                model: deckModel,
                 ...shared,
               });
             } else {
@@ -794,7 +1071,13 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
               });
             }
           }}
-          className="flex flex-1 items-center justify-center gap-2 rounded-l-xl bg-gradient-to-b from-gold to-gold-deep py-2.5 text-[13px] font-semibold text-ink transition hover:brightness-110 active:brightness-95 disabled:pointer-events-none disabled:opacity-50"
+          className={cx(
+            "flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-[13px] font-semibold text-ink",
+            "bg-gradient-to-b from-[#dcc08e] via-gold to-gold-deep transition duration-[var(--dur)]",
+            "shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_2px_12px_rgba(201,169,110,0.2)]",
+            "hover:brightness-110 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.3),0_6px_24px_rgba(201,169,110,0.4)]",
+            "active:brightness-95 disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none",
+          )}
         >
           <Sparkles size={13} />{" "}
           {lab.sending
@@ -810,9 +1093,6 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
                   : mode === "deck"
                   ? `Generate deck${deckLines.length ? ` · ${deckLines.length}` : ""}`
                   : "Generate"}
-        </button>
-        <button className="flex w-9 items-center justify-center rounded-r-xl bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110">
-          <ChevronDown size={14} />
         </button>
         </div>
         {/* cost lands above the error slot so it is visible while you set up
@@ -834,6 +1114,13 @@ function ParamsPanel({ mode, setMode, refs, editorId, setEditorId, refsMax }: {
           </p>
         ) : null}
       </div>
+
+      <PromptLibraryPanel
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        prompt={prompt}
+        onPick={ps.pickPreset}
+      />
     </aside>
   );
 }
@@ -938,22 +1225,45 @@ function FailureCard({
   );
 }
 
-function ResultTile({ tile, actions }: { tile: ImageTile; actions: TileActions }) {
+function ResultTile({
+  tile,
+  actions,
+  view,
+  index,
+}: {
+  tile: ImageTile;
+  actions: TileActions;
+  /** masonry keeps the true aspect; grid crops to a uniform contact sheet */
+  view: "masonry" | "grid";
+  /** position in the roll — drives the entrance stagger */
+  index: number;
+}) {
   /** the tile's own modal layer: delete needs a confirm, upscale needs a
    * choice, and neither fits in the hover bar */
   const [overlay, setOverlay] = useState<null | "delete" | "upscale">(null);
+  const masonry = view === "masonry";
+  /** the wave: tiles land one after another instead of all at once. Capped so
+   * a 60-image roll doesn't spend two seconds assembling itself. */
+  const stagger = { animationDelay: `${Math.min(index, 14) * 26}ms` };
 
   if (tile.generating)
     return (
-      <div className="relative flex aspect-[3/2] items-center justify-center overflow-hidden rounded-xl border border-gold/40">
+      <div
+        style={stagger}
+        className={cx(
+          "anim-rise relative flex aspect-[3/2] items-center justify-center overflow-hidden rounded-panel border border-gold/40",
+          masonry && "mb-3 break-inside-avoid",
+        )}
+      >
         <div className={cx("absolute inset-0", tile.swatch, "opacity-60")} />
-        <div className="absolute inset-0 animate-pulse bg-gradient-to-tr from-transparent via-gold/10 to-transparent" />
+        {/* a sweep, not a blink — the pulse read as a broken image */}
+        <div className="absolute inset-0 animate-[aurea-sweep_1.8s_var(--ease-out-quart)_infinite] bg-[linear-gradient(105deg,transparent_35%,rgba(201,169,110,0.16)_50%,transparent_65%)]" />
         <div className="relative flex flex-col items-center gap-1.5 px-3 text-center">
-          <Sparkles size={18} className="text-gold" />
+          <Sparkles size={18} className="animate-pulse text-gold" />
           <span className="max-w-full truncate text-[12px] text-cream/90">
             {tile.generating.label ?? "Generating…"}
           </span>
-          <span className="text-[12px] font-semibold tabular-nums text-gold">
+          <span className="font-serif text-lg font-semibold tabular-nums text-gold">
             {Math.round(tile.generating.progress)}%
           </span>
           {tile.generating.label && (
@@ -967,19 +1277,36 @@ function ResultTile({ tile, actions }: { tile: ImageTile; actions: TileActions }
   const upscaling = actions.upscaling(tile);
 
   return (
-    <div className="group relative aspect-[3/2] overflow-hidden rounded-xl">
+    <div
+      style={stagger}
+      className={cx(
+        "anim-rise group relative overflow-hidden rounded-panel ring-1 ring-cream/6",
+        "transition-[box-shadow,transform,--tw-ring-color] duration-[var(--dur-slow)] ease-[var(--ease-out-quart)]",
+        "hover:z-10 hover:-translate-y-0.5 hover:shadow-[0_20px_50px_-12px_rgba(0,0,0,0.75)] hover:ring-gold/45",
+        masonry ? "mb-3 break-inside-avoid" : "aspect-[4/3]",
+        masonry && !tile.url && "aspect-[3/2]",
+      )}
+    >
       <div className={cx("absolute inset-0", tile.swatch)} />
       {tile.url ? (
+        /* in-flow image at its natural aspect — this is what makes the masonry.
+           In grid view it fills a uniform cell instead. */
         <button
           onClick={() => actions.onOpen(tile)}
           title="Open full size"
-          className="absolute inset-0 cursor-zoom-in"
+          /* `relative` is load-bearing: the swatch behind is absolutely
+             positioned, so a static button would let the placeholder paint
+             OVER the loaded still */
+          className={cx("relative block cursor-zoom-in", masonry ? "w-full" : "h-full w-full")}
         >
           <img
             src={tile.url}
             alt={tile.name ?? ""}
             draggable={false}
-            className="h-full w-full object-cover"
+            className={cx(
+              "block transition-transform duration-[900ms] ease-[var(--ease-out-quart)] group-hover:scale-[1.04]",
+              masonry ? "h-auto w-full" : "h-full w-full object-cover",
+            )}
           />
         </button>
       ) : (
@@ -987,14 +1314,18 @@ function ResultTile({ tile, actions }: { tile: ImageTile; actions: TileActions }
         <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_30%,rgba(237,234,228,0.07),transparent_60%)]" />
       )}
 
+      {/* the scrim that makes overlaid chrome legible on a bright still */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-ink/85 via-ink/25 to-transparent opacity-0 transition-opacity duration-[var(--dur-slow)] group-hover:opacity-100" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-ink/70 to-transparent opacity-0 transition-opacity duration-[var(--dur-slow)] group-hover:opacity-100" />
+
       {upscaling && (
-        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-ink/70 px-2.5 py-1 text-[10px] font-medium text-gold backdrop-blur">
+        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-pill bg-ink/70 px-2.5 py-1 text-[10px] font-medium text-gold backdrop-blur">
           <Loader2 size={11} className="animate-spin" /> Upscaling…
         </span>
       )}
 
       {tile.upscaled && !upscaling && (
-        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-ink/70 px-2.5 py-1 text-[10px] font-medium text-gold backdrop-blur">
+        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-pill bg-ink/70 px-2.5 py-1 text-[10px] font-medium text-gold backdrop-blur">
           <Maximize2 size={11} /> Upscaled
         </span>
       )}
@@ -1003,7 +1334,8 @@ function ResultTile({ tile, actions }: { tile: ImageTile; actions: TileActions }
         title={liked ? "Unlike" : "Like"}
         onClick={() => actions.onLike(tile)}
         className={cx(
-          "absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-ink/50 backdrop-blur transition",
+          "absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-ink/50 backdrop-blur",
+          "transition duration-[var(--dur)] ease-[var(--ease-spring)] hover:scale-110",
           liked ? "text-gold" : "text-cream/70 opacity-0 hover:text-cream group-hover:opacity-100",
         )}
       >
@@ -1062,12 +1394,25 @@ function ResultTile({ tile, actions }: { tile: ImageTile; actions: TileActions }
       )}
 
       {overlay === null && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center pb-3 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100">
-          <div className="glass flex overflow-hidden rounded-xl">
+        <div
+          className={cx(
+            "pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-center gap-1.5 px-3 pb-3",
+            "translate-y-1.5 opacity-0 transition duration-[var(--dur-slow)] ease-[var(--ease-out-quart)]",
+            "group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100",
+          )}
+        >
+          {tile.name && (
+            <span className="max-w-full truncate text-[10px] text-cream/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
+              {tile.name}
+            </span>
+          )}
+          {/* icon-only: five labelled buttons were wider than a masonry column
+              and got clipped by the tile's own overflow */}
+          <div className="glass flex max-w-full overflow-hidden rounded-pill shadow-[0_8px_24px_rgba(0,0,0,0.45)]">
             {[
-              { icon: Expand, label: "Open", run: () => actions.onOpen(tile) },
+              { icon: Expand, label: "Open full size", run: () => actions.onOpen(tile) },
               { icon: Maximize2, label: "Upscale", run: () => setOverlay("upscale") },
-              { icon: Pencil, label: "Edit", run: () => actions.onEdit(tile) },
+              { icon: Pencil, label: "Use as reference", run: () => actions.onEdit(tile) },
               { icon: Download, label: "Download", run: () => actions.onDownload(tile) },
               { icon: Trash2, label: "Delete", run: () => setOverlay("delete"), danger: true },
             ].map(({ icon: Icon, label, run, danger }) => (
@@ -1076,15 +1421,113 @@ function ResultTile({ tile, actions }: { tile: ImageTile; actions: TileActions }
                 title={label}
                 onClick={run}
                 className={cx(
-                  "flex flex-col items-center gap-1 px-3 py-2.5 text-[10px] text-cream/85 transition hover:bg-cream/8",
+                  "flex h-9 w-9 shrink-0 items-center justify-center text-cream/85",
+                  "transition duration-[var(--dur-fast)] hover:bg-cream/10",
                   danger ? "hover:text-red-400" : "hover:text-gold",
                 )}
               >
                 <Icon size={14} />
-                {label}
               </button>
             ))}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** List view — the roll as a table of stills. Same verbs as the tile bar, laid
+ * out for scanning names and dates rather than looking at pictures. */
+function ResultRow({
+  tile,
+  actions,
+  index,
+}: {
+  tile: ImageTile;
+  actions: TileActions;
+  index: number;
+}) {
+  const [armed, setArmed] = useState(false);
+  const liked = actions.liked(tile);
+  const upscaling = actions.upscaling(tile);
+
+  return (
+    <div
+      style={{ animationDelay: `${Math.min(index, 14) * 18}ms` }}
+      className={cx(
+        "anim-rise group flex items-center gap-3 rounded-card border border-cream/8 bg-surface/40 p-2",
+        "transition duration-[var(--dur)] hover:border-gold/30 hover:bg-surface/70",
+      )}
+    >
+      <button
+        onClick={() => actions.onOpen(tile)}
+        title="Open full size"
+        className="relative h-11 w-16 shrink-0 cursor-zoom-in overflow-hidden rounded-md"
+      >
+        <span className={cx("absolute inset-0", tile.swatch)} />
+        {tile.url && (
+          <img src={tile.url} alt="" className="relative h-full w-full object-cover" />
+        )}
+        {tile.generating && (
+          <span className="absolute inset-0 flex items-center justify-center bg-ink/60 text-[10px] font-semibold tabular-nums text-gold">
+            {Math.round(tile.generating.progress)}%
+          </span>
+        )}
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs text-cream/90">
+          {tile.name ?? tile.generating?.label ?? "Rendering…"}
+        </div>
+        <div className="flex items-center gap-2 text-2xs text-fog">
+          <span>{tile.day ? dayLabel(tile.day) : "in flight"}</span>
+          {tile.upscaled && !upscaling && <span className="text-gold/80">· upscaled</span>}
+          {upscaling && <span className="text-gold/80">· upscaling…</span>}
+        </div>
+      </div>
+
+      {!tile.generating && (
+        <div className="flex shrink-0 items-center gap-0.5 text-fog/70">
+          {[
+            {
+              icon: Heart,
+              label: liked ? "Unlike" : "Like",
+              run: () => actions.onLike(tile),
+              on: liked,
+            },
+            { icon: Pencil, label: "Edit", run: () => actions.onEdit(tile) },
+            { icon: Download, label: "Download", run: () => actions.onDownload(tile) },
+          ].map(({ icon: Icon, label, run, on }) => (
+            <button
+              key={label}
+              title={label}
+              onClick={run}
+              className={cx(
+                "rounded-md p-1.5 transition duration-[var(--dur-fast)] hover:bg-cream/8 hover:text-gold",
+                on && "text-gold",
+              )}
+            >
+              <Icon size={13} fill={on ? "currentColor" : "none"} />
+            </button>
+          ))}
+          <button
+            title={armed ? "Click again to delete" : "Delete"}
+            onClick={() => {
+              if (!armed) {
+                setArmed(true);
+                return;
+              }
+              setArmed(false);
+              actions.onDelete(tile);
+            }}
+            onBlur={() => setArmed(false)}
+            className={cx(
+              "rounded-md p-1.5 transition duration-[var(--dur-fast)] hover:bg-cream/8 hover:text-red-400",
+              armed && "bg-red-500/15 text-red-400",
+            )}
+          >
+            <Trash2 size={13} />
+          </button>
         </div>
       )}
     </div>
@@ -1135,26 +1578,37 @@ function Lightbox({
   const liked = actions.liked(tile);
 
   return (
+    /* Under Electron the overlay starts BELOW the 36px frameless title strip.
+       Full-bleed put our Close pill directly under the OS window buttons,
+       where it was invisible and unclickable — and it swallowed the drag
+       region while open. */
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-ink/92 backdrop-blur-sm"
+      className={cx(
+        "fixed inset-x-0 bottom-0 z-[var(--z-modal)] flex flex-col bg-ink/92 backdrop-blur-sm",
+        window.aurea?.isElectron ? "top-9" : "top-0",
+      )}
       onClick={onClose}
     >
       <header className="flex shrink-0 items-center gap-3 px-5 py-3">
-        <span className="min-w-0 truncate text-[12px] text-cream/90">{tile.name}</span>
-        <span className="shrink-0 text-[11px] tabular-nums text-fog">
-          {index + 1} / {tiles.length}
-        </span>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onClose();
           }}
           title="Close (Esc)"
-          className="ml-auto flex h-10 items-center gap-1.5 rounded-full bg-cream/6 px-3.5 text-[11px] text-cream/80 transition hover:bg-cream/12 hover:text-gold"
+          className={cx(
+            "flex h-9 shrink-0 items-center gap-1.5 rounded-pill border border-cream/15 bg-raised px-3.5",
+            "text-xs font-medium text-cream/90 shadow-[0_6px_20px_rgba(0,0,0,0.5)]",
+            "transition duration-[var(--dur)] hover:border-gold/50 hover:text-gold",
+          )}
         >
-          <X size={16} />
+          <X size={15} />
           Close
         </button>
+        <span className="min-w-0 truncate text-[12px] text-cream/90">{tile.name}</span>
+        <span className="shrink-0 text-[11px] tabular-nums text-fog">
+          {index + 1} / {tiles.length}
+        </span>
       </header>
 
       <div className="flex min-h-0 flex-1 items-center gap-2 px-3">
@@ -1168,14 +1622,21 @@ function Lightbox({
         >
           <ChevronLeft size={18} />
         </button>
-        {tile.url && (
-          <img
-            src={tile.url}
-            alt={tile.name ?? ""}
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-full min-w-0 flex-1 cursor-default object-contain"
-          />
-        )}
+        {/* the img sizes to its own picture (max-w/max-h, no flex-1) so the
+            radius hugs the image instead of a letterboxed element box */}
+        {/* self-stretch, not the row's items-center default: an auto-height
+            wrapper gives `max-h-full` nothing to resolve against and the
+            picture spills past the header and action bar */}
+        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center self-stretch">
+          {tile.url && (
+            <img
+              src={tile.url}
+              alt={tile.name ?? ""}
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-full max-w-full cursor-default rounded-panel object-contain shadow-[0_30px_80px_rgba(0,0,0,0.6)]"
+            />
+          )}
+        </div>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -1575,58 +2036,92 @@ function RightRail({ refs, setRefs, onRefAdded, dayFilter, setDayFilter, refsMax
 
 /* ---------- status bar ---------- */
 
-function StatusBar() {
+function LabStatusBar() {
   const lab = useImageLab();
   const { system } = useSystem();
   const { vram } = useJobs();
   const pct = Math.min(100, (vram.used / vram.total) * 100);
+  const [copied, setCopied] = useState(false);
 
   return (
-    <footer className="flex items-center gap-4 border-t hairline px-5 py-2 text-[11px] text-fog">
-      <span className="flex items-center gap-1.5">
-        <i className="h-1.5 w-1.5 rounded-full bg-sage" />
-        <span className="text-cream/80">{lab.models[0].label}</span>
-        <span className="text-sage">Ready</span>
-      </span>
-      <span className="tabular-nums">{lab.resolution}</span>
-      <span className="tabular-nums">
-        {lab.batch.length} image{lab.batch.length === 1 ? "" : "s"}
-      </span>
-      <span className="flex items-center gap-1 tabular-nums">
-        Seed: {lab.seed}
-        <button className="text-fog/60 transition hover:text-gold">
-          <Copy size={11} />
-        </button>
-      </span>
-
-      <span className="ml-auto flex items-center gap-2">
-        <span className="text-fog/70">GPU</span>
-        <span className="text-cream/80">{system.gpu.replace("NVIDIA GeForce ", "")}</span>
-      </span>
-      <span className="flex items-center gap-2">
-        <span className="text-fog/70">VRAM</span>
-        <span className="h-1 w-24 overflow-hidden rounded-full bg-cream/8">
-          <span
-            className="block h-full rounded-full bg-gradient-to-r from-gold-deep to-gold"
-            style={{ width: `${pct}%` }}
-          />
-        </span>
-        <span className="tabular-nums text-cream/80">
-          {vram.used} / {vram.total} GB
-        </span>
-      </span>
-      <button className="text-fog/60 transition hover:text-gold">
-        <Settings2 size={13} />
-      </button>
-    </footer>
+    <StatusBar
+      left={
+        <>
+          <span className="flex items-center gap-1.5">
+            <i className="h-1.5 w-1.5 rounded-full bg-sage shadow-[0_0_6px_1px_rgba(111,160,124,0.6)]" />
+            <span className="text-cream/80">{lab.models[0].label}</span>
+            <span className="text-sage">Ready</span>
+          </span>
+          <span className="tabular-nums">{lab.resolution}</span>
+          <span className="tabular-nums">
+            {lab.batch.length} image{lab.batch.length === 1 ? "" : "s"}
+          </span>
+          <button
+            onClick={() => {
+              void navigator.clipboard.writeText(String(lab.seed));
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1400);
+            }}
+            title="Copy the seed"
+            className="flex items-center gap-1 tabular-nums transition hover:text-gold"
+          >
+            Seed: {lab.seed}
+            {copied ? <Check size={11} className="text-sage" /> : <Copy size={11} />}
+          </button>
+        </>
+      }
+      right={
+        <>
+          <span className="flex items-center gap-2">
+            <span className="text-fog/70">GPU</span>
+            <span className="text-cream/80">{system.gpu.replace("NVIDIA GeForce ", "")}</span>
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="text-fog/70">VRAM</span>
+            <span className="h-1 w-24 overflow-hidden rounded-full bg-cream/8">
+              <span
+                className="block h-full rounded-full bg-gradient-to-r from-gold-deep to-gold transition-[width] duration-[var(--dur-slow)]"
+                style={{ width: `${pct}%` }}
+              />
+            </span>
+            <span className="tabular-nums text-cream/80">
+              {vram.used} / {vram.total} GB
+            </span>
+          </span>
+        </>
+      }
+    />
   );
 }
 
 /* ---------- screen ---------- */
 
+/** Layout choices are muscle memory — they survive the screen. */
+const PREF_KEY = "aurea:imagelab:prefs";
+interface LabPrefs {
+  view: RollView;
+  railOpen: boolean;
+  libraryDocked: boolean;
+}
+/* The library column is open out of the box — it is half of what the composer
+ * is for, and a panel nobody knows to unhide may as well not exist. The
+ * Library button in the Prompt header (and the rail's own ✕) toggles it. */
+const PREF_DEFAULTS: LabPrefs = { view: "masonry", railOpen: true, libraryDocked: true };
+
+function loadPrefs(): LabPrefs {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PREF_KEY) ?? "{}");
+    return { ...PREF_DEFAULTS, ...(raw && typeof raw === "object" ? raw : {}) };
+  } catch {
+    return PREF_DEFAULTS;
+  }
+}
+
 export function ImageLab() {
   const lab = useImageLab();
   const likes = useLikes();
+  /** the prompt is shared by the composer and the docked library column */
+  const ps = usePromptState(lab.prompt);
   const [mode, setMode] = useState<LabMode>("generate");
   const [refs, setRefs] = useState<RefImage[]>([]);
   /** which edit model is selected. It lives here because the params panel
@@ -1639,15 +2134,45 @@ export function ImageLab() {
   const [dayFilter, setDayFilter] = useState<string | null>(null);
   const [visible, setVisible] = useState(ROLL_PAGE);
 
-  // a filtered roll still shows work in flight — otherwise pressing Generate
-  // while a past day is pinned looks like nothing happened
-  const roll = dayFilter
-    ? lab.batch.filter((t) => t.generating || t.day === dayFilter)
-    : lab.batch;
+  /* ---- the roll's own chrome: scope, search, layout (all sticky) ---- */
+  const [prefs, setPrefs] = useState<LabPrefs>(loadPrefs);
+  const setPref = <K extends keyof LabPrefs>(key: K, value: LabPrefs[K]) =>
+    setPrefs((prev) => {
+      const next = { ...prev, [key]: value };
+      localStorage.setItem(PREF_KEY, JSON.stringify(next));
+      return next;
+    });
+  const [scope, setScope] = useState<RollScope>("all");
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  /** the canvas scroller — "New generation" returns you to the top of the roll */
+  const canvasRef = useRef<HTMLElement>(null);
+
+  const q = search.trim().toLowerCase();
+  const filtering = !!dayFilter || scope !== "all" || !!q;
+
+  // Work in flight is never filtered out — pressing Generate with a past day
+  // pinned (or a search typed) otherwise looks like nothing happened.
+  const roll = lab.batch.filter((t) => {
+    if (t.generating) return true;
+    if (dayFilter && t.day !== dayFilter) return false;
+    if (scope === "favorites" && !likes.isLiked(t.relPath)) return false;
+    if (scope === "upscaled" && !t.upscaled) return false;
+    if (q && !(t.name ?? "").toLowerCase().includes(q)) return false;
+    return true;
+  });
 
   // a narrower roll must start from the top again, or "show older" state from
   // the full roll leaves a filtered day looking longer than it is
-  useEffect(() => setVisible(ROLL_PAGE), [dayFilter]);
+  useEffect(() => setVisible(ROLL_PAGE), [dayFilter, scope, q]);
+
+  // the references live in the right rail — switching to Edit with the rail
+  // hidden would put the mode's only real control off screen
+  useEffect(() => {
+    if (mode === "edit") setPref("railOpen", true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // dropping from the cloud model's 16 refs back to qwen-edit's 3 has to trim
   // the list here — otherwise the extras stay on screen and the run dies in
@@ -1690,8 +2215,42 @@ export function ImageLab() {
     },
   };
 
+  const finished = roll.filter((t) => !t.generating).length;
+  const rendering = roll.length - finished;
+  const subtitle =
+    `${finished} generation${finished === 1 ? "" : "s"}` +
+    (rendering ? ` · ${rendering} rendering` : "") +
+    (filtering ? " · filtered" : "");
+
+  const clearFilters = () => {
+    setDayFilter(null);
+    setScope("all");
+    setSearch("");
+  };
+
   return (
     <div className="flex h-full flex-col">
+      <LabHeader
+        scope={scope}
+        setScope={setScope}
+        scopeOpen={scopeOpen}
+        setScopeOpen={setScopeOpen}
+        search={search}
+        setSearch={setSearch}
+        view={prefs.view}
+        setView={(v) => setPref("view", v)}
+        railOpen={prefs.railOpen}
+        setRailOpen={(o) => setPref("railOpen", o)}
+        subtitle={subtitle}
+        onNewGeneration={() => {
+          // a fresh sheet: empty composer, unfiltered roll, back at the top
+          ps.clear();
+          setMode("generate");
+          clearFilters();
+          canvasRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+      />
+
       <div className="flex min-h-0 flex-1">
         <ParamsPanel
           mode={mode}
@@ -1700,9 +2259,22 @@ export function ImageLab() {
           editorId={editorId}
           setEditorId={setEditorId}
           refsMax={refsMax}
+          ps={ps}
+          libraryDocked={prefs.libraryDocked}
+          setLibraryDocked={(o) => setPref("libraryDocked", o)}
+          libraryOpen={libraryOpen}
+          setLibraryOpen={setLibraryOpen}
         />
 
-        <section className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        {prefs.libraryDocked && (
+          <PromptLibraryRail
+            onPick={ps.pickPreset}
+            onClose={() => setPref("libraryDocked", false)}
+            onManage={() => setLibraryOpen(true)}
+          />
+        )}
+
+        <section ref={canvasRef} className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
           {lab.failures
             .filter((f) => !dismissed.includes(f.id))
             .map((f) => (
@@ -1718,68 +2290,107 @@ export function ImageLab() {
             <DeckCard key={deck.id} deck={deck} />
           ))}
 
+          {/* what is currently narrowing the roll, and one click off each */}
+          {filtering && roll.length > 0 && (
+            <div className="anim-fade flex flex-wrap items-center gap-1.5">
+              {dayFilter && (
+                <Chip tone="gold" onClick={() => setDayFilter(null)} title="Clear the day filter">
+                  {dayLabel(dayFilter)} <X size={10} />
+                </Chip>
+              )}
+              {scope !== "all" && (
+                <Chip tone="gold" onClick={() => setScope("all")} title="Clear the scope filter">
+                  {scope === "favorites" ? "Favorites" : "Upscaled"} <X size={10} />
+                </Chip>
+              )}
+              {q && (
+                <Chip tone="gold" onClick={() => setSearch("")} title="Clear the search">
+                  “{search.trim()}” <X size={10} />
+                </Chip>
+              )}
+              <button
+                onClick={clearFilters}
+                className="text-2xs text-fog transition hover:text-gold"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
+
           {roll.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
-              <Sparkles size={22} className="text-gold/60" />
-              <p className="text-[12px] text-cream/80">
-                {dayFilter ? "Nothing from that day" : "Nothing rendered yet"}
+            <div className="flex flex-1 flex-col items-center justify-center gap-2.5 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-full border border-gold/25 bg-gold/6">
+                <Sparkles size={22} className="text-gold/70" />
+              </span>
+              <p className="font-serif text-lg text-cream/90">
+                {filtering ? "Nothing matches" : "Nothing rendered yet"}
               </p>
-              <p className="max-w-[280px] text-[11px] leading-relaxed text-fog">
-                {dayFilter
-                  ? "Those stills have been deleted since. Clear the filter to see the rest of the roll."
+              <p className="max-w-[300px] text-xs leading-relaxed text-fog">
+                {filtering
+                  ? "No still on the roll matches those filters — widen them, or clear them to see everything."
                   : "Describe an image on the left and hit Generate — every take lands here and in the asset library."}
               </p>
-              {dayFilter && (
+              {filtering && (
                 <button
-                  onClick={() => setDayFilter(null)}
-                  className="mt-1 text-[11px] text-gold hover:underline"
+                  onClick={clearFilters}
+                  className="mt-1 rounded-pill border border-cream/12 px-3 py-1.5 text-xs text-cream/80 transition hover:border-gold/50 hover:text-gold"
                 >
-                  Clear filter
+                  Clear filters
                 </button>
               )}
             </div>
           ) : (
             <>
-              {dayFilter && (
-                <div className="flex items-center gap-2 rounded-xl bg-gold/8 px-3 py-2">
-                  <span className="text-[11px] text-cream/85">
-                    Showing {dayLabel(dayFilter)} only
-                  </span>
-                  <button
-                    onClick={() => setDayFilter(null)}
-                    className="ml-auto flex items-center gap-1 text-[11px] text-gold hover:underline"
-                  >
-                    <X size={11} /> Clear
-                  </button>
-                </div>
-              )}
-              {groupByDay(roll.slice(0, visible)).map((section) => (
+              {groupByDay(roll.slice(0, visible)).map((section, si) => (
                 <div key={section.day} className="first:-mt-2">
                   {/* the roll used to run together as one undated wall — the
                       separator is what makes "a day's work" legible, so it
                       gets real weight, a rule, and air above it */}
-                  <div className="sticky top-0 z-10 -mx-4 mb-3 mt-5 bg-ink/92 px-4 pb-2 pt-2 backdrop-blur-sm">
+                  <div className="sticky top-0 z-20 -mx-4 mb-3 mt-5 bg-ink/85 px-4 pb-2 pt-2 backdrop-blur-md">
                     <div className="flex items-center gap-2.5 border-b border-cream/12 pb-2">
-                      <span className="h-3.5 w-[3px] shrink-0 rounded-full bg-gold/70" />
-                      <h3 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-cream">
+                      <span className="h-3.5 w-[3px] shrink-0 rounded-full bg-gold/70 shadow-[0_0_8px_rgba(201,169,110,0.5)]" />
+                      <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-cream">
                         {dayLabel(section.day)}
                       </h3>
-                      <span className="rounded-full bg-cream/8 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-fog">
+                      <span className="rounded-pill bg-cream/8 px-2 py-0.5 text-2xs font-semibold tabular-nums text-fog">
                         {section.tiles.length}
                       </span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 2xl:grid-cols-3">
-                    {section.tiles.map((tile) => (
-                      <ResultTile key={tile.id} tile={tile} actions={actions} />
-                    ))}
-                  </div>
+                  {prefs.view === "list" ? (
+                    <div className="space-y-1.5">
+                      {section.tiles.map((tile, i) => (
+                        <ResultRow key={tile.id} tile={tile} actions={actions} index={i} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      className={
+                        prefs.view === "masonry"
+                          ? /* tiles keep their real aspect and pack tight */
+                            "columns-2 gap-3 lg:columns-3 2xl:columns-4"
+                          : /* contact sheet — uniform cells, easier to scan */
+                            "grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4"
+                      }
+                    >
+                      {section.tiles.map((tile, i) => (
+                        <ResultTile
+                          key={tile.id}
+                          tile={tile}
+                          actions={actions}
+                          view={prefs.view === "grid" ? "grid" : "masonry"}
+                          // only the first screenful earns the entrance wave
+                          index={si === 0 ? i : 99}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               {visible < roll.length && (
                 <button
                   onClick={() => setVisible((v) => v + ROLL_PAGE)}
-                  className="mx-auto rounded-xl border border-cream/12 px-4 py-2 text-[11px] text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                  className="mx-auto rounded-pill border border-cream/12 px-4 py-2 text-xs text-cream/80 transition hover:border-gold/50 hover:text-gold"
                 >
                   Show older — {roll.length - visible} more
                 </button>
@@ -1788,16 +2399,18 @@ export function ImageLab() {
           )}
         </section>
 
-        <RightRail
-          refs={refs}
-          setRefs={setRefs}
-          onRefAdded={() => setMode("edit")}
-          dayFilter={dayFilter}
-          setDayFilter={setDayFilter}
-          refsMax={refsMax}
-        />
+        {prefs.railOpen && (
+          <RightRail
+            refs={refs}
+            setRefs={setRefs}
+            onRefAdded={() => setMode("edit")}
+            dayFilter={dayFilter}
+            setDayFilter={setDayFilter}
+            refsMax={refsMax}
+          />
+        )}
       </div>
-      <StatusBar />
+      <LabStatusBar />
 
       {lightbox !== null && openable.length > 0 && (
         <Lightbox

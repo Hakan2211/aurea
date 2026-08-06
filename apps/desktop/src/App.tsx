@@ -1,16 +1,14 @@
-import { HashRouter, Route, Routes } from "react-router";
+import { HashRouter, Navigate, Route, Routes } from "react-router";
 import { AppShell } from "@/components/AppShell";
 import { FirstRunWizard } from "@/components/FirstRunWizard";
 import { AssetLibrary } from "@/screens/AssetLibrary";
-import { DirectorChat } from "@/screens/DirectorChat";
+import { DirectorScreen } from "@/screens/Director";
 import { Formats } from "@/screens/Formats";
 import { ImageLab } from "@/screens/ImageLab";
 import { JobCenter } from "@/screens/JobCenter";
 import { MusicLab } from "@/screens/MusicLab";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 import { StudioScreen } from "@/screens/Studio";
-import { StoryboardScreen } from "@/screens/Storyboard";
-import { WritersRoomScreen } from "@/screens/WritersRoom";
 import { BibleScreen } from "@/screens/Bible";
 import { VideoLab } from "@/screens/VideoLab";
 import { TimelineScreen } from "@/screens/Timeline";
@@ -24,10 +22,12 @@ export function App() {
       <FirstRunWizard />
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<DirectorChat />} />
+          <Route index element={<DirectorScreen />} />
           <Route path="studio" element={<StudioScreen />} />
-          <Route path="script" element={<WritersRoomScreen />} />
-          <Route path="storyboard" element={<StoryboardScreen />} />
+          {/* the 2026-08-06 route merges: the storyboard lives inside the
+              Director, the screenplay is the Studio's Script view */}
+          <Route path="storyboard" element={<Navigate to="/" replace />} />
+          <Route path="script" element={<Navigate to="/studio" replace />} />
           <Route path="bible" element={<BibleScreen />} />
           <Route path="images" element={<ImageLab />} />
           <Route path="voice" element={<VoiceLab />} />

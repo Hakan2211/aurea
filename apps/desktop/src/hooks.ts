@@ -11,6 +11,7 @@ import type {
   ImageDeckGenerate,
   ImageGenerate,
   VoiceConvertGenerate,
+  AssetMeta,
   Job,
   JobPayload,
   LibraryAsset as CoreAsset,
@@ -251,6 +252,92 @@ export function useFormats() {
   return { formats: FORMATS, packs: STYLE_PACKS };
 }
 
+/** a videofast run in flight, as the format tile draws it */
+export interface FormatRun {
+  id: string;
+  title: string;
+  progress: number;
+  /** pipeline stage label ("Render"), or the queue state */
+  stage: string;
+  eta?: string;
+  queued: boolean;
+}
+
+/** a finished run — the poster strip under a format */
+export interface FormatRunResult {
+  id: string;
+  title: string;
+  /** media-route url of the delivered video, when it landed in the library */
+  url?: string;
+  failed?: boolean;
+  error?: string;
+}
+
+export interface FormatRuns {
+  active: FormatRun[];
+  recent: FormatRunResult[];
+}
+
+/** the key a videofast job belongs under in the gallery: its format id, or the
+ * blend pseudo-format when the run carries a hand-authored brief (those all
+ * enqueue as `strategist` and would otherwise pile onto that tile) */
+export const BLEND_KEY = "__blend";
+const runKey = (p: Extract<JobPayload, { type: "videofast" }>) =>
+  p.brief ? BLEND_KEY : p.format;
+
+/** LIVE — every videofast run the queue knows about, bucketed by format, so a
+ * format tile can show its own render and the last few videos it produced.
+ * This is what closes the loop the old screen left open: enqueue used to end
+ * at "watch it in Jobs", three screens away from where you pressed the button. */
+export function useFormatRuns(): Map<string, FormatRuns> {
+  const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
+  const library = trpc.library.list.useQuery().data?.assets;
+  const media = useMediaBase();
+
+  return useMemo(() => {
+    const byName = new Map<string, string>();
+    for (const a of library ?? []) if (a.kind === "video") byName.set(a.name, a.url);
+    const out = new Map<string, FormatRuns>();
+    const bucket = (key: string) => {
+      let b = out.get(key);
+      if (!b) out.set(key, (b = { active: [], recent: [] }));
+      return b;
+    };
+
+    for (const j of jobsData ?? []) {
+      if (j.payload?.type !== "videofast") continue;
+      const key = runKey(j.payload);
+      if (!key) continue;
+      if (j.status === "running" || j.status === "queued") {
+        bucket(key).active.push({
+          id: j.id,
+          title: j.title,
+          progress: j.progress,
+          stage: j.stage ?? (j.status === "queued" ? "Queued" : "Working"),
+          eta: j.eta,
+          queued: j.status === "queued",
+        });
+      } else if (j.status === "completed" || j.status === "failed") {
+        // job.output is the *imported* absolute path; the library knows it by
+        // basename (imports are collision-numbered, so names stay unique)
+        const name = pathBasename(j.output);
+        const route = name ? byName.get(name) : undefined;
+        bucket(key).recent.push({
+          id: j.id,
+          title: j.title,
+          url: route && media ? media(route) : undefined,
+          failed: j.status === "failed",
+          error: j.error,
+        });
+      }
+    }
+    // the jobs stream lists finished runs oldest-first — a format's newest
+    // three are at the END of its bucket, not the front
+    for (const b of out.values()) b.recent = b.recent.slice(-3).reverse();
+    return out;
+  }, [jobsData, library, media]);
+}
+
 /** LIVE — the channel presets in <videofastDir>/accounts the finished-video
  * pipeline renders as. Empty when the videofast path isn't configured. */
 export function useVideofastAccounts() {
@@ -289,9 +376,17 @@ export function useTimeline() {
     exportJobs?.find((j) => j.status === "running" || j.status === "queued") ?? exportJobs?.at(-1);
 
   const assetByRel = useMemo(() => {
-    const map = new Map<string, { url?: string; kind: LibraryKind; name: string }>();
+    const map = new Map<
+      string,
+      { url?: string; kind: LibraryKind; name: string; meta?: AssetMeta }
+    >();
     for (const a of library ?? []) {
-      map.set(a.relPath, { url: media ? media(a.url) : undefined, kind: a.kind, name: a.name });
+      map.set(a.relPath, {
+        url: media ? media(a.url) : undefined,
+        kind: a.kind,
+        name: a.name,
+        meta: a.meta,
+      });
     }
     return map;
   }, [library, media]);
@@ -300,6 +395,8 @@ export function useTimeline() {
     project,
     initial: query.data,
     live: !!query.data,
+    /** the first fetch is still in flight — "loading", not "no core" */
+    loading: query.isLoading,
     /** media candidates for the shot rail, newest first */
     pool: useMemo(
       () =>
@@ -624,7 +721,14 @@ export function useImageLab() {
 
     extras.failures = labFailures(jobsData, "image", "imageDeck", "imageUpscale");
 
-    const active = labJobs(jobsData, "image", "imageDeck", "imageUpscale");
+    // Music-lab cover art is drawn by the image engine but isn't image-lab
+    // work — it never appeared in this canvas as a request, so it doesn't
+    // appear here as a result either. Both halves have to be filtered: the
+    // in-flight job (or the roll grows a phantom tile) and the landed file.
+    const roll = kindAssets.filter((a) => a.meta?.origin !== "musicCover");
+    const active = labJobs(jobsData, "image", "imageDeck", "imageUpscale").filter(
+      (j) => !(j.payload.type === "image" && j.payload.cover),
+    );
     // a deck is one job rendering N prompts — it gets its own progress card
     // rather than N phantom tiles, so a 40-prompt run doesn't bury the roll
     extras.decks = active
@@ -662,7 +766,7 @@ export function useImageLab() {
       }
       if (j.status !== "completed") return false;
       const name = pathBasename(j.output);
-      if (name && kindAssets.some((a) => a.name === name)) {
+      if (name && roll.some((a) => a.name === name)) {
         seenUpscales.current.delete(j.id);
         return false;
       }
@@ -693,7 +797,7 @@ export function useImageLab() {
             generating: { progress: j.progress },
           })),
         ),
-      ...kindAssets.map((a) => ({
+      ...roll.map((a) => ({
         id: a.id,
         swatch: labSwatch(a.id),
         url: media ? media(a.url) : undefined,
@@ -707,7 +811,7 @@ export function useImageLab() {
     // history = the image roll grouped by day, newest first. The same day keys
     // separate the canvas, so a row and its section always agree.
     const byDay = new Map<string, CoreAsset[]>();
-    for (const a of kindAssets) {
+    for (const a of roll) {
       const day = a.createdAt.slice(0, 10);
       byDay.set(day, [...(byDay.get(day) ?? []), a]);
     }
@@ -834,6 +938,43 @@ export async function downloadAsset(url: string, filename: string): Promise<void
   setTimeout(() => URL.revokeObjectURL(href), 30_000);
 }
 
+/** Save a library file as itself or as another format. The wav is what the
+ * engine rendered; the mp3 is what you send someone, so the conversion runs
+ * in the core (ffmpeg) and the result is fetched off the media route like any
+ * other file. `busy` is the format currently converting — the menu row says
+ * "Converting…" rather than looking dead for the second or two it takes. */
+export function useDownloadTrack() {
+  const media = useMediaBase();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const transcode = trpc.library.transcode.useMutation();
+  const { mutateAsync } = transcode;
+
+  const download = async (
+    track: { url?: string; relPath?: string; title: string },
+    format: "wav" | "mp3",
+  ) => {
+    const name = (track.title || "track").replace(/[\\/:*?"<>|]/g, "").slice(0, 80);
+    setError(null);
+    if (format === "wav") {
+      if (track.url) await downloadAsset(track.url, `${name}.wav`);
+      return;
+    }
+    if (!track.relPath || !media) return;
+    setBusy(format);
+    try {
+      const { relPath } = await mutateAsync({ relPath: track.relPath, format });
+      await downloadAsset(media(`/media/${relPath.split("/").map(encodeURIComponent).join("/")}`), `${name}.mp3`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Conversion failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return { download, busy, error, clearError: () => setError(null) };
+}
+
 export function useVoiceLab() {
   const catalog = trpc.labs.voice.catalog.useQuery().data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("audio");
@@ -943,14 +1084,18 @@ export function useVoiceLab() {
       ...kindAssets.map((a, i) => ({
         id: a.id,
         label: strip(a.name),
-        duration: fmtBytes(a.sizeBytes),
+        // real length is probed client-side from the file (useMediaDuration);
+        // "" here means "unknown yet" — the file size is metadata, not a length
+        duration: "",
+        sizeLabel: fmtBytes(a.sizeBytes),
         rating: 0,
         waveSeed: waveSeed(a.id),
         url: media ? media(a.url) : undefined,
         relPath: a.relPath,
         selected: i === 0,
       })),
-    ].slice(0, 14);
+      // the rail pages through these — the cap is a memory guard, not the view
+    ].slice(0, 120);
 
     return {
       ...voiceLab,
@@ -995,13 +1140,42 @@ export function useVoiceLab() {
 
 const fmtClock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`;
 
+/** A filename made readable again. Imports slugify the job title onto the
+ * file, so tracks made before the sidecar kept the real one read
+ * "german-party-rock-duet-male-and-female-voc-2" — a slug is not a title.
+ * Restores the spaces and the sentence case; the trailing collision number
+ * stays, because it is the only thing telling two takes of one brief apart. */
+function unslug(name: string): string {
+  const words = name.replace(/[-_]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** date *and* time — an evening of composing yields a dozen tracks that all
+ * say "Aug 6", which is the v2 mockup's point about the metadata line */
+export const fmtStamp = (iso: string) =>
+  new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+/** Ceiling on the track list. Was a hard 12, which silently hid everything
+ * older than an afternoon's work — the same bug the Voice lab's takes rail
+ * had at 14. The view pages through this with "Load more". */
+const MUSIC_ROLL_MAX = 120;
+
 export function useMusicLab() {
   const catalog = trpc.labs.music.catalog.useQuery().data;
   const { media, project, invalidate, jobsData, kindAssets } = useLabData("music");
+  const assets = trpc.library.list.useQuery().data?.assets;
   const mutation = trpc.labs.music.generate.useMutation(invalidate);
   const { mutate } = mutation;
   const { mutate: cancelJob } = trpc.jobs.cancel.useMutation(invalidate);
   const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
+  const coverMutation = trpc.labs.music.cover.useMutation(invalidate);
+  const { mutate: mutateCover } = coverMutation;
   const removeAssets = useRemoveAssets();
 
   return useMemo(() => {
@@ -1013,6 +1187,11 @@ export function useMusicLab() {
       /** delete a finished track from disk */
       remove: removeAssets.remove,
       removing: removeAssets.removing,
+      /** draw this track's cover again (or for the first time, on a track
+       * that predates covers) — the automatic one is unasked-for, so there
+       * has to be a way to say "not that" */
+      recover: (relPath: string) => mutateCover({ relPath, project }),
+      recovering: coverMutation.isPending,
       failures: [] as LabFailure[],
     };
     const advanced = {
@@ -1039,6 +1218,10 @@ export function useMusicLab() {
     advanced.shiftDefault = catalog.shiftDefault ?? 3.0;
     advanced.metadataManagedOnly = catalog.metadataManagedOnly ?? false;
 
+    // covers live in assets/image, addressed from the track's sidecar — index
+    // the whole library once by relPath rather than scanning it per track
+    const byRelPath = new Map((assets ?? []).map((a) => [a.relPath, a]));
+
     const active = labJobs(musicJobs, "music", "voiceConvert");
     const tracks: MusicTrack[] = [
       ...active.map((j) => ({
@@ -1051,30 +1234,39 @@ export function useMusicLab() {
         swatch: labSwatch(j.id),
         // a chained conversion is by definition re-voicing sung vocals
         arrangement: j.payload.type === "music" ? j.payload.arrangement : ("vocals" as const),
+        styles: j.payload.type === "music" ? j.payload.styles : undefined,
         generating: { progress: j.progress, stage: j.stage ?? "Queued" },
       })),
-      ...kindAssets.map((a, i) => ({
-        id: a.id,
-        title: strip(a.name),
-        // the sidecar carries what the take was actually sung to — tempo and
-        // key included, whether you asked for them or the model chose
-        bpm: a.meta?.bpm ?? 0,
-        key: a.meta?.keyscale ?? "",
-        // real length is probed client-side from the file (useMediaDuration);
-        // "" here means "unknown yet", never the file size
-        duration: "",
-        waveSeed: waveSeed(a.id),
-        swatch: labSwatch(a.id),
-        // provenance sidecar knows; files without one predate it → default old label
-        arrangement: a.meta?.arrangement ?? ("instrumental" as const),
-        lyrics: a.meta?.lyrics,
-        prompt: a.meta?.prompt,
-        origin: a.meta?.origin,
-        url: media ? media(a.url) : undefined,
-        relPath: a.relPath,
-        selected: i === 0,
-      })),
-    ].slice(0, 12);
+      ...kindAssets.map((a, i) => {
+        const cover = a.meta?.cover ? byRelPath.get(a.meta.cover) : undefined;
+        return {
+          id: a.id,
+          // the sidecar's title is the brief as it was written; the filename
+          // is that same brief slugified, so it's the fallback, de-slugged
+          title: a.meta?.title?.trim() || unslug(strip(a.name)),
+          // the sidecar carries what the take was actually sung to — tempo and
+          // key included, whether you asked for them or the model chose
+          bpm: a.meta?.bpm ?? 0,
+          key: a.meta?.keyscale ?? "",
+          // real length is probed client-side from the file (useMediaDuration);
+          // "" here means "unknown yet", never the file size
+          duration: "",
+          waveSeed: waveSeed(a.id),
+          swatch: labSwatch(a.id),
+          // provenance sidecar knows; files without one predate it → default old label
+          arrangement: a.meta?.arrangement ?? ("instrumental" as const),
+          styles: a.meta?.styles,
+          lyrics: a.meta?.lyrics,
+          prompt: a.meta?.prompt,
+          origin: a.meta?.origin,
+          createdAt: a.createdAt,
+          coverUrl: cover && media ? media(cover.url) : undefined,
+          url: media ? media(a.url) : undefined,
+          relPath: a.relPath,
+          selected: i === 0,
+        };
+      }),
+    ].slice(0, MUSIC_ROLL_MAX);
 
     return {
       ...musicLab,
@@ -1093,7 +1285,21 @@ export function useMusicLab() {
       generate,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, kindAssets, jobsData, media, project, mutate, mutation.isPending, cancelJob, retryJob, removeAssets]);
+  }, [
+    catalog,
+    kindAssets,
+    assets,
+    jobsData,
+    media,
+    project,
+    mutate,
+    mutation.isPending,
+    cancelJob,
+    retryJob,
+    mutateCover,
+    coverMutation.isPending,
+    removeAssets,
+  ]);
 }
 
 /* ---------- asset library (LIVE) ---------- */
@@ -1209,9 +1415,22 @@ export function useVideoLab() {
   const mutation = trpc.labs.video.generate.useMutation(invalidate);
   const { mutate } = mutation;
   const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
+  /* Staging a picked file as a project ref. It lives under labs.image because
+   * that lab needed it first, but nothing about it is image-lab specific: it
+   * writes a PNG into projects/<id>/refs and hands back the dataRoot-relative
+   * path every ref field in the app takes — including MiniMax's. */
+  const addRefMutation = trpc.labs.image.addRef.useMutation();
+  const { mutateAsync: addRefAsync } = addRefMutation;
 
   return useMemo(() => {
     const extras = {
+      /** Bring an image in from outside the library — the reference lane's
+       * "From your computer". Returns its dataRoot-relative path. Staged refs
+       * are NOT library assets (scanLibrary only walks assets/), so the caller
+       * keeps its own thumbnail. */
+      addRef: async (name: string, pngBase64: string) =>
+        (await addRefAsync({ project, name, pngBase64 })).ref,
+      addingRef: addRefMutation.isPending,
       /** every library still, newest first — the Replace-frame picker's roll */
       frames: (images ?? []).slice(0, 60).map((a) => ({
         relPath: a.relPath,
@@ -1250,6 +1469,26 @@ export function useVideoLab() {
       /** null while the probe is in flight; the panel treats that as "unknown"
        * rather than "unsupported" so Director doesn't flicker off on load */
       capabilities: capabilities ?? null,
+      /** Engines don't share a canvas — the per-engine preset lists, keyed by
+       * engine id. Optional-chained for the same renderer-outlives-core reason
+       * as minimaxRefsAvailable below: an old catalog missing the key must dim
+       * a picker, not blank the lab. */
+      resolutionsByEngine: (catalog?.resolutionsByEngine ?? {}) as Record<string, string[]>,
+      /** the LTX-only control surface (fps ladder, draft mode, keyframe/LoRA
+       * ceilings, camera-move names); null on an old core, and the engine
+       * surface treats null as "feature not stated" rather than crashing */
+      ltx: catalog?.ltx ?? null,
+      /** Is MiniMax's reference head installed? Unlike the LTX capabilities
+       * above this is a download, not a live probe — the catalog already knows,
+       * and it doesn't change while the app is open.
+       *
+       * Optional all the way down even though the type says otherwise: a
+       * renderer can outlive its core. Electron reuses a studiod that is
+       * already listening on the port file, so restarting the app after a
+       * rebuild can leave a NEW screen talking to an OLD catalog — and reading
+       * one missing key off that catalog throws in render, which blanks the
+       * whole lab rather than dimming one panel. */
+      minimaxRefsAvailable: catalog?.minimax?.reference?.available ?? false,
       /** shot sizes and moves for the prompt-beat camera pickers; empty until
        * the project's bible has the cinematography bank imported */
       cinematography: cinematography ?? EMPTY_CINEMATOGRAPHY,
@@ -1291,9 +1530,16 @@ export function useVideoLab() {
         }
       : { ...videoLab.startFrame, url: undefined, relPath: undefined };
 
-    /** callers may override startFrame (Replace picker) and attach audio (ia2v) */
+    /** callers may override startFrame (Replace picker) and attach audio (ia2v).
+     * A MiniMax reference shot is the one case with no start frame at all —
+     * ref2va has no keyframe input, and quietly defaulting one in would be
+     * rejected by the adapter as a contradiction. */
     const generate = (input: Omit<VideoGenerate, "project">) =>
-      mutate({ ...input, startFrame: input.startFrame ?? startFrame.relPath, project });
+      mutate({
+        ...input,
+        startFrame: input.minimaxRefs ? undefined : (input.startFrame ?? startFrame.relPath),
+        project,
+      });
 
     const takes: VideoTake[] = kindAssets.slice(0, 8).map((a, i) => ({
       id: a.id,
@@ -1301,6 +1547,7 @@ export function useVideoLab() {
       swatch: labSwatch(a.id),
       url: media ? media(a.url) : undefined,
       relPath: a.relPath,
+      engine: a.meta?.engine,
       selected: i === 0,
     }));
 
@@ -1359,7 +1606,7 @@ export function useVideoLab() {
       canGenerate: !!frame,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, capabilities, bible, cinematography, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob]);
+  }, [catalog, capabilities, bible, cinematography, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob, addRefAsync, addRefMutation.isPending]);
 }
 
 /* ---------- studio: bible + production (LIVE) ---------- */

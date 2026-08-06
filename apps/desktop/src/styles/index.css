@@ -19,6 +19,47 @@
 
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Fraunces Variable", Georgia, serif;
+
+  /* Type scale — replaces the ad-hoc text-[9..13px] brackets. Six named
+   * steps; if a screen needs a seventh, the scale is wrong, not the screen.
+   * Tailwind v4 derives text-2xs/xs/sm/base/lg/display utilities from these. */
+  --text-2xs: 10px;
+  --text-2xs--line-height: 1.4;
+  --text-xs: 11px;
+  --text-xs--line-height: 1.45;
+  --text-sm: 12.5px;
+  --text-sm--line-height: 1.5;
+  --text-base: 14px;
+  --text-base--line-height: 1.55;
+  --text-lg: 17px;
+  --text-lg--line-height: 1.4;
+  --text-display: 24px;
+  --text-display--line-height: 1.2;
+
+  /* Layout — panel widths and radii were bespoke magic numbers per screen
+   * (264…680px); pick from the scale instead. */
+  --spacing-panel-sm: 264px;
+  --spacing-panel-md: 320px;
+  --spacing-panel-lg: 380px;
+  --radius-card: 0.5rem;
+  --radius-panel: 0.75rem;
+  --radius-pill: 999px;
+
+  /* Z scale — every overlay picks a named layer; no more 7 modals at 7
+   * hand-rolled z-indexes fighting each other. */
+  --z-panel: 10;
+  --z-scrim: 40;
+  --z-modal: 50;
+  --z-tooltip: 60;
+  --z-toast: 70;
+
+  /* Motion — the Apple-esque feel is 90% consistent easing. Fast for hover
+   * feedback, base for state changes, slow for panels/modals. */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.32, 1.25, 0.32, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
 }
 
 @layer base {
@@ -78,6 +119,38 @@
     border: 1px solid color-mix(in srgb, var(--color-cream) 7%, transparent);
   }
 
+  /* Numbered-step badge — the ①②③ rail in the labs' params column */
+  .step-numeral {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--color-gold) 45%, transparent);
+    color: var(--color-gold);
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+
+  /* Active-nav treatment — warm gold edge bleeding into the row */
+  .active-edge {
+    position: relative;
+  }
+  .active-edge::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 15%;
+    bottom: 15%;
+    width: 2px;
+    border-radius: 999px;
+    background: var(--color-gold);
+    box-shadow: 0 0 12px 1px color-mix(in srgb, var(--color-gold) 55%, transparent);
+  }
+
   .hairline {
     border-color: color-mix(in srgb, var(--color-cream) 7%, transparent);
   }
@@ -90,5 +163,98 @@
   .drag-region button,
   .drag-region input {
     -webkit-app-region: no-drag;
+  }
+
+  /* The house range input — gold fill painted by the component via a
+     linear-gradient background; this styles the track shell and thumb. */
+  .aurea-slider {
+    appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    outline: none;
+  }
+  .aurea-slider::-webkit-slider-thumb {
+    appearance: none;
+    height: 14px;
+    width: 14px;
+    border-radius: 999px;
+    background: var(--color-cream);
+    border: 2px solid var(--color-gold);
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-out-quart);
+  }
+  .aurea-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+
+  /* Entrance motion — shared by Modal and any panel that slides into being.
+     Kept as utilities so every overlay animates identically. */
+  .anim-fade {
+    animation: aurea-fade var(--dur) var(--ease-out-quart) both;
+  }
+  .anim-rise {
+    animation: aurea-rise var(--dur-slow) var(--ease-out-quart) both;
+  }
+  .anim-scale-in {
+    animation: aurea-scale-in var(--dur) var(--ease-spring) both;
+  }
+  /* Slide-over — a panel arriving over the right edge (the Director's shot
+     inspector). Off when the OS asks for reduced motion. */
+  .anim-slide-over {
+    animation: aurea-slide-over var(--dur) var(--ease-out-quart) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .anim-slide-over {
+      animation: aurea-fade var(--dur-fast) both;
+    }
+  }
+}
+
+@keyframes aurea-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes aurea-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* Render-in-flight sheen — a light sweeping across the placeholder. Reads as
+   "working" where a pulse read as "broken image". */
+@keyframes aurea-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes aurea-slide-over {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes aurea-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }

@@ -5,13 +5,15 @@
  * are debounced whole-entity upserts (timeline precedent: renderer owns edit
  * state, bible.json is the truth). */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Crosshair,
   Expand,
   ImagePlus,
   Images,
   Loader2,
+  Pencil,
+  Pause,
   Play,
   Plus,
   RefreshCw,
@@ -33,6 +35,57 @@ const textInput =
   "w-full rounded-lg border border-cream/10 bg-ink/60 px-2.5 py-1.5 text-[12px] text-cream " +
   "outline-none placeholder:text-fog/60 focus:border-gold/40";
 const textArea = cx(textInput, "min-h-[64px] resize-y leading-relaxed");
+
+/** The gold "+" that sits beside a section heading (bible-v2 adopt). Every
+ * addable list on this screen gets the same affordance in the same place, so
+ * "how do I add one of these?" has one answer. */
+function AddButton({
+  title,
+  onClick,
+  active,
+  busy,
+  className,
+}: {
+  title: string;
+  onClick: () => void;
+  /** the add form below is open — hold the gold so the two read as one control */
+  active?: boolean;
+  busy?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className={cx(
+        "flex h-5 w-5 items-center justify-center rounded-md border transition",
+        active
+          ? "border-gold/50 bg-gold/15 text-gold"
+          : "border-gold/25 text-gold/70 hover:border-gold/60 hover:bg-gold/10 hover:text-gold",
+        className,
+      )}
+    >
+      {busy ? <Loader2 size={11} className="animate-spin" /> : <Plus size={12} />}
+    </button>
+  );
+}
+
+/** The gold CANON tag pinned on the still that is a character's / a location's
+ * canonical image (bible-v2 adopt) — for a character that is the key ref, the
+ * one picture every keyframe and shot prompt is actually built from. */
+function CanonTag({ className }: { className?: string }) {
+  return (
+    <span
+      title="Canon — the reference every keyframe and shot prompt is built from"
+      className={cx(
+        "rounded-full bg-gold/90 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-ink",
+        className,
+      )}
+    >
+      Canon
+    </span>
+  );
+}
 
 const slugify = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
@@ -110,7 +163,7 @@ function Rail({
     const id = slugify(name) || "new";
     if (tab === "cast") {
       bible.upsertCharacter({
-        id, name, species: "", build: "", face: "", wardrobe: "", props: "", colors: "",
+        id, name, species: "", role: "", build: "", face: "", wardrobe: "", props: "", colors: "",
         signatureFeature: "", anchors: { body: "", face: "", macro: "" }, personality: "",
         speechPattern: "",
         voice: { voiceId: null, engine: "chatterbox", exaggeration: 0.5, cfgWeight: 0.4, deliveryNotes: "" },
@@ -131,13 +184,11 @@ function Rail({
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <span className="font-serif text-[15px] font-semibold text-cream">Bible</span>
         {tab !== "style" && (
-          <button
+          <AddButton
             title={tab === "cast" ? "New character" : "New location"}
+            active={adding}
             onClick={() => setAdding((a) => !a)}
-            className="flex h-6 w-6 items-center justify-center rounded-md text-fog transition hover:bg-cream/5 hover:text-cream"
-          >
-            <Plus size={14} />
-          </button>
+          />
         )}
       </div>
 
@@ -173,7 +224,12 @@ function Rail({
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {tab === "cast" &&
           bible.bible.characters.map((c) => {
-            const url = bible.refUrl(c.refs.hero ?? c.refs.turnaround ?? c.refs.sheet);
+            /* the rail portrait is whatever picture this character actually
+             * has, in the same precedence the reference strip uses (canon key
+             * ref first). Reading only hero/turnaround/sheet meant a cast
+             * seeded with keyframeRef + frames — i.e. all of them — showed a
+             * rail of letter initials, and bible-v1 draws portraits. */
+            const url = bible.refUrl(refEntries(c.refs)[0]?.rel);
             const active = c.id === selectedCharId;
             return (
               <button
@@ -191,7 +247,15 @@ function Rail({
                   )}
                 >
                   {url ? (
-                    <img src={url} alt="" className="h-full w-full object-cover object-top" />
+                    /* the cast's references are full-body S1 frames — dropped
+                     * into a 40px circle unzoomed they're an unreadable
+                     * figure-in-a-room. Magnify around the head band so the
+                     * circle reads as a portrait, the way bible-v1 draws it. */
+                    <img
+                      src={url}
+                      alt=""
+                      className="h-full w-full origin-[50%_14%] scale-[2] object-cover object-top"
+                    />
                   ) : (
                     <span className="font-serif text-sm text-gold">{c.name.charAt(0)}</span>
                   )}
@@ -200,7 +264,15 @@ function Rail({
                   <span className={cx("block truncate text-[12px] font-medium", active ? "text-gold" : "text-cream")}>
                     {c.name}
                   </span>
-                  <span className="block truncate text-[10px] text-fog">{c.species || "—"}</span>
+                  {/* role first — what they do in the story orients faster
+                      than what animal they are (bible-v2 adopt) */}
+                  <span className="block truncate text-[10px] text-fog">
+                    {c.role && (
+                      <span className="uppercase tracking-[0.1em] text-cream/55">{c.role}</span>
+                    )}
+                    {c.role && c.species && <span className="text-fog/50"> · </span>}
+                    {c.species || (c.role ? "" : "—")}
+                  </span>
                 </span>
               </button>
             );
@@ -253,6 +325,14 @@ function Rail({
 
 function SeedBlock({ bible }: { bible: ReturnType<typeof useBible> }) {
   const empty = bible.bible.characters.length === 0;
+  /* while the core is unreachable the rail is empty for a reason that has
+     nothing to do with seeding — don't offer the seed as the way out of it */
+  if (!bible.live)
+    return (
+      <div className="border-t hairline p-3 text-[10px] leading-relaxed text-fog">
+        Studio core offline — the bible on disk is untouched.
+      </div>
+    );
   return (
     <div className="border-t hairline p-3">
       {empty ? (
@@ -282,14 +362,21 @@ function SeedBlock({ bible }: { bible: ReturnType<typeof useBible> }) {
   );
 }
 
+/** Two different nothings, and they must never look alike: an empty bible (add
+ * or seed one) versus a bible we can't read because the core is down. Saying
+ * "The bible is empty" for the second reads as data loss — the characters are
+ * still sitting in bible.json, we just can't see them. */
 function EmptyState({ bible }: { bible: ReturnType<typeof useBible> }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <span className="font-serif text-xl text-cream">The bible is empty</span>
-      <p className="max-w-[340px] text-[12px] leading-relaxed text-fog">
+      <span className="font-serif text-xl text-cream">
+        {bible.live ? "The bible is empty" : "Not connected to the studio core"}
+      </span>
+      <p className="max-w-[360px] text-[12px] leading-relaxed text-fog">
         {bible.live
           ? "Seed the Animal Sitcom cast from your videofast character sheets, or add a character with the + button."
-          : "Waiting for the studio core…"}
+          : "Nothing has been lost — your cast, locations and style live in this project's " +
+            "bible.json on disk. Reopening Aurea restarts the core and they come straight back."}
       </p>
       {bible.live && (
         <GoldButton onClick={() => void bible.seed()}>
@@ -298,154 +385,6 @@ function EmptyState({ bible }: { bible: ReturnType<typeof useBible> }) {
         </GoldButton>
       )}
     </div>
-  );
-}
-
-/* ---------- character detail ---------- */
-
-function CharacterDetail({
-  character,
-  bible,
-}: {
-  character: BibleCharacter;
-  bible: ReturnType<typeof useBible>;
-}) {
-  const { draft, patch } = useDraft(character, bible.upsertCharacter);
-  const [zoom, setZoom] = useState<string | null>(null);
-
-  const strip = refEntries(draft.refs);
-
-  return (
-    <>
-      <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-5">
-        <header className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="font-serif text-[32px] font-semibold leading-tight tracking-wide text-cream">
-              {draft.name}
-            </h1>
-            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-fog">
-              Character profile
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {draft.species && <Chip tone="gold">{draft.species}</Chip>}
-            <button
-              title="Remove character"
-              onClick={() => bible.removeCharacter(draft.id)}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-fog transition hover:bg-ember/20 hover:text-[#e07a6b]"
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        </header>
-
-        <ReferenceManager draft={draft} patch={patch} bible={bible} onZoom={setZoom} />
-
-        {/* structured appearance slots */}
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          {(
-            [
-              ["Species / build", "build"],
-              ["Face", "face"],
-              ["Wardrobe", "wardrobe"],
-              ["Props", "props"],
-              ["Colors", "colors"],
-              ["Signature feature", "signatureFeature"],
-            ] as const
-          ).map(([label, key]) => (
-            <label key={key} className="block">
-              <span className={fieldLabel}>{label}</span>
-              <textarea
-                className={textArea}
-                value={draft[key]}
-                onChange={(e) => patch({ [key]: e.target.value } as Partial<BibleCharacter>)}
-              />
-            </label>
-          ))}
-        </div>
-
-        <div className="mt-3 grid grid-cols-3 gap-3">
-          {(
-            [
-              ["Anchor — body", "body"],
-              ["Anchor — face", "face"],
-              ["Anchor — macro", "macro"],
-            ] as const
-          ).map(([label, key]) => (
-            <label key={key} className="block">
-              <span className={fieldLabel}>{label}</span>
-              <textarea
-                className={textArea}
-                value={draft.anchors[key]}
-                onChange={(e) => patch({ anchors: { ...draft.anchors, [key]: e.target.value } })}
-              />
-            </label>
-          ))}
-        </div>
-
-        <footer className="mt-5 flex items-center gap-6 border-t hairline pt-3 text-[10px] uppercase tracking-[0.12em] text-fog">
-          <span>
-            Updated <span className="text-cream/80">{fmtDay(bible.bible.updatedAt)}</span>
-          </span>
-          <span>
-            Seed <span className="text-cream/80">{draft.seed ?? "—"}</span>
-          </span>
-          <span>
-            References <span className="text-cream/80">{strip.length}</span>
-          </span>
-        </footer>
-      </section>
-
-      {/* right column */}
-      <aside className="w-[300px] shrink-0 space-y-3 overflow-y-auto border-l hairline p-3">
-        <VoiceCard draft={draft} patch={patch} bible={bible} />
-
-        <div className={card}>
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className={sectionLabel}>Personality prompt</span>
-            <span className="text-[10px] text-fog">{draft.personality.length} / 600</span>
-          </div>
-          <textarea
-            className={cx(textArea, "min-h-[110px]")}
-            maxLength={600}
-            value={draft.personality}
-            onChange={(e) => patch({ personality: e.target.value })}
-          />
-          <span className={cx(fieldLabel, "mt-2.5")}>Speech pattern</span>
-          <textarea
-            className={textArea}
-            value={draft.speechPattern}
-            onChange={(e) => patch({ speechPattern: e.target.value })}
-          />
-        </div>
-
-        <div className={card}>
-          <span className={sectionLabel}>LoRA status</span>
-          <div className="mt-2 flex items-center justify-between rounded-lg border border-cream/10 bg-ink/50 px-2.5 py-2">
-            <span className="text-[11px] text-fog">
-              {draft.lora ? `Trained · ${draft.lora.trigger || draft.lora.asset}` : "Not trained"}
-            </span>
-            <Chip tone={draft.lora ? "sage" : "muted"}>{draft.lora ? "ready" : "S-P2"}</Chip>
-          </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-fog/80">
-            Character LoRA training lands with shot generation — reference frames above become the
-            training set.
-          </p>
-        </div>
-      </aside>
-
-      {zoom && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-ink/90 backdrop-blur-sm"
-          onClick={() => setZoom(null)}
-        >
-          <button className="absolute right-4 top-4 text-fog transition hover:text-cream">
-            <X size={18} />
-          </button>
-          <img src={zoom} alt="" className="max-h-[92vh] max-w-[92vw] rounded-xl object-contain" />
-        </div>
-      )}
-    </>
   );
 }
 
@@ -501,28 +440,34 @@ const fileName = (rel: string) => rel.split("/").at(-1) ?? rel;
  * seed copied in — those are ours to delete outright when they're dropped. */
 const isStaged = (rel: string) => rel.includes("/refs/");
 
-/** The character's picture library: pick one to inspect, promote it into a
- * slot, drop it, or upload replacements. Before this the Bible was read-only —
- * a wrong seeded image was stuck on the character for good. */
-function ReferenceManager({
-  draft,
-  patch,
+/* ---------- character detail ---------- */
+
+/** Laid out after `bible-v1`: breadcrumb, a hero portrait card carrying the
+ * name and the ROLE · SPECIES line, turnaround + reference grid beside it, then
+ * the character's prose as full-width edit-in-place cards. The prose used to be
+ * two cramped textareas in the right rail — which is backwards, since
+ * personality and speech are what you actually come here to read. The rail now
+ * holds only what's about production: the voice and the LoRA. */
+function CharacterDetail({
+  character,
   bible,
-  onZoom,
 }: {
-  draft: BibleCharacter;
-  patch: (p: Partial<BibleCharacter>) => void;
+  character: BibleCharacter;
   bible: ReturnType<typeof useBible>;
-  onZoom: (url: string) => void;
 }) {
-  const entries = refEntries(draft.refs);
+  const { draft, patch } = useDraft(character, bible.upsertCharacter);
+  const [zoom, setZoom] = useState<string | null>(null);
   const [selRel, setSelRel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  const entries = refEntries(draft.refs);
   const selected = entries.find((e) => e.rel === selRel) ?? entries[0] ?? null;
-  const url = bible.refUrl(selected?.rel);
+  /** what the hero card shows: the picked reference, else the canon key ref.
+   * The grid's whole job is "is this the right animal?" — a thumbnail click
+   * has to land in the big frame, or the selection only moves a gold border. */
+  const shownRel = selected?.rel ?? draft.refs.keyframeRef ?? null;
 
   const setSlot = (slot: RefSlot, rel: string | null) =>
     patch({ refs: { ...draft.refs, [slot]: rel } });
@@ -576,47 +521,9 @@ function ReferenceManager({
   const pickFiles = () => fileInput.current?.click();
 
   return (
-    <div className={cx(card, "p-0")}>
-      <div className="flex items-center justify-between gap-3 border-b hairline px-3 py-2">
-        <div className="flex items-baseline gap-2">
-          <span className={sectionLabel}>References</span>
-          <span className="text-[10px] tabular-nums text-fog/70">{entries.length}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {url && (
-            <button
-              onClick={() => onZoom(url)}
-              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
-            >
-              <Expand size={11} /> Full size
-            </button>
-          )}
-          <GhostButton onClick={pickFiles} disabled={bible.uploadingRef} className="py-1">
-            {bible.uploadingRef ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <ImagePlus size={12} />
-            )}
-            {bible.uploadingRef ? "Uploading…" : "Upload"}
-          </GhostButton>
-        </div>
-      </div>
-
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          if (e.target.files?.length) void upload(e.target.files);
-          e.target.value = "";
-        }}
-      />
-
-      {/* the picture under inspection — big, because "is this the right animal?"
-          is the question this screen exists to answer */}
-      <div
+    <>
+      <section
+        className="@container flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-5"
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -627,130 +534,559 @@ function ReferenceManager({
           setDragging(false);
           if (e.dataTransfer.files.length) void upload(e.dataTransfer.files);
         }}
-        className={cx("p-3", dragging && "bg-gold/6 ring-1 ring-inset ring-gold/40")}
       >
-        {selected && url ? (
-          <>
-            <div className="flex items-center justify-center rounded-lg bg-ink/40">
-              <img
-                src={url}
-                alt={`${draft.name} reference`}
-                onClick={() => onZoom(url)}
-                className="max-h-[360px] w-full cursor-zoom-in object-contain"
-              />
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {selected.roles.map((r) => (
-                <Chip key={r} tone={r === "Key ref" ? "gold" : "muted"} className="text-[10px]">
-                  {r}
-                </Chip>
-              ))}
-              <span className="ml-1 min-w-0 truncate text-[10px] text-fog" title={selected.rel}>
-                {fileName(selected.rel)}
-              </span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {SLOTS.map(({ slot, label, icon: Icon, hint }) => {
-                const active = draft.refs[slot] === selected.rel;
-                return (
-                  <button
-                    key={slot}
-                    title={active ? `Clear the ${label.toLowerCase()} slot` : hint}
-                    onClick={() => setSlot(slot, active ? null : selected.rel)}
-                    className={cx(
-                      "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition",
-                      active
-                        ? "border-gold/50 bg-gold/12 text-gold"
-                        : "border-cream/10 text-cream/70 hover:border-gold/40 hover:text-gold",
-                    )}
-                  >
-                    <Icon size={11} />
-                    {active ? label : `Set ${label.toLowerCase()}`}
-                  </button>
-                );
-              })}
-              <button
-                title={
-                  isStaged(selected.rel)
-                    ? "Delete this upload — it lives in this project's refs folder"
-                    : "Remove from this character (the file stays in the library)"
-                }
-                onClick={() => detach(selected.rel)}
-                className="ml-auto inline-flex items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[10px] font-medium text-fog transition hover:border-[#e07a6b]/50 hover:text-[#e07a6b]"
-              >
-                <Trash2 size={11} /> {isStaged(selected.rel) ? "Delete" : "Remove"}
-              </button>
-            </div>
-          </>
-        ) : (
-          <button
-            onClick={pickFiles}
-            className="flex w-full flex-col items-center gap-1.5 rounded-xl border border-dashed border-gold/35 px-4 py-10 transition hover:border-gold/60 hover:bg-gold/4"
-          >
-            <ImagePlus size={22} strokeWidth={1.5} className="text-gold/80" />
-            <span className="mt-1 text-[12px] font-medium text-cream/90">
-              {bible.uploadingRef ? "Uploading…" : "Drop reference images here"}
-            </span>
-            <span className="text-[11px] text-fog">
-              or click to upload — run the character-sheet pipeline and re-seed for the full set
-            </span>
-          </button>
-        )}
-        {error && <p className="mt-2 text-[10px] text-[#e07a6b]">{error}</p>}
-      </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files?.length) void upload(e.target.files);
+            e.target.value = "";
+          }}
+        />
 
-      {entries.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto px-3 pb-3">
-          {entries.map((entry) => {
-            const thumb = bible.refUrl(entry.rel);
-            const active = entry.rel === selected?.rel;
-            const isKey = draft.refs.keyframeRef === entry.rel;
-            return (
-              <button
-                key={entry.rel}
-                onClick={() => setSelRel(entry.rel)}
-                title={`${fileName(entry.rel)} — ${entry.roles.join(" · ")}`}
-                className={cx(
-                  "group relative h-[84px] w-[68px] shrink-0 overflow-hidden rounded-lg border transition",
-                  active ? "border-gold" : "border-cream/10 hover:border-gold/50",
-                )}
-              >
-                {thumb ? (
-                  <img src={thumb} alt="" className="h-full w-full object-cover object-top" />
-                ) : (
-                  <span className="block h-full w-full bg-gradient-to-br from-[#2a2118] to-[#0f0b06]" />
-                )}
-                {isKey && (
-                  <span className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-ink">
-                    <Crosshair size={9} strokeWidth={3} />
-                  </span>
-                )}
-                <span
-                  role="button"
-                  title="Remove from this character"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    detach(entry.rel);
-                  }}
-                  className="absolute right-1 top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-ink/80 text-fog transition hover:text-[#e07a6b] group-hover:flex"
-                >
-                  <X size={10} />
-                </span>
-              </button>
-            );
-          })}
+        <div className="flex items-center justify-between gap-3">
+          <nav className="flex min-w-0 items-center gap-1.5 text-[11px] text-fog">
+            <span>Bible</span>
+            <span className="text-fog/40">/</span>
+            <span>Cast</span>
+            <span className="text-fog/40">/</span>
+            <span className="truncate text-cream">{draft.name}</span>
+          </nav>
           <button
-            onClick={pickFiles}
-            title="Upload more references"
-            className="flex h-[84px] w-[68px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-cream/15 text-fog transition hover:border-gold/50 hover:text-gold"
+            title="Remove character"
+            onClick={() => bible.removeCharacter(draft.id)}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fog transition hover:bg-ember/20 hover:text-[#e07a6b]"
           >
-            <Plus size={14} />
-            <span className="text-[9px]">Add</span>
+            <Trash2 size={14} />
           </button>
         </div>
+
+        {/* hero portrait beside turnaround + references — one column until the
+            pane is wide enough that a 300px portrait still leaves a usable grid */}
+        <div className="grid gap-3 @3xl:grid-cols-[300px_minmax(0,1fr)]">
+          <HeroCard
+            draft={draft}
+            url={bible.refUrl(shownRel)}
+            isCanon={!!shownRel && shownRel === draft.refs.keyframeRef}
+            onZoom={setZoom}
+            onPick={pickFiles}
+          />
+          <div className="flex min-w-0 flex-col gap-3">
+            <TurnaroundCard draft={draft} bible={bible} onZoom={setZoom} />
+            <ReferenceGrid
+              draft={draft}
+              bible={bible}
+              entries={entries}
+              selected={selected}
+              onSelect={setSelRel}
+              onZoom={setZoom}
+              onPick={pickFiles}
+              setSlot={setSlot}
+              detach={detach}
+              dragging={dragging}
+              error={error}
+            />
+          </div>
+        </div>
+
+        <ProseCard
+          title="Personality"
+          value={draft.personality}
+          maxLength={600}
+          placeholder="What are they like? This paragraph is what the Director writes them with."
+          onChange={(v) => patch({ personality: v })}
+        />
+        <ProseCard
+          title="Speech pattern"
+          value={draft.speechPattern}
+          placeholder="How do they sound — accent, rhythm, verbal tics?"
+          onChange={(v) => patch({ speechPattern: v })}
+        />
+        <ProseCard
+          title="Delivery notes"
+          value={draft.voice.deliveryNotes}
+          placeholder="How the takes should be performed — pace, weight, what to never do."
+          onChange={(v) => patch({ voice: { ...draft.voice, deliveryNotes: v } })}
+        />
+
+        <AppearanceCard draft={draft} patch={patch} />
+
+        <footer className="mt-1 flex items-center gap-6 border-t hairline pt-3 text-[10px] uppercase tracking-[0.12em] text-fog">
+          <span>
+            Updated <span className="text-cream/80">{fmtDay(bible.bible.updatedAt)}</span>
+          </span>
+          <span>
+            Seed <span className="text-cream/80">{draft.seed ?? "—"}</span>
+          </span>
+          <span>
+            References <span className="text-cream/80">{entries.length}</span>
+          </span>
+        </footer>
+      </section>
+
+      {/* right column — production state, not description */}
+      <aside className="w-[300px] shrink-0 space-y-3 overflow-y-auto border-l hairline p-3">
+        <VoiceCard draft={draft} patch={patch} bible={bible} />
+        <LoraCard draft={draft} />
+      </aside>
+
+      {zoom && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-ink/90 backdrop-blur-sm"
+          onClick={() => setZoom(null)}
+        >
+          <button className="absolute right-4 top-4 text-fog transition hover:text-cream">
+            <X size={18} />
+          </button>
+          <img src={zoom} alt="" className="max-h-[92vh] max-w-[92vw] rounded-xl object-contain" />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** The character as a lookbook plate: the canon picture, their name over it,
+ * and the ROLE · SPECIES line the cast rail echoes. */
+function HeroCard({
+  draft,
+  url,
+  isCanon,
+  onZoom,
+  onPick,
+}: {
+  draft: BibleCharacter;
+  url: string | undefined;
+  /** the shown picture is the key ref — only then does the CANON tag belong */
+  isCanon: boolean;
+  onZoom: (url: string) => void;
+  onPick: () => void;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border hairline bg-surface">
+      {url ? (
+        <img
+          src={url}
+          alt={draft.name}
+          onClick={() => onZoom(url)}
+          className="aspect-[3/4] w-full cursor-zoom-in object-cover object-top"
+        />
+      ) : (
+        <button
+          onClick={onPick}
+          className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1.5 px-4 text-center transition hover:bg-gold/5"
+        >
+          <ImagePlus size={22} strokeWidth={1.5} className="text-gold/80" />
+          <span className="text-[12px] font-medium text-cream/90">No picture yet</span>
+          <span className="text-[11px] leading-relaxed text-fog">
+            Drop a reference anywhere on this page, or click to upload
+          </span>
+        </button>
+      )}
+      {url && isCanon && <CanonTag className="absolute left-2 top-2" />}
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink via-ink/85 to-transparent px-3 pb-3 pt-10">
+        <h1 className="truncate font-serif text-[26px] font-semibold leading-tight tracking-wide text-cream">
+          {draft.name}
+        </h1>
+        <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-gold/85">
+          {[draft.role, draft.species].filter(Boolean).join(" · ") || "Character profile"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** The turnaround slot, given its own titled panel like the mockup. Empty is
+ * the normal state for a seeded cast (the char-sheet pipeline fills S1 frames,
+ * not turnarounds) — so the empty state says which slot to set rather than
+ * pretending the section doesn't exist. */
+function TurnaroundCard({
+  draft,
+  bible,
+  onZoom,
+}: {
+  draft: BibleCharacter;
+  bible: ReturnType<typeof useBible>;
+  onZoom: (url: string) => void;
+}) {
+  const url = bible.refUrl(draft.refs.turnaround ?? draft.refs.sheet);
+  const isSheet = !draft.refs.turnaround && !!draft.refs.sheet;
+  return (
+    <div className={cx(card, "p-0")}>
+      <div className="flex items-center gap-2 border-b hairline px-3 py-2">
+        <span className={sectionLabel}>Turnaround</span>
+        {isSheet && <span className="text-[10px] text-fog/70">contact sheet</span>}
+      </div>
+      {url ? (
+        <img
+          src={url}
+          alt={`${draft.name} turnaround`}
+          onClick={() => onZoom(url)}
+          className="max-h-[150px] w-full cursor-zoom-in bg-ink/40 object-contain p-2"
+        />
+      ) : (
+        <p className="px-3 py-4 text-[11px] leading-relaxed text-fog">
+          No turnaround yet — pick a reference below and press{" "}
+          <span className="text-cream/80">Set turnaround</span>. Front / side / back views keep a
+          character on-model when a shot needs an angle the key ref doesn't show.
+        </p>
       )}
     </div>
   );
+}
+
+/** Every picture attached to the character as a grid (the mockup's References
+ * 6/9 block). Selecting one exposes the slot buttons — which slot a picture
+ * holds is the only thing on this screen that changes what gets rendered. */
+function ReferenceGrid({
+  draft,
+  bible,
+  entries,
+  selected,
+  onSelect,
+  onZoom,
+  onPick,
+  setSlot,
+  detach,
+  dragging,
+  error,
+}: {
+  draft: BibleCharacter;
+  bible: ReturnType<typeof useBible>;
+  entries: RefEntry[];
+  selected: RefEntry | null;
+  onSelect: (rel: string) => void;
+  onZoom: (url: string) => void;
+  onPick: () => void;
+  setSlot: (slot: RefSlot, rel: string | null) => void;
+  detach: (rel: string) => void;
+  dragging: boolean;
+  error: string | null;
+}) {
+  const selUrl = bible.refUrl(selected?.rel);
+  return (
+    <div className={cx(card, "p-0", dragging && "ring-1 ring-inset ring-gold/40")}>
+      <div className="flex items-center justify-between gap-3 border-b hairline px-3 py-2">
+        <div className="flex items-center gap-2">
+          <span className={sectionLabel}>References</span>
+          <span className="text-[10px] tabular-nums text-fog/70">{entries.length}</span>
+          <AddButton
+            title={bible.uploadingRef ? "Uploading…" : "Upload reference images"}
+            busy={bible.uploadingRef}
+            onClick={onPick}
+          />
+        </div>
+        {selUrl && (
+          <button
+            onClick={() => onZoom(selUrl)}
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
+          >
+            <Expand size={11} /> Full size
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-2 p-3">
+        {entries.map((entry) => {
+          const thumb = bible.refUrl(entry.rel);
+          const active = entry.rel === selected?.rel;
+          const isKey = draft.refs.keyframeRef === entry.rel;
+          return (
+            <button
+              key={entry.rel}
+              onClick={() => onSelect(entry.rel)}
+              title={`${fileName(entry.rel)} — ${entry.roles.join(" · ")}`}
+              className={cx(
+                "group relative aspect-[3/4] overflow-hidden rounded-lg border transition",
+                active ? "border-gold" : "border-cream/10 hover:border-gold/50",
+              )}
+            >
+              {thumb ? (
+                <img src={thumb} alt="" className="h-full w-full object-cover object-top" />
+              ) : (
+                <span className="block h-full w-full bg-gradient-to-br from-[#2a2118] to-[#0f0b06]" />
+              )}
+              {isKey && <CanonTag className="absolute left-1 top-1" />}
+              <span
+                role="button"
+                title="Remove from this character"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  detach(entry.rel);
+                }}
+                className="absolute right-1 top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-ink/80 text-fog transition hover:text-[#e07a6b] group-hover:flex"
+              >
+                <X size={10} />
+              </span>
+            </button>
+          );
+        })}
+        <button
+          onClick={onPick}
+          title="Upload more references"
+          className="flex aspect-[3/4] flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream/15 text-fog transition hover:border-gold/50 hover:text-gold"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-gold/30 text-gold">
+            {bible.uploadingRef ? <Loader2 size={13} className="animate-spin" /> : <Plus size={14} />}
+          </span>
+          <span className="text-[9px] leading-tight">Upload<br />reference</span>
+        </button>
+      </div>
+
+      {selected && (
+        <div className="flex flex-wrap items-center gap-1.5 border-t hairline px-3 py-2">
+          {selected.roles.map((r) => (
+            <Chip key={r} tone={r === "Key ref" ? "gold" : "muted"} className="text-[10px]">
+              {r}
+            </Chip>
+          ))}
+          <span className="min-w-0 truncate text-[10px] text-fog" title={selected.rel}>
+            {fileName(selected.rel)}
+          </span>
+          <span className="ml-auto flex flex-wrap items-center gap-1.5">
+            {SLOTS.map(({ slot, label, icon: Icon, hint }) => {
+              const active = draft.refs[slot] === selected.rel;
+              return (
+                <button
+                  key={slot}
+                  title={active ? `Clear the ${label.toLowerCase()} slot` : hint}
+                  onClick={() => setSlot(slot, active ? null : selected.rel)}
+                  className={cx(
+                    "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition",
+                    active
+                      ? "border-gold/50 bg-gold/12 text-gold"
+                      : "border-cream/10 text-cream/70 hover:border-gold/40 hover:text-gold",
+                  )}
+                >
+                  <Icon size={11} />
+                  {active ? label : `Set ${label.toLowerCase()}`}
+                </button>
+              );
+            })}
+            <button
+              title={
+                isStaged(selected.rel)
+                  ? "Delete this upload — it lives in this project's refs folder"
+                  : "Remove from this character (the file stays in the library)"
+              }
+              onClick={() => detach(selected.rel)}
+              className="inline-flex items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[10px] font-medium text-fog transition hover:border-[#e07a6b]/50 hover:text-[#e07a6b]"
+            >
+              <Trash2 size={11} /> {isStaged(selected.rel) ? "Delete" : "Remove"}
+            </button>
+          </span>
+        </div>
+      )}
+      {error && <p className="px-3 pb-2 text-[10px] text-[#e07a6b]">{error}</p>}
+    </div>
+  );
+}
+
+/** A prose section as the mockup draws it: serif heading, the text set to be
+ * read, an Edit affordance that swaps in the textarea. Reading is the common
+ * case here — the seeded prose is already right — so it gets the calm state. */
+function ProseCard({
+  title,
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+}: {
+  title: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  maxLength?: number;
+}) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <div className={cx(card, "p-4")}>
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <h2 className="font-serif text-[17px] font-semibold text-cream">{title}</h2>
+        <div className="flex items-center gap-2">
+          {maxLength && editing && (
+            <span className="text-[10px] tabular-nums text-fog">
+              {value.length} / {maxLength}
+            </span>
+          )}
+          <button
+            onClick={() => setEditing((e) => !e)}
+            className="flex items-center gap-1 rounded-md px-1 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog transition hover:text-gold"
+          >
+            <Pencil size={11} />
+            {editing ? "Done" : "Edit"}
+          </button>
+        </div>
+      </div>
+      {editing ? (
+        <textarea
+          autoFocus
+          maxLength={maxLength}
+          className={cx(textArea, "min-h-[96px]")}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
+        />
+      ) : value ? (
+        <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-cream/85">{value}</p>
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          className="text-left text-[12px] italic leading-relaxed text-fog transition hover:text-cream/80"
+        >
+          {placeholder}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The structured slots the prompt composer actually reads. The mockup drops
+ * them; they stay, because `composeKeyframePrompt` is built out of exactly
+ * these strings — they just sit below the prose now instead of above it.
+ * Role and species get real inputs here: species had no editor at all. */
+function AppearanceCard({
+  draft,
+  patch,
+}: {
+  draft: BibleCharacter;
+  patch: (p: Partial<BibleCharacter>) => void;
+}) {
+  return (
+    <div className={cx(card, "p-4")}>
+      <h2 className="mb-2.5 font-serif text-[17px] font-semibold text-cream">
+        Appearance &amp; identity anchors
+      </h2>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className={fieldLabel}>Role</span>
+          <input
+            className={textInput}
+            value={draft.role}
+            placeholder="Lead, Antagonist, Comic engine…"
+            onChange={(e) => patch({ role: e.target.value })}
+          />
+        </label>
+        <label className="block">
+          <span className={fieldLabel}>Species</span>
+          <input
+            className={textInput}
+            value={draft.species}
+            placeholder="lion, emperor penguin…"
+            onChange={(e) => patch({ species: e.target.value })}
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        {(
+          [
+            ["Build", "build"],
+            ["Face", "face"],
+            ["Wardrobe", "wardrobe"],
+            ["Props", "props"],
+            ["Colors", "colors"],
+            ["Signature feature", "signatureFeature"],
+          ] as const
+        ).map(([label, key]) => (
+          <label key={key} className="block">
+            <span className={fieldLabel}>{label}</span>
+            <textarea
+              className={textArea}
+              value={draft[key]}
+              onChange={(e) => patch({ [key]: e.target.value } as Partial<BibleCharacter>)}
+            />
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        {(
+          [
+            ["Anchor — body", "body"],
+            ["Anchor — face", "face"],
+            ["Anchor — macro", "macro"],
+          ] as const
+        ).map(([label, key]) => (
+          <label key={key} className="block">
+            <span className={fieldLabel}>{label}</span>
+            <textarea
+              className={textArea}
+              value={draft.anchors[key]}
+              onChange={(e) => patch({ anchors: { ...draft.anchors, [key]: e.target.value } })}
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const fmtClock = (s: number) =>
+  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/** One reference clip, with the transport state the UI has to reflect: is it
+ * playing (so the button can say Pause), and how far in (so the waveform can
+ * act as the playhead). The element is owned by the hook — a fresh `new Audio`
+ * per click, as before, left the old one playing underneath and made "playing"
+ * unknowable. Rebuilds when the cast voice changes; pauses on unmount so
+ * switching character mid-clip doesn't leave audio running. */
+function useAudioClip(url: string | undefined) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  useEffect(() => {
+    setPlaying(false);
+    setElapsed(0);
+    setDuration(0);
+    if (!url) {
+      audioRef.current = null;
+      return;
+    }
+    const a = new Audio(url);
+    audioRef.current = a;
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    const onTime = () => setElapsed(a.currentTime);
+    const onMeta = () => setDuration(Number.isFinite(a.duration) ? a.duration : 0);
+    const onEnd = () => {
+      setPlaying(false);
+      setElapsed(0);
+      a.currentTime = 0;
+    };
+    a.addEventListener("play", onPlay);
+    a.addEventListener("pause", onPause);
+    a.addEventListener("timeupdate", onTime);
+    a.addEventListener("loadedmetadata", onMeta);
+    /* duration can arrive late (or only once decoding starts) — without this
+       the clock and the playhead would sit at zero for the whole clip */
+    a.addEventListener("durationchange", onMeta);
+    a.addEventListener("ended", onEnd);
+    return () => {
+      a.pause();
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("pause", onPause);
+      a.removeEventListener("timeupdate", onTime);
+      a.removeEventListener("loadedmetadata", onMeta);
+      a.removeEventListener("durationchange", onMeta);
+      a.removeEventListener("ended", onEnd);
+      audioRef.current = null;
+    };
+  }, [url]);
+
+  const toggle = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) void a.play();
+    else a.pause();
+  };
+
+  return { playing, elapsed, duration, toggle, progress: duration ? elapsed / duration : 0 };
 }
 
 function VoiceCard({
@@ -762,54 +1098,77 @@ function VoiceCard({
   patch: (p: Partial<BibleCharacter>) => void;
   bible: ReturnType<typeof useBible>;
 }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const url = bible.voiceUrl(draft.voice.voiceId);
+  const cast = bible.voices.find((v) => v.id === draft.voice.voiceId) ?? null;
   const setVoice = (p: Partial<BibleCharacter["voice"]>) => patch({ voice: { ...draft.voice, ...p } });
+  const clip = useAudioClip(url);
 
   return (
-    <div className={card}>
-      <span className={sectionLabel}>Voice</span>
-      <div className="mt-2 flex items-center gap-2">
-        <Waveform seed={(draft.voice.voiceId ?? draft.id).length * 131} bars={34} className="min-w-0 flex-1" />
-        <button
-          title={url ? "Play reference clip" : "No playable reference clip"}
-          onClick={() => {
-            if (!url) return;
-            audioRef.current?.pause();
-            audioRef.current = new Audio(url);
-            void audioRef.current.play();
-          }}
+    <div className={cx(card, "p-4")}>
+      <h2 className="font-serif text-[19px] font-semibold text-cream">Voice</h2>
+      <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-fog">
+        {draft.name} — main voice
+      </p>
+
+      {/* the waveform is the playhead — bars fill gold as the clip runs */}
+      <Waveform
+        seed={(draft.voice.voiceId ?? draft.id).length * 131}
+        bars={44}
+        played={clip.progress}
+        className="mt-3 w-full"
+      />
+      {clip.duration > 0 && (
+        <p className="mt-1 text-right text-[10px] tabular-nums text-fog">
+          {fmtClock(clip.elapsed)} / {fmtClock(clip.duration)}
+        </p>
+      )}
+
+      <span className={cx(fieldLabel, "mt-3")}>Voice engine</span>
+      <select
+        value={draft.voice.voiceId ?? ""}
+        onChange={(e) => setVoice({ voiceId: e.target.value || null })}
+        className="w-full rounded-lg border border-cream/10 bg-ink px-2 py-1.5 text-[11px] text-cream outline-none focus:border-gold/40"
+      >
+        <option value="">— not cast yet —</option>
+        {bible.voices.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.name} ({v.kind}
+            {v.source ? ` · ${v.source}` : ""})
+          </option>
+        ))}
+      </select>
+
+      <button
+        title={
+          url
+            ? clip.playing
+              ? "Pause the reference clip"
+              : "Play the reference clip"
+            : "This voice has no playable reference clip"
+        }
+        disabled={!url}
+        onClick={clip.toggle}
+        className={cx(
+          "mt-2.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-semibold transition",
+          url
+            ? "bg-gradient-to-b from-gold to-gold-deep text-ink hover:brightness-110"
+            : "border border-cream/10 text-fog",
+        )}
+      >
+        <span
           className={cx(
-            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition",
-            url
-              ? "bg-gradient-to-b from-gold to-gold-deep text-ink hover:brightness-110"
-              : "border border-cream/10 text-fog",
+            "flex h-6 w-6 items-center justify-center rounded-full",
+            url ? "bg-ink/20" : "border border-cream/10",
           )}
         >
-          <Play size={13} className="ml-0.5" />
-        </button>
-      </div>
+          {clip.playing ? <Pause size={12} /> : <Play size={12} className="ml-0.5" />}
+        </span>
+        {clip.playing ? "Pause" : "Play voice"}
+      </button>
 
-      <div className="mt-2 rounded-lg border border-cream/10 bg-ink/50 px-2.5 py-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium text-cream">
-            {draft.voice.voiceId ? `Locked · cloned voice` : "Not cast yet"}
-          </span>
-          {draft.voice.voiceId && <Chip tone="gold">{draft.voice.engine}</Chip>}
-        </div>
-        <select
-          value={draft.voice.voiceId ?? ""}
-          onChange={(e) => setVoice({ voiceId: e.target.value || null })}
-          className="mt-1.5 w-full rounded-md border border-cream/10 bg-ink px-2 py-1 text-[11px] text-cream outline-none focus:border-gold/40"
-        >
-          <option value="">— pick a voice —</option>
-          {bible.voices.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name} ({v.kind}
-              {v.source ? ` · ${v.source}` : ""})
-            </option>
-          ))}
-        </select>
+      <div className="mt-2.5 flex items-center gap-2">
+        <Chip tone={cast ? "sage" : "muted"}>{cast ? `${cast.kind} voice` : "not cast"}</Chip>
+        {cast && <Chip tone="gold">{draft.voice.engine}</Chip>}
       </div>
 
       {(
@@ -834,13 +1193,31 @@ function VoiceCard({
           />
         </label>
       ))}
+    </div>
+  );
+}
 
-      <span className={cx(fieldLabel, "mt-2.5")}>Delivery notes</span>
-      <textarea
-        className={cx(textArea, "min-h-[48px]")}
-        value={draft.voice.deliveryNotes}
-        onChange={(e) => setVoice({ deliveryNotes: e.target.value })}
-      />
+/** The mockup's LoRA card, minus its invented telemetry: there is no training
+ * run to report a percentage for until S-P2 ships, and a fake 87% bar is the
+ * same lie the Director's "Confidence 87%" was rejected for. */
+function LoraCard({ draft }: { draft: BibleCharacter }) {
+  const lora = draft.lora;
+  return (
+    <div className={cx(card, "p-4")}>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="font-serif text-[19px] font-semibold text-cream">LoRA</h2>
+        <Chip tone={lora ? "sage" : "muted"}>{lora ? "ready" : "S-P2"}</Chip>
+      </div>
+      <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-fog">
+        {lora ? lora.trigger || lora.asset : `${draft.id}_lora`}
+      </p>
+      <div className="mt-2.5 rounded-lg border border-cream/10 bg-ink/50 px-2.5 py-2 text-[11px] text-fog">
+        {lora ? "Trained — used automatically when this character is boarded." : "Not trained"}
+      </div>
+      <p className="mt-2 text-[10px] leading-relaxed text-fog/80">
+        Character LoRA training lands with shot generation — the reference grid becomes the
+        training set.
+      </p>
     </div>
   );
 }
@@ -940,9 +1317,14 @@ function LocationRefs({
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
-        <span className={fieldLabel}>Reference stills</span>
+      <div className="mb-1 flex items-center gap-2">
+        <span className={cx(fieldLabel, "mb-0")}>Reference stills</span>
         <span className="text-[10px] tabular-nums text-fog/70">{draft.refs.length}</span>
+        <AddButton
+          title={bible.uploadingRef ? "Uploading…" : "Upload reference stills"}
+          busy={bible.uploadingRef}
+          onClick={() => fileInput.current?.click()}
+        />
       </div>
       <input
         ref={fileInput}
@@ -971,11 +1353,7 @@ function LocationRefs({
               className="group relative h-[76px] w-[120px] shrink-0 overflow-hidden rounded-lg border hairline"
             >
               {url && <img src={url} alt="" className="h-full w-full object-cover" />}
-              {i === 0 && (
-                <span className="absolute left-1 top-1 rounded-full bg-gold/90 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-ink">
-                  Canon
-                </span>
-              )}
+              {i === 0 && <CanonTag className="absolute left-1 top-1" />}
               <div className="absolute inset-x-1 bottom-1 hidden justify-end gap-1 group-hover:flex">
                 {i > 0 && (
                   <button
