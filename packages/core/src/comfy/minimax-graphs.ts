@@ -109,6 +109,12 @@ export interface MinimaxGraphSpec {
   /** patch the unet with SageAttention (KJ node on the H3 install) — roughly
    * doubles render speed; needs `sageattention` in that ComfyUI's python */
   sage?: boolean;
+  /** the Turbo distill LoRA's combo name on THIS install (resolved live by the
+   * adapter — a Windows walk returns backslash paths, so it is never composed
+   * here). Present = draft: the LoRA on the unet, sigma shift 12/6, and the
+   * caller drops steps to TURBO_STEPS. Both heads take it — the distill was
+   * trained on the shared transformer, not one checkpoint's conditioning. */
+  turbo?: string;
   models: MinimaxModelNames;
   filenamePrefix?: string;
 }
@@ -132,7 +138,19 @@ export const MINIMAX_NODES = {
   firstFrame: "15",
   lastFrame: "16",
   sage: "17",
+  turboLora: "18",
+  sigmaShift: "19",
 } as const;
+
+/** Draft's step count. The distill is trained for 4 steps but its own README
+ * recommends 8–10 for the pruned ComfyUI conversion; 8 measured sharp, and
+ * still ~3× faster than the 25-step Final tier. */
+export const MINIMAX_TURBO_STEPS = 8;
+
+/** the shifts the Turbo distill was trained around (drbaph README: video 12,
+ * audio 4–6; the example workflow ships 12/6) */
+const TURBO_SHIFT_VIDEO = 12;
+const TURBO_SHIFT_AUDIO = 6;
 
 /** Everything either graph needs around its conditioning node: the four
  * loaders, the sampler chain, and the two decoders that turn ONE sampled
@@ -145,20 +163,39 @@ function minimaxScaffold(
   steps: number,
   filenamePrefix: string,
   sage = false,
+  turbo?: string,
 ): ComfyGraph {
   const N = MINIMAX_NODES;
-  /* with Sage on, everything that consumes the unet reads the patched model */
-  const model: [string, number] = sage ? [N.sage, 0] : [N.unet, 0];
-  const sageNode: ComfyGraph = sage
-    ? {
-        [N.sage]: {
-          class_type: "PathchSageAttentionKJ",
-          inputs: { sage_attention: "auto", allow_compile: false, model: [N.unet, 0] },
-        },
-      }
-    : {};
+  /* The model chain, in the Turbo workflow's published order: unet → distill
+   * LoRA → attention patch → sigma shift. Everything downstream (guider,
+   * scheduler) reads the end of whatever chain this render built. The shift
+   * node only exists on the turbo path — the 25-step Final tier renders on the
+   * model's own schedule, exactly as it always has. */
+  let model: [string, number] = [N.unet, 0];
+  const patchNodes: ComfyGraph = {};
+  if (turbo) {
+    patchNodes[N.turboLora] = {
+      class_type: "LoraLoaderModelOnly",
+      inputs: { lora_name: turbo, strength_model: 1, model },
+    };
+    model = [N.turboLora, 0];
+  }
+  if (sage) {
+    patchNodes[N.sage] = {
+      class_type: "PathchSageAttentionKJ",
+      inputs: { sage_attention: "auto", allow_compile: false, model },
+    };
+    model = [N.sage, 0];
+  }
+  if (turbo) {
+    patchNodes[N.sigmaShift] = {
+      class_type: "MiniMaxH3SigmaShift",
+      inputs: { shift_video: TURBO_SHIFT_VIDEO, shift_audio: TURBO_SHIFT_AUDIO, model },
+    };
+    model = [N.sigmaShift, 0];
+  }
   return {
-    ...sageNode,
+    ...patchNodes,
     [N.unet]: {
       class_type: "UnetLoaderGGUF",
       inputs: { unet_name: unetName },
@@ -249,9 +286,10 @@ export function minimaxH3Graph(spec: MinimaxGraphSpec): ComfyGraph {
     spec.models,
     spec.models.unet,
     spec.seed,
-    spec.steps ?? 25,
+    spec.steps ?? (spec.turbo ? MINIMAX_TURBO_STEPS : 25),
     spec.filenamePrefix ?? "aurea/h3",
     spec.sage,
+    spec.turbo,
   );
   graph[N.conditioning] = {
     class_type: "MiniMaxH3ImageToVideo",
@@ -322,6 +360,8 @@ export interface MinimaxRefGraphSpec {
   steps?: number;
   /** SageAttention on the H3 install — see MinimaxGraphSpec.sage */
   sage?: boolean;
+  /** the Turbo distill's combo name — see MinimaxGraphSpec.turbo */
+  turbo?: string;
   models: MinimaxRefModelNames;
   filenamePrefix?: string;
 }
@@ -343,9 +383,10 @@ export function minimaxH3RefGraph(spec: MinimaxRefGraphSpec): ComfyGraph {
     spec.models,
     spec.models.refUnet,
     spec.seed,
-    spec.steps ?? 25,
+    spec.steps ?? (spec.turbo ? MINIMAX_TURBO_STEPS : 25),
     spec.filenamePrefix ?? "aurea/h3-ref",
     spec.sage,
+    spec.turbo,
   );
 
   const refInputs: Record<string, unknown> = {};

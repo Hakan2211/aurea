@@ -303,6 +303,7 @@ export function ParamsPanel({
       resolutionsByEngine: lab.resolutionsByEngine,
       ltx: lab.ltx,
       minimaxRefsAvailable: lab.minimaxRefsAvailable,
+      minimaxTurboAvailable: lab.minimaxTurboAvailable,
     },
     lab.capabilities,
     engineId,
@@ -535,7 +536,10 @@ export function ParamsPanel({
           ? simpleKeyframes.slice(0, keyframesMax)
           : undefined,
       fps: isLtx && fps === 48 ? 48 : undefined,
-      fast: isLtx && quality === "draft" ? true : undefined,
+      // draft rides two engines now — LTX skips its refine stage, H3 loads the
+      // Turbo distill; only sent where the surface offers the choice, so an
+      // engine switch can't smuggle a stale draft flag into a clean payload
+      fast: surface.sections.quality.state === "shown" && quality === "draft" ? true : undefined,
       loras:
         isLtx && surface.sections.adapters.state === "shown" && loras.some((l) => l.name)
           ? loras.filter((l) => l.name).slice(0, lorasMax)
@@ -1414,7 +1418,13 @@ export function ParamsPanel({
           <DisclosureRow
             step={nextStep(surface.sections.quality.state)}
             title="Quality"
-            summary={quality === "draft" ? "Draft — half-size, fast" : "Final"}
+            summary={
+              quality === "draft"
+                ? engineId === "minimax-h3"
+                  ? "Draft — 8-step Turbo, fast"
+                  : "Draft — half-size, fast"
+                : "Final"
+            }
             state={surface.sections.quality.state}
             reason={surface.sections.quality.reason}
             open={openRow === "quality"}
@@ -1430,9 +1440,13 @@ export function ParamsPanel({
                 ]}
               />
               <p className="text-2xs leading-relaxed text-fog/70">
-                {quality === "draft"
-                  ? "Skips the ×2 upscale + refine pass — half-size picture, well under half the wait. For blocking a shot, not keeping it."
-                  : "Full pipeline: base pass, ×2 spatial upscale, refine. The delivery setting."}
+                {engineId === "minimax-h3"
+                  ? quality === "draft"
+                    ? "Renders with the Turbo distill LoRA — 8 sampler steps instead of 25, about 3× faster, sound included. Skin can look plasticky; for blocking a shot, not keeping it."
+                    : "The full 25-step sampler. The delivery setting."
+                  : quality === "draft"
+                    ? "Skips the ×2 upscale + refine pass — half-size picture, well under half the wait. For blocking a shot, not keeping it."
+                    : "Full pipeline: base pass, ×2 spatial upscale, refine. The delivery setting."}
               </p>
             </div>
           </DisclosureRow>

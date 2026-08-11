@@ -30,14 +30,22 @@ LM_MODEL   = "acestep-5Hz-lm-1.7B"                  # the LM the registry ships
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
+import torch
 from acestep.handler import AceStepHandler
 from acestep.llm_inference import LLMHandler
 from acestep.inference import GenerationParams, GenerationConfig, generate_music
 
+# CUDA on Windows, Metal on a Mac. The DiT and the LM have to agree — split
+# them across devices and generation dies on a cross-device matmul — so the
+# choice is made once here and passed to both.
+DEVICE = ("cuda" if torch.cuda.is_available()
+          else "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+          else "cpu")
+
 dit = AceStepHandler()
-print("[aurea-music] initializing DiT (turbo)...", flush=True)
+print(f"[aurea-music] initializing DiT (turbo) on {DEVICE}...", flush=True)
 msg, ok = dit.initialize_service(
-    project_root=PROJECT, config_path="acestep-v15-turbo", device="cuda"
+    project_root=PROJECT, config_path="acestep-v15-turbo", device=DEVICE
 )
 if not ok:
     print(f"[aurea-music] FAILED: DiT init: {msg}", flush=True)
@@ -49,7 +57,7 @@ msg, ok = llm.initialize(
     checkpoint_dir=os.path.join(PROJECT, "checkpoints"),
     lm_model_path=LM_MODEL,
     backend="vllm",
-    device="cuda",
+    device=DEVICE,
 )
 if not ok:
     print(f"[aurea-music] FAILED: LM init: {msg}", flush=True)

@@ -119,9 +119,10 @@ export class ComfyVideoAdapter implements EngineAdapter {
       const weight = resolveCameraLoras(options)[payload.cameraLora.move as never];
       if (!weight) {
         throw new Error(
-          `No camera-control LoRA for "${payload.cameraLora.move}" on this install — ` +
-            "Lightricks has not shipped 22b camera weights yet; describe the move in " +
-            "the prompt instead (the cinematography bank already does).",
+          `No camera-control LoRA for "${payload.cameraLora.move}" in this install's lora ` +
+            "folder — the Lightricks set loads on 2.3 despite its 19b name (see " +
+            "resolveCameraLoras); drop it in and restart ComfyUI, or describe the move " +
+            "in the prompt instead (the cinematography bank already does).",
         );
       }
       loras.push({ name: weight, strength: payload.cameraLora.strength });

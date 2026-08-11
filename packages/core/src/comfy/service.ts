@@ -93,12 +93,26 @@ export class ComfyService {
     return this.idleUrl(engines.videoMode) ?? "";
   }
 
-  /** minimaxUrl(), allowed to run discovery when H3 shares the LTX server */
+  /** minimaxUrl(), allowed to run discovery when H3 shares the LTX server.
+   * Passive — for capability probes. Renders want minimaxUrlEnsured(). */
   async minimaxUrlResolved(): Promise<string> {
     const { engines } = this.settings.get();
     const explicit = engines.minimaxUrl.trim().replace(/\/$/, "");
     if (explicit) return explicit;
     return (await this.idleUrlResolved(engines.videoMode)) ?? "";
+  }
+
+  /** minimaxUrlResolved() for a render: when H3 shares the LTX server it is
+   * allowed to START that server. The passive lookup returns null for a cold
+   * managed engine, which an H3 render used to report as "MiniMax-H3 has no
+   * ComfyUI to run on" — true of the moment, false of the setup. An explicit
+   * minimaxUrl is still somebody else's process and is never booted. */
+  async minimaxUrlEnsured(): Promise<string> {
+    const { engines } = this.settings.get();
+    const explicit = engines.minimaxUrl.trim().replace(/\/$/, "");
+    if (explicit) return explicit;
+    if (engines.videoMode === "external") return this.minimaxUrlResolved();
+    return this.ensure("managed");
   }
   /** jobs currently inside run() — the idle clock only ticks at zero */
   private busy = 0;
@@ -206,24 +220,39 @@ export class ComfyService {
         this.discoveryNote = null;
         return url;
       }
-      // no Director pack: usable for plain renders, but only if this isn't the
-      // H3 sidecar wearing a ComfyUI's clothes
-      if (await client.hasNode(MINIMAX_NODE)) {
-        rejected.push(`${url} is the MiniMax-H3 ComfyUI, not the LTX one`);
-      } else if (await client.hasNode(BASE_LTX_NODE)) {
+      // No Director pack. Still usable for plain renders — but say WHY it was
+      // passed over, because the usual cause is a specific, fixable mistake:
+      // ComfyUI Desktop launched from its icon passes its own generated
+      // --extra-model-paths-config, which lists model folders and no
+      // custom_nodes, so the D:\custom_nodes packs never load. Same install,
+      // same port, no LTXDirector.
+      //
+      // H3's nodes are NOT the discriminator any more (core since ComfyUI
+      // 0.30, so every modern install answers to them) — a bare LTX node is
+      // what separates "a ComfyUI missing its custom nodes" from "not a video
+      // ComfyUI at all".
+      if (await client.hasNode(BASE_LTX_NODE)) {
         fallback ??= url;
+        rejected.push(
+          `${url} has core LTX but no Director pack — if that is ComfyUI Desktop, ` +
+            "its icon launch overrides the config that mounts custom_nodes",
+        );
+      } else if (await client.hasNode(MINIMAX_NODE)) {
+        rejected.push(`${url} is a MiniMax-H3-only ComfyUI, not the LTX one`);
       } else {
         rejected.push(`${url} is a ComfyUI without the LTX pipeline`);
       }
     }
     this.discovered = fallback;
     this.discoveredAt = Date.now();
-    this.discoveryNote =
-      !fallback && rejected.length
-        ? `A ComfyUI is running, but not the one Aurea's video engine needs: ${rejected.join("; ")}. ` +
-          "Launch the LTX install (the one whose custom_nodes has WhatDreamsCost-ComfyUI) " +
-          "and it will be picked up automatically."
-        : null;
+    // set even when a fallback WAS adopted: a half-surface engine is exactly
+    // the case where the user needs to know which ComfyUI got picked and what
+    // it is missing, rather than watching Director mode grey itself out
+    this.discoveryNote = rejected.length
+      ? `A ComfyUI is running, but not the one Aurea's video engine needs: ${rejected.join("; ")}. ` +
+        "Launch the LTX install (the one whose custom_nodes has WhatDreamsCost-ComfyUI) " +
+        "and it will be picked up automatically."
+      : null;
     return fallback;
   }
 

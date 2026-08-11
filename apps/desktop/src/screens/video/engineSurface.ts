@@ -62,6 +62,8 @@ export interface SurfaceCatalog {
   } | null;
   /** MiniMax's ref2va checkpoint is downloaded (catalog, not a live probe) */
   minimaxRefsAvailable: boolean;
+  /** the H3 Turbo distill LoRA is downloaded — Draft quality on minimax-h3 */
+  minimaxTurboAvailable: boolean;
 }
 
 /** the slice of labs.video.capabilities the surface reads; null mid-probe */
@@ -130,6 +132,14 @@ export function computeEngineSurface(
                 "MiniMax-H3 Reference (GGUF). It is what carries a face, a voice or a " +
                 "camera move into a new shot, and how a finished clip gets edited.",
             ),
+        // Draft on H3 = the Turbo distill (8 steps instead of 25, ~3× faster),
+        // gated on its own download the way references are
+        quality: catalog.minimaxTurboAvailable
+          ? shown
+          : locked(
+              "Draft renders with the Turbo distill LoRA — 8 steps instead of 25, about " +
+                "3× faster at preview quality. Settings → Models → MiniMax-H3 Turbo LoRA.",
+            ),
       },
       resolutions,
       // 4–15s is what H3 was trained on; the panel keeps its own warning for a
@@ -157,9 +167,9 @@ export function computeEngineSurface(
               capabilities.note ??
                 "Needs a ComfyUI with the Director node pack — check Settings → Engines.",
             ),
-      // hidden, not locked, until compatible weights exist: Lightricks has only
-      // shipped camera LoRAs for the 19b base, and a control nobody can unlock
-      // is noise rather than gating
+      // hidden, not locked, until the weights are in the lora folder — a
+      // control nobody can unlock is noise rather than gating. (The Lightricks
+      // set loads on 2.3 despite its 19b name; see resolveCameraLoras.)
       camera:
         capabilities && Object.keys(capabilities.cameraLoras).length > 0 ? shown : hidden,
       adapters: capabilities?.availableLoras.length

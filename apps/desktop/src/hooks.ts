@@ -1489,6 +1489,9 @@ export function useVideoLab() {
        * one missing key off that catalog throws in render, which blanks the
        * whole lab rather than dimming one panel. */
       minimaxRefsAvailable: catalog?.minimax?.reference?.available ?? false,
+      /** Is the H3 Turbo distill downloaded? Same download-not-probe rule (and
+       * the same renderer-outlives-core optional chain) as the reference head. */
+      minimaxTurboAvailable: catalog?.minimax?.turbo?.available ?? false,
       /** shot sizes and moves for the prompt-beat camera pickers; empty until
        * the project's bible has the cinematography bank imported */
       cinematography: cinematography ?? EMPTY_CINEMATOGRAPHY,

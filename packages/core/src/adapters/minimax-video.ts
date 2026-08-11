@@ -46,6 +46,14 @@ const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
 export const MINIMAX_MODEL_ID = "minimax-h3-gguf";
 /** the ref2va head — a second 15.6 GB checkpoint, downloaded separately */
 export const MINIMAX_REF_MODEL_ID = "minimax-h3-ref-gguf";
+/** the Turbo distill LoRA behind Draft — 8 steps instead of 25, ~3× faster */
+export const MINIMAX_TURBO_MODEL_ID = "minimax-h3-turbo-lora";
+
+/** How the Turbo LoRA is recognised in the install's own lora walk. Resolved
+ * from the combo rather than composed: ComfyUI validates lora_name against a
+ * directory walk that arrives with backslash separators on Windows, so a
+ * composed forward-slash path is rejected before the render starts. */
+const TURBO_LORA = /minimax.h3.turbo/i;
 
 /** Only 0.30.0+ carries comfy/ldm/minimax. Below that the MiniMaxH3ImageToVideo
  * node simply isn't registered, and CLIPLoaderGGUF's "minimax" type falls back
@@ -219,8 +227,9 @@ export class MinimaxVideoAdapter implements EngineAdapter {
       if (payload?.type !== "video") throw new Error("not a video job");
       const { storage } = this.settings.get();
 
-      // empty minimaxUrl = "same ComfyUI as LTX" (see ComfyService.minimaxUrl)
-      const url = await this.comfy.minimaxUrlResolved();
+      // empty minimaxUrl = "same ComfyUI as LTX" (see ComfyService.minimaxUrl),
+      // and on a managed engine that server is ours to start
+      const url = await this.comfy.minimaxUrlEnsured();
       if (!url) {
         throw new Error(
           "MiniMax-H3 has no ComfyUI to run on. It needs ComfyUI 0.30.0 or newer — the same " +
@@ -263,10 +272,10 @@ export class MinimaxVideoAdapter implements EngineAdapter {
           `MiniMax-H3 renders at 24 fps only — ${payload.fps} fps is an LTX-2.3 option.`,
         );
       }
-      if (payload.fast) {
+      if (payload.fast && !this.models.ready(MINIMAX_TURBO_MODEL_ID)) {
         throw new Error(
-          "Draft mode skips LTX's refine pass — H3 has no equivalent stage. Lower the " +
-            "duration or resolution to render faster here.",
+          "Draft on H3 renders with the Turbo distill LoRA (8 steps instead of 25) — " +
+            "Settings → Models → MiniMax-H3 Turbo LoRA, or switch Quality back to Final.",
         );
       }
       if (!this.models.ready(MINIMAX_MODEL_ID)) {
@@ -344,6 +353,32 @@ export class MinimaxVideoAdapter implements EngineAdapter {
         this.settings.get().engines.minimaxTuning.sageAttention &&
         (await client.hasNode("PathchSageAttentionKJ"));
 
+      /* Draft = the Turbo distill riding the unet. Unlike sage this REFUSES
+       * when the install can't do it: a silently-dropped speed toggle would
+       * deliver a 25-step render the user budgeted 8 steps of waiting for.
+       * The name comes from the install's own walk (see TURBO_LORA); the
+       * ready() preflight above already vouched the weight was downloaded, so
+       * a miss here means this ComfyUI can't see our store — say which. */
+      let turbo: string | undefined;
+      if (payload.fast) {
+        const options = await client.comboOptions("LoraLoaderModelOnly", "lora_name");
+        turbo = options.find((o) => TURBO_LORA.test(o));
+        if (!turbo) {
+          throw new Error(
+            `The Turbo LoRA is downloaded but the ComfyUI at ${url} doesn't list it in its ` +
+              "lora folder — it scans folders at startup, so restart it (or check that this " +
+              "install mounts Aurea's model store) and try again.",
+          );
+        }
+        if (!(await client.hasNode("MiniMaxH3SigmaShift"))) {
+          throw new Error(
+            `The ComfyUI at ${url} has no MiniMaxH3SigmaShift node — Draft needs the sigma ` +
+              "shift the distill was trained around. The node ships with ComfyUI 0.30.2+; " +
+              "update that install, or switch Quality back to Final.",
+          );
+        }
+      }
+
       report({ progress: 2, stage: "Staging inputs" });
       const stage = async (rel: string, tag: string, what: string) => {
         const file = path.join(storage.dataRoot, rel);
@@ -414,6 +449,7 @@ export class MinimaxVideoAdapter implements EngineAdapter {
           height,
           seed,
           sage,
+          turbo,
           models: this.refModelNames(),
           filenamePrefix: "aurea/h3-ref",
         });
@@ -437,6 +473,7 @@ export class MinimaxVideoAdapter implements EngineAdapter {
           height,
           seed,
           sage,
+          turbo,
           models: this.modelNames(),
           filenamePrefix: "aurea/h3",
         });
@@ -458,7 +495,7 @@ export class MinimaxVideoAdapter implements EngineAdapter {
       report({
         progress: 4,
         stage: "Queuing on ComfyUI",
-        detail: `${frames} frames @ ${MINIMAX_FPS}fps${refs ? ` · ${describeRefs(refs)}` : ""}`,
+        detail: `${frames} frames @ ${MINIMAX_FPS}fps${turbo ? " · Turbo draft" : ""}${refs ? ` · ${describeRefs(refs)}` : ""}`,
       });
 
       const files = await client.run(graph, {
@@ -468,6 +505,7 @@ export class MinimaxVideoAdapter implements EngineAdapter {
         timeoutMs: 120 * 60_000,
         onNode: (classType) => {
           if (classType === "UnetLoaderGGUF") report({ stage: "Loading MiniMax-H3" });
+          else if (classType === "LoraLoaderModelOnly") report({ stage: "Loading the Turbo LoRA" });
           else if (classType === "CLIPLoaderGGUF") report({ stage: "Loading the text encoder" });
           else if (classType === "MiniMaxH3ImageToVideo") report({ stage: "Encoding the prompt" });
           else if (classType === "GetVideoComponents") report({ stage: "Reading the reference clips" });
@@ -501,6 +539,7 @@ export class MinimaxVideoAdapter implements EngineAdapter {
         meta: {
           engine: "minimax-h3",
           nativeAudio: true,
+          ...(turbo ? { draft: true } : {}),
           ...(refs ? { mode: "ref2va", refs: describeRefs(refs) } : {}),
         },
       };

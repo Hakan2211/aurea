@@ -682,10 +682,10 @@ export class Labs {
         keyframesMax: 8,
         /** stackable adapter LoRAs per render */
         lorasMax: 3,
-        /** camera-control moves the payload can name. Weights for the 22b
-         * model have not shipped — capabilities.cameraLoras says which (if
-         * any) are installed; until then the cinematography bank's prose
-         * carries the move. */
+        /** camera-control moves the payload can name — capabilities.cameraLoras
+         * says which are installed (the Lightricks set loads on 2.3 despite its
+         * 19b name; see resolveCameraLoras). A move with no weight falls back
+         * to the cinematography bank's prose. */
         cameraMoves: [
           "dolly-in",
           "dolly-out",
@@ -747,7 +747,11 @@ export class Labs {
           "Roughly 10x LTX-2.3's render time for the same length on the same card — budget it as a hero shot, not a draft.",
           "The 2K presets render ~2.4× the pixels of the native 768-edge canvas — sharper stills-like frames, but the model was trained at 768, so treat 2K as a finishing choice and expect the wait to scale with the pixels.",
           "SageAttention (Settings → Engines → MiniMax-H3 tuning) roughly halves the render time when the `sageattention` package is installed in that ComfyUI's python; the toggle is dropped silently when the node is missing.",
+          "Draft quality renders with the Turbo distill LoRA — 8 sampler steps instead of 25, ~3× faster, with plastic-looking skin on some shots. Block in Draft, deliver in Final.",
         ],
+        /** Draft on H3 = the Turbo distill LoRA, gated on its own download the
+         * way the reference head is */
+        turbo: { available: this.models.ready("minimax-h3-turbo-lora") },
         /** H3's OTHER head. Same model, different checkpoint and node: instead
          * of a first frame it takes things to carry forward — stills, clips,
          * sound — and that is also the only way to edit an existing clip on
@@ -786,9 +790,21 @@ export class Labs {
     const { engines } = this.settings.get();
     const mode = engines.videoMode;
     const url = await this.comfy.idleUrlResolved(mode);
+    // a cold managed engine has no URL to probe, but its node surface is known
+    // from the pinned packs the runtime installed — see InstalledPacks
+    const installed = {
+      director: this.runtime.componentReady("director-nodes"),
+      kjnodes: this.runtime.componentReady("kjnodes"),
+      comfy: this.runtime.componentReady("comfy"),
+    };
     const [ltx, minimax] = await Promise.all([
-      probeVideoCapabilities(url, mode),
-      probeMinimaxCapabilities(await this.comfy.minimaxUrlResolved()),
+      probeVideoCapabilities(url, mode, installed),
+      probeMinimaxCapabilities(
+        await this.comfy.minimaxUrlResolved(),
+        // no URL because the shared managed engine is cold, not because H3 is
+        // unconfigured — kjnodes is installed, so Sage comes back with it
+        mode === "managed" && !engines.minimaxUrl.trim() && installed.kjnodes,
+      ),
     ]);
     // discovery is a silent override otherwise: say so, so the setting that no
     // longer matches reality is visible rather than mysterious
@@ -800,7 +816,10 @@ export class Labs {
     }
     // nothing usable found, but something WAS listening — say which, so the
     // lab reads as "wrong ComfyUI" rather than "half the features vanished"
-    const why = mode === "external" && !url ? this.comfy.lastDiscoveryNote() : null;
+    // also when a ComfyUI WAS adopted but has no Director pack: "which install
+    // is this and what is it missing" beats a bare greyed-out toggle
+    const why =
+      mode === "external" && (!url || !ltx.director) ? this.comfy.lastDiscoveryNote() : null;
     if (why) ltx.note = why;
     return { ...ltx, minimax };
   }
@@ -953,7 +972,7 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
           payload.resolution,
           `${payload.durationSec}s`,
           payload.fps !== 24 ? `${payload.fps}fps` : "",
-          payload.fast ? "draft · half-size" : "",
+          payload.fast ? (minimax ? "draft · 8-step Turbo" : "draft · half-size") : "",
           payload.endFrame && !minimax ? "end frame" : "",
           payload.keyframes.length
             ? `${payload.keyframes.length} anchor${payload.keyframes.length === 1 ? "" : "s"}`

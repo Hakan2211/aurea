@@ -14,9 +14,33 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-Setup-${version}.${ext}
+mac:
+  # electron-builder derives the .icns from the same 512px png
+  icon: build/icon.png
+  category: public.app-category.video
+  target:
+    - target: dmg
+      arch:
+        # Apple Silicon is the build that matters — Metal/MPS is what torch
+        # accelerates on. x64 is here so an Intel Mac gets a build that runs
+        # rather than one that dies at the first native wheel.
+        - arm64
+        - x64
+  # Unsigned, so the hardened runtime would only buy a Gatekeeper refusal with
+  # no way through. `identity: null` stops electron-builder hunting the
+  # keychain and failing the build on a machine with no certificate.
+  hardenedRuntime: false
+  identity: null
+dmg:
+  # arch in the name: the site's download resolver picks arm64 over x64, and a
+  # human can tell at a glance which one they grabbed
+  artifactName: ${productName}-${version}-${arch}.${ext}
 # No code signing yet — dev builds only
 forceCodeSigning: false
 npmRebuild: false
-# Use the locally installed electron (same pinned 43.1.1) instead of
-# download+extract — the extract's dir-rename trips over Defender on this box
-electronDist: ../../node_modules/electron/dist
+# NOTE: electronDist is deliberately NOT set here. The Windows build still uses
+# the locally installed electron (same pinned 43.1.1) to dodge the Defender
+# stall on the download's dir-rename, but it is passed on the command line by
+# `npm run package:win` instead. A single local dist is one platform and one
+# arch, so as a global it would hand the arm64 and x64 Mac builds the same
+# binary — quietly producing an "arm64" dmg with x64 Electron inside.

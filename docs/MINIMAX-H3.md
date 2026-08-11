@@ -24,6 +24,33 @@ the full canvas nearer the ~20 min the original evaluation predicted. Add a
 cold-start penalty on the first run of a session: 24 GB of weights have to come
 off disk.
 
+## Draft mode: the Turbo distill (2026-08-07)
+
+`payload.fast` on H3 renders with the **MiniMax-H3 Turbo LoRA**
+(`minimax-h3-turbo-lora` in the registry — drbaph's ComfyUI conversion of
+larryvrh's few-step distill, ema ckpt850): the same joint A/V pass in **8
+sampler steps instead of 25**, ~3× faster sampling wall-clock. It loads on both
+heads.
+
+The graph changes only on the draft path (`minimax-graphs.ts`, `spec.turbo`):
+
+```
+UnetLoaderGGUF → LoraLoaderModelOnly(turbo, 1.0) → [PathchSageAttentionKJ]
+              → MiniMaxH3SigmaShift(video 12, audio 6) → BasicGuider/Scheduler
+```
+
+`MiniMaxH3SigmaShift` ships in core 0.30.2; the shift values are what the
+distill was trained around (its README: video 12, audio 4–6). Sampler stays
+`res_multistep` + `simple`. The Final tier is untouched — same 25-step graph as
+always, no shift node.
+
+Quality caveat (it is a preview-grade distill): plastic-looking skin and
+over-sharp grain on some shots. Draft is for blocking; Final delivers. Unlike
+the Sage toggle, an unusable draft **refuses** rather than silently rendering
+25 steps — the LoRA name is resolved from the install's own lora walk
+(`TURBO_LORA` regex in the adapter), and a missing weight or shift node says
+exactly what to fix.
+
 ---
 
 ## Why it is a separate engine, not another checkpoint

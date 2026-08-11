@@ -497,9 +497,11 @@ export const videoPayloadSchema = z.object({
   /** LTX only: 24 is the trained default; 48 doubles the frame count for the
    * same seconds — smoother, roughly double the render time and VRAM. */
   fps: z.union([z.literal(24), z.literal(48)]).default(24),
-  /** LTX draft mode: stop after the base sampling pass and skip the ×2
-   * upscale + refine stage. Half the pixels, well under half the wait — for
-   * blocking a shot, not delivering it. */
+  /** Draft mode, with a per-engine meaning. LTX: stop after the base sampling
+   * pass and skip the ×2 upscale + refine stage — half the pixels, well under
+   * half the wait. MiniMax-H3: render with the Turbo distill LoRA, 8 steps
+   * instead of 25 (~3× faster), at preview quality. Both are for blocking a
+   * shot, not delivering it. */
   fast: z.boolean().default(false),
   /** stackable adapter LoRAs (LTX only) — names must come from the install's
    * own list (capabilities.availableLoras); ComfyUI validates them verbatim */
@@ -513,8 +515,8 @@ export const videoPayloadSchema = z.object({
     .max(3)
     .default([]),
   /** camera-control LoRA move (LTX only). Gated on capabilities.cameraLoras —
-   * Lightricks has not yet shipped 22b/2.3 camera weights, so this stays
-   * hidden until a compatible set lands in the lora folder. */
+   * hidden until the weights are in the install's lora folder (the Lightricks
+   * set loads on 2.3 despite its 19b name; see resolveCameraLoras). */
   cameraLora: z
     .object({
       move: z.enum([

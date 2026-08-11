@@ -8,9 +8,12 @@
  *   runtime/extra_model_paths.yaml   points ComfyUI at <dataRoot>/models
  *   runtime/runtime.json  installed versions (a pin change = reinstall)
  *
- * This is what makes the P1 exit criterion possible: a clean Windows machine
- * gets Python and ComfyUI from the wizard, no terminal, no system installs.
- * Everything is user-writable and lives under the one storage root. */
+ * This is what makes the P1 exit criterion possible: a clean machine — Windows
+ * or macOS — gets Python and ComfyUI from the wizard, no terminal, no system
+ * installs. Everything is user-writable and lives under the one storage root.
+ *
+ * Weights are never bundled: the model manager fetches them from Hugging Face
+ * on demand, so the host only has to supply an interpreter and an accelerator. */
 
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
@@ -20,21 +23,129 @@ import type { SettingsStore } from "../settings.js";
 import { runProcess } from "../adapters/proc.js";
 import { downloadFile } from "./download.js";
 
+/* ---------- host platform ----------
+ *
+ * The managed runtime is the same substrate on every host — portable CPython,
+ * one ComfyUI, venvs per engine. What differs is three things and no more: the
+ * CPython asset, where a venv puts its interpreter, and which torch wheels to
+ * pull. Everything below funnels those differences through here rather than
+ * scattering `process.platform` checks down the install path. */
+const IS_WINDOWS = process.platform === "win32";
+
+/** Windows lays a venv out as Scripts/python.exe, POSIX as bin/python3. */
+const VENV_BIN = IS_WINDOWS ? "Scripts" : "bin";
+const VENV_PYTHON = IS_WINDOWS ? "python.exe" : "python3";
+
 /** pinned upstream builds — bump deliberately, never silently */
-export const PYTHON_PIN = {
-  version: "3.12.13",
-  /** python-build-standalone release tag */
-  tag: "20260623",
-  url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.12.13%2B20260623-x86_64-pc-windows-msvc-install_only.tar.gz",
-  sizeBytes: 46013305,
-  sha256: "c6af85bb83d5158c9ff71f50dfad467853d1cd236f932b144e87e26e2ea2a83e",
+const PYTHON_VERSION = "3.12.13";
+/** python-build-standalone release tag */
+const PYTHON_TAG = "20260623";
+
+/**
+ * One tag, one CPython version, one asset per host. Sizes and digests are the
+ * ones GitHub reports for that release — the Windows entry is the pin this file
+ * has always carried, unchanged.
+ *
+ * Apple Silicon and Intel are both listed because an Intel Mac running the
+ * arm64 build would fail at the first native wheel, and picking by
+ * `process.arch` costs nothing.
+ */
+const PYTHON_BUILDS: Record<
+  string,
+  { triple: string; sizeBytes: number; sha256: string }
+> = {
+  "win32-x64": {
+    triple: "x86_64-pc-windows-msvc",
+    sizeBytes: 46013305,
+    sha256: "c6af85bb83d5158c9ff71f50dfad467853d1cd236f932b144e87e26e2ea2a83e",
+  },
+  "darwin-arm64": {
+    triple: "aarch64-apple-darwin",
+    sizeBytes: 25159977,
+    sha256: "3724aa4dafb5f7b6c2cf98e89914e4248dc6bd2fe40407df4a2d73de99615f16",
+  },
+  "darwin-x64": {
+    triple: "x86_64-apple-darwin",
+    sizeBytes: 24829196,
+    sha256: "7c57fdd1fa675190093700eb0d8e7117e1f9eae7c30a46dea5f8d5266bcfc791",
+  },
 };
 
-export const COMFY_PIN = {
-  tag: "v0.28.0",
-  /** GitHub tag archive (no published sha — verified structurally instead) */
-  url: "https://github.com/Comfy-Org/ComfyUI/archive/refs/tags/v0.28.0.zip",
+/**
+ * Resolved lazily rather than at module load: importing @aurea/core on an
+ * unsupported host (Linux CI, a contributor's box) must not explode on import.
+ * The failure belongs at "install the runtime", where it can be shown in the
+ * wizard as a sentence a person can act on.
+ */
+function pythonBuild(): { triple: string; sizeBytes: number; sha256: string } {
+  const key = `${process.platform}-${process.arch}`;
+  const build = PYTHON_BUILDS[key];
+  if (!build) {
+    throw new Error(
+      `No managed Python build for ${key}. Aurea's runtime supports Windows x64 and macOS (Apple Silicon or Intel).`,
+    );
+  }
+  return build;
+}
+
+export const PYTHON_PIN = {
+  version: PYTHON_VERSION,
+  tag: PYTHON_TAG,
+  /** the asset for *this* host — throws on an unsupported platform */
+  get url(): string {
+    // "+" is percent-encoded in the published filename
+    return `https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_TAG}/cpython-${PYTHON_VERSION}%2B${PYTHON_TAG}-${pythonBuild().triple}-install_only.tar.gz`;
+  },
+  get sizeBytes(): number {
+    return pythonBuild().sizeBytes;
+  },
+  get sha256(): string {
+    return pythonBuild().sha256;
+  },
 };
+
+/** Bumped v0.28.0 → v0.30.2 on 2026-08-07 so ONE managed ComfyUI serves both
+ * video engines: MiniMax-H3's nodes became core in 0.30, so the managed runtime
+ * no longer needs an external ComfyUI for H3 (0.28 has core LTX but no H3).
+ * That is what lets engines.videoMode run "managed" — see comfy/service.ts. */
+export const COMFY_PIN = {
+  tag: "v0.30.2",
+  /** GitHub tag archive (no published sha — verified structurally instead) */
+  url: "https://github.com/Comfy-Org/ComfyUI/archive/refs/tags/v0.30.2.zip",
+};
+
+/**
+ * Torch install args for the host.
+ *
+ * On Windows the CUDA index is passed as `--index-url` (not `--extra-`) so
+ * PyPI can never win with a newer CPU-only build — that rule is load-bearing
+ * and every engine spec below depends on it.
+ *
+ * On macOS there is no CUDA index to point at: PyPI's own macOS wheels are the
+ * Metal/MPS builds, and forcing an index-url would either 404 or drag in a
+ * Linux CPU wheel. So the version pins stay exactly as they are and only the
+ * index drops — same torch, same resolution, different accelerator underneath.
+ */
+function torchArgs(packages: string[], cudaIndex: string): string[] {
+  return IS_WINDOWS ? [...packages, "--index-url", cudaIndex] : [...packages];
+}
+
+/** "Installing PyTorch (CUDA 12.8)" reads as a lie on a Mac. */
+function torchStage(cudaLabel: string): string {
+  return IS_WINDOWS
+    ? `Installing PyTorch (${cudaLabel}) — several GB, takes a while`
+    : "Installing PyTorch (Metal/MPS) — several GB, takes a while";
+}
+
+/**
+ * The accelerator probe behind every engine's post-install check: CUDA on
+ * Windows, MPS on a Mac. The check exists to prove the import graph resolves,
+ * so it prints the answer rather than asserting it — a machine with no usable
+ * accelerator should say `accel=False` out loud, not fail the install and
+ * leave the user guessing which of forty wheels went wrong.
+ */
+const ACCEL_EXPR =
+  "(torch.cuda.is_available() or (hasattr(torch.backends,'mps') and torch.backends.mps.is_available()))";
 
 /** A Python engine that runs in its own venv under runtime/venvs/<id> —
  * the protocol behind every non-ComfyUI local engine. Bumping `version`
@@ -68,16 +179,20 @@ export const CHATTERBOX_PIN: VenvEngineSpec = {
   version: "0.1.7",
   steps: [
     {
-      stage: "Installing PyTorch (CUDA 12.4) — several GB, takes a while",
-      // chatterbox-tts pins torch==2.6.0; install the CUDA build first so
-      // PyPI's CPU-only wheel can never satisfy the pin
-      args: ["torch==2.6.0", "torchaudio==2.6.0", "--index-url", "https://download.pytorch.org/whl/cu124"],
+      stage: torchStage("CUDA 12.4"),
+      // chatterbox-tts pins torch==2.6.0; on Windows install the CUDA build
+      // first so PyPI's CPU-only wheel can never satisfy the pin. On macOS the
+      // PyPI wheel *is* the right one (MPS), so the index drops away.
+      args: torchArgs(
+        ["torch==2.6.0", "torchaudio==2.6.0"],
+        "https://download.pytorch.org/whl/cu124",
+      ),
     },
     { stage: "Installing Chatterbox TTS", args: ["chatterbox-tts==0.1.7"] },
   ],
   check: {
-    code: "import chatterbox.tts, torch; print('chatterbox ok cuda='+str(torch.cuda.is_available()))",
-    expect: /chatterbox ok cuda=/,
+    code: `import chatterbox.tts, torch; print('chatterbox ok accel='+str(${ACCEL_EXPR}))`,
+    expect: /chatterbox ok accel=/,
   },
   expectedBytes: 6 * 1024 ** 3,
 };
@@ -93,13 +208,13 @@ export const ACESTEP_PIN: VenvEngineSpec = {
   },
   steps: [
     {
-      stage: "Installing PyTorch (CUDA 12.8) — several GB, takes a while",
+      stage: torchStage("CUDA 12.8"),
       // upstream pins torch==2.7.1+cu128 on Windows; CUDA index first so
       // PyPI's CPU-only build can never satisfy the pin
-      args: [
-        "torch==2.7.1", "torchvision==0.22.1", "torchaudio==2.7.1",
-        "--index-url", "https://download.pytorch.org/whl/cu128",
-      ],
+      args: torchArgs(
+        ["torch==2.7.1", "torchvision==0.22.1", "torchaudio==2.7.1"],
+        "https://download.pytorch.org/whl/cu128",
+      ),
     },
     {
       stage: "Installing ACE-Step dependencies",
@@ -125,8 +240,8 @@ export const ACESTEP_PIN: VenvEngineSpec = {
     },
   ],
   check: {
-    code: 'import sys; sys.path.insert(0, r"{repo}"); from acestep.handler import AceStepHandler; import nanovllm, torch; print("acestep ok cuda="+str(torch.cuda.is_available()))',
-    expect: /acestep ok cuda=/,
+    code: `import sys; sys.path.insert(0, r"{repo}"); from acestep.handler import AceStepHandler; import nanovllm, torch; print("acestep ok accel="+str(${ACCEL_EXPR}))`,
+    expect: /acestep ok accel=/,
   },
   expectedBytes: 8 * 1024 ** 3,
 };
@@ -142,13 +257,13 @@ export const SEEDVC_PIN: VenvEngineSpec = {
   },
   steps: [
     {
-      stage: "Installing PyTorch (CUDA 12.4) — several GB, takes a while",
+      stage: torchStage("CUDA 12.4"),
       // upstream pins torch==2.4.0 (works on our portable 3.12); CUDA index
       // first so PyPI's CPU-only wheel can never satisfy the pin
-      args: [
-        "torch==2.4.0", "torchvision==0.19.0", "torchaudio==2.4.0",
-        "--index-url", "https://download.pytorch.org/whl/cu124",
-      ],
+      args: torchArgs(
+        ["torch==2.4.0", "torchvision==0.19.0", "torchaudio==2.4.0"],
+        "https://download.pytorch.org/whl/cu124",
+      ),
     },
     {
       stage: "Installing Seed-VC dependencies",
@@ -166,8 +281,8 @@ export const SEEDVC_PIN: VenvEngineSpec = {
     },
   ],
   check: {
-    code: 'import sys; sys.path.insert(0, r"{repo}"); import torch; from modules import commons; print("seedvc ok cuda="+str(torch.cuda.is_available()))',
-    expect: /seedvc ok cuda=/,
+    code: `import sys; sys.path.insert(0, r"{repo}"); import torch; from modules import commons; print("seedvc ok accel="+str(${ACCEL_EXPR}))`,
+    expect: /seedvc ok accel=/,
   },
   expectedBytes: 7 * 1024 ** 3,
 };
@@ -334,7 +449,11 @@ export class EngineRuntime extends EventEmitter {
   }
 
   pythonExe(): string {
-    return path.join(this.root(), "python", "python.exe");
+    // python-build-standalone unpacks to python/python.exe on Windows and
+    // python/bin/python3 on macOS
+    return IS_WINDOWS
+      ? path.join(this.root(), "python", "python.exe")
+      : path.join(this.root(), "python", "bin", "python3");
   }
 
   comfyDir(): string {
@@ -342,7 +461,7 @@ export class EngineRuntime extends EventEmitter {
   }
 
   venvPython(): string {
-    return path.join(this.root(), "comfy-venv", "Scripts", "python.exe");
+    return path.join(this.root(), "comfy-venv", VENV_BIN, VENV_PYTHON);
   }
 
   extraModelPathsFile(): string {
@@ -354,7 +473,7 @@ export class EngineRuntime extends EventEmitter {
   }
 
   venvEnginePython(id: RuntimeComponentId): string {
-    return path.join(this.venvDir(id), "Scripts", "python.exe");
+    return path.join(this.venvDir(id), VENV_BIN, VENV_PYTHON);
   }
 
   /** a venv engine's pinned source checkout (specs with `repo`) */
@@ -609,7 +728,14 @@ export class EngineRuntime extends EventEmitter {
       "--cache-dir", cacheDir, ...args,
     ];
 
-    if (!fs.existsSync(path.join(this.comfyDir(), "main.py"))) {
+    // a pin change re-fetches the checkout, exactly as installCustomNode does:
+    // without the tag test an upgrade would reinstall requirements and record
+    // the new tag over an unchanged tree, so runtime.json would claim a version
+    // that is not on disk (and the new core nodes would never appear)
+    if (
+      !fs.existsSync(path.join(this.comfyDir(), "main.py")) ||
+      this.record().comfy !== COMFY_PIN.tag
+    ) {
       live.stage = `Downloading ComfyUI ${COMFY_PIN.tag}`;
       this.publish();
       const archive = path.join(root, "downloads", `ComfyUI-${COMFY_PIN.tag}.zip`);
@@ -657,13 +783,14 @@ export class EngineRuntime extends EventEmitter {
     // pip runs are resumable as a whole: already-satisfied packages are no-ops
     const poller = this.startSizePoller([venvDir, cacheDir], live, 15, 70);
     try {
-      live.stage = "Installing PyTorch (CUDA 12.8) — several GB, takes a while";
+      live.stage = torchStage("CUDA 12.8");
       live.progress = 15;
       this.publish();
-      // --index-url (not extra): PyPI must not win with a newer CPU-only build
+      // --index-url (not extra): PyPI must not win with a newer CPU-only build.
+      // On macOS the index drops and PyPI's own wheels are the MPS builds.
       await this.run(
         this.venvPython(),
-        pip(["torch", "torchvision", "torchaudio", "--index-url", TORCH_INDEX]),
+        pip(torchArgs(["torch", "torchvision", "torchaudio"], TORCH_INDEX)),
         signal,
         live,
       );
@@ -688,10 +815,10 @@ export class EngineRuntime extends EventEmitter {
     this.publish();
     const torch = await this.capture(
       this.venvPython(),
-      ["-c", "import torch;print(torch.__version__+' cuda='+str(torch.cuda.is_available()))"],
+      ["-c", `import torch;print(torch.__version__+' accel='+str(${ACCEL_EXPR}))`],
       signal,
     );
-    if (!/cuda=/.test(torch)) throw new Error(`torch import failed: ${torch || "(no output)"}`);
+    if (!/accel=/.test(torch)) throw new Error(`torch import failed: ${torch || "(no output)"}`);
     live.detail = `torch ${torch}`;
 
     this.writeExtraModelPaths();

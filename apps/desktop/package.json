@@ -10,7 +10,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && tsc --noEmit -p tsconfig.electron.json && vite build",
     "preview": "vite preview",
-    "package": "npm run build && electron-builder --win"
+    "package": "npm run package:win",
+    "package:win": "npm run build && electron-builder --win -c.electronDist=../../node_modules/electron/dist",
+    "package:mac": "npm run build && electron-builder --mac --arm64 --x64"
   },
   "dependencies": {
     "@aurea/core": "*",

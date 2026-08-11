@@ -165,6 +165,29 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: false,
   }),
   withSize({
+    id: "minimax-h3-turbo-lora",
+    name: "MiniMax-H3 Turbo LoRA",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · draft)",
+    description:
+      "Distilled few-step LoRA for MiniMax-H3 — the same joint audio-video pass in 8 sampler " +
+      "steps instead of 25, roughly 3× faster wall-clock. A preview-quality distill: expect " +
+      "plastic-looking skin and over-sharp grain on some shots, which is why it renders the " +
+      "Draft tier and the 25-step sampler stays the Final one. ComfyUI-compatible conversion " +
+      "of larryvrh's turbo LoRA (drbaph repack, ema ckpt850); loads on both the fl2va and " +
+      "ref2va heads.",
+    files: [
+      {
+        name: "loras/minimax_h3_turbo_4step_ema_ckpt850_pruned_comfyui.safetensors",
+        url: "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/minimax_h3_turbo_4step_ema_ckpt850_pruned_comfyui.safetensors",
+        sizeBytes: 620285592,
+        sha256: "ca29f15222f42d8a8edf91dc29fce8438044e5f65b52fa1eb7396567c2b3a3b4",
+      },
+    ],
+    license: APACHE,
+    essential: false,
+  }),
+  withSize({
     id: "z-image-turbo",
     name: "Z-Image Turbo",
     use: "image",

@@ -73,10 +73,11 @@ const IC_LORA = /ic-lora.*(union-control|motion-track)/i;
  * ships 22b versions) the camera-control set. */
 const INFRA_LORA = /ic-lora|distilled|gemma/i;
 
-/** camera-control LoRAs, keyed by move. As of 2026-08 Lightricks has only
- * published these for the 19b base model — a 19b LoRA does not load on the
- * 22b 2.3 transformer, so this probe is expected to find nothing today. The
- * moment compatible weights land in the lora folder, the moves light up. */
+/** Camera-control LoRAs, keyed by move. Lightricks publishes these under
+ * "19b" names, but the weights only touch attention layers whose dimensions
+ * are IDENTICAL on the 2.3 22b transformer — verified key-by-key against the
+ * 22b checkpoint 2026-08-07 (480/480 pairs match, same 48 blocks, same 4096
+ * hidden), which is why the "19b" set in the store loads and works here. */
 export const CAMERA_MOVES = [
   "dolly-in",
   "dolly-out",
@@ -185,11 +186,49 @@ const NONE = {
   cameraLoras: {} as Partial<Record<CameraMove, string>>,
 } as const;
 
+/** What a cold managed engine WILL have once it boots, from the installed
+ * runtime rather than a live probe.
+ *
+ * A managed engine's node surface is not a mystery: the runtime installs pinned
+ * packs, so "is the Director pack there?" is answered by runtime.json, not by
+ * /object_info. Without this a cold managed engine reported every node feature
+ * as missing, which locked the Shot Director toggle until something else
+ * happened to boot the sidecar — the same "half the engine vanished" failure
+ * external-mode discovery exists to prevent.
+ *
+ * Only node-derived features can be answered this way. Weight-derived ones
+ * (adapter LoRAs, camera LoRAs, the Ingredients IC-LoRA behind multiRef) are a
+ * directory listing on a live server, so they stay false until the engine is up
+ * and are filled in by the real probe then. */
+export interface InstalledPacks {
+  /** the WhatDreamsCost pack — Director timeline, prompt zones, audio track */
+  director: boolean;
+  /** KJNodes — attention patches, chunked feed-forward, NAG */
+  kjnodes: boolean;
+  /** ComfyUI itself, which carries the core LTX guide nodes */
+  comfy: boolean;
+}
+
 export async function probeVideoCapabilities(
   url: string | null,
   mode: "managed" | "external",
+  installed?: InstalledPacks,
 ): Promise<VideoCapabilities> {
   if (!url) {
+    if (mode === "managed" && installed) {
+      return {
+        mode,
+        reachable: false,
+        ...NONE,
+        director: installed.director,
+        perfPatches: installed.kjnodes,
+        nag: installed.kjnodes,
+        endFrame: installed.comfy,
+        note: installed.director
+          ? "The managed engine is asleep — it starts on the first render (about a minute)."
+          : "The managed engine is missing the Director node pack — Settings → Engines → Install engine runtime.",
+      };
+    }
     return {
       mode,
       reachable: false,
@@ -263,8 +302,24 @@ export interface MinimaxCapabilities {
   note?: string;
 }
 
-export async function probeMinimaxCapabilities(url: string): Promise<MinimaxCapabilities> {
+/** `managedAsleep` says the empty URL is not a missing setting: H3 has no
+ * address because it shares the cold managed engine, which the render will
+ * start. Telling the user to configure a URL there would be advice against
+ * their own working setup. */
+export async function probeMinimaxCapabilities(
+  url: string,
+  managedAsleep = false,
+): Promise<MinimaxCapabilities> {
   if (!url.trim()) {
+    if (managedAsleep) {
+      return {
+        reachable: false,
+        // KJNodes is installed in the managed runtime, so Sage is available
+        // once it boots — see InstalledPacks
+        sage: true,
+        note: "The managed engine is asleep — it starts on the first render (about a minute).",
+      };
+    }
     return {
       reachable: false,
       sage: false,

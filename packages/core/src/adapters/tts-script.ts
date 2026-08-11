@@ -13,12 +13,18 @@ REF_WAV   = os.environ["AUREA_REF_WAV"]
 EXAG      = float(os.environ.get("AUREA_EXAG", "0.6"))
 OUT_WAV   = os.environ["AUREA_OUT_WAV"]
 
-import torchaudio
+import torch, torchaudio
 from chatterbox.tts import ChatterboxTTS
 
+# CUDA on Windows, Metal on a Mac, CPU if the host offers neither. Resolved
+# once here so the load and every tensor that follows agree on one device.
+DEVICE = ("cuda" if torch.cuda.is_available()
+          else "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+          else "cpu")
+
 t0 = time.time()
-model = ChatterboxTTS.from_local(MODEL_DIR, device="cuda")
-print(f"[aurea-tts] model loaded in {time.time()-t0:.1f}s (exag={EXAG})", flush=True)
+model = ChatterboxTTS.from_local(MODEL_DIR, device=DEVICE)
+print(f"[aurea-tts] model loaded in {time.time()-t0:.1f}s (exag={EXAG} device={DEVICE})", flush=True)
 
 wav = model.generate(TEXT, audio_prompt_path=REF_WAV, exaggeration=EXAG, cfg_weight=0.4)
 os.makedirs(os.path.dirname(OUT_WAV), exist_ok=True)

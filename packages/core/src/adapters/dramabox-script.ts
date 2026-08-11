@@ -236,16 +236,22 @@ def build_dramabox_prompt(design, text):
 
 sys.path.insert(0, REPO)
 os.chdir(REPO)  # relative HF-cache/config lookups resolve from the repo
+import torch
 from src.inference_server import TTSServer
 from src.model_downloader import get_all_paths
 
-print("[aurea-dbx] loading model", flush=True)
+# CUDA on Windows, Metal on a Mac, CPU if the host offers neither.
+DEVICE = ("cuda" if torch.cuda.is_available()
+          else "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+          else "cpu")
+
+print(f"[aurea-dbx] loading model on {DEVICE}", flush=True)
 paths = get_all_paths()   # weights auto-cached under ~/.cache/dramabox
 t0 = time.time()
 server = TTSServer(checkpoint=paths["transformer"],
                    full_checkpoint=paths["audio_components"],
-                   gemma_root=paths["gemma_root"], device="cuda",
-                   compile_model=False)   # torch.compile needs Triton (no Windows)
+                   gemma_root=paths["gemma_root"], device=DEVICE,
+                   compile_model=False)   # torch.compile needs Triton (absent on Windows and macOS)
 print(f"[aurea-dbx] model loaded in {time.time()-t0:.1f}s "
       f"(seed={SEED} cfg={CFG} stg={STG} dur_mult={DUR_MULT})", flush=True)
 
