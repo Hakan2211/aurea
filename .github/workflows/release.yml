@@ -1,0 +1,118 @@
+# Builds Aurea for every platform it ships on and attaches the installers to a
+# GitHub release.
+#
+# Why this exists: a macOS build cannot be produced anywhere but macOS —
+# electron-builder refuses to cross-build one, and the Windows box this project
+# is developed on therefore cannot make a .dmg at all. A macOS runner closes
+# that gap without anyone owning a Mac.
+#
+# Push a tag and both installers appear on the release:
+#
+#     git tag v0.0.2 && git push origin v0.0.2
+#
+# Or run it by hand from the Actions tab against an existing tag.
+#
+# The site's download page reads whatever assets the latest release carries, so
+# a .dmg landing here is all it takes for the macOS button to appear — no site
+# change, no second release.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach to (e.g. v0.0.1)"
+        required: true
+        type: string
+
+# Needed to create the release and upload assets with the built-in token.
+permissions:
+  contents: write
+
+# A second push to the same tag supersedes the first rather than racing it for
+# the upload.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      # One platform failing must not cancel the other: a broken macOS build
+      # should still leave the Windows installer on the release.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # Apple Silicon; also emits the x64 dmg
+            name: macOS
+            package: npx electron-builder --mac --arm64 --x64
+            artifacts: apps/desktop/release/*.dmg
+          - os: windows-latest
+            name: Windows
+            package: npx electron-builder --win
+            artifacts: apps/desktop/release/*.exe
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build renderer and main
+        run: npm run build -w @aurea/desktop
+
+      - name: Package
+        working-directory: apps/desktop
+        env:
+          # Nothing is signed yet (electron-builder.yml sets identity: null and
+          # forceCodeSigning: false). Without this, electron-builder searches the
+          # runner's empty keychain and fails the macOS build outright.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        # electronDist is deliberately not passed here. Locally it dodges a
+        # Defender stall on the download's dir-rename; a clean runner has no
+        # such problem, and on macOS a single local dist cannot serve both
+        # architectures.
+        run: ${{ matrix.package }}
+
+      # Kept regardless of whether the upload below succeeds, so a token or
+      # release problem never costs a 20-minute build.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurea-${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The release usually exists already (published by hand, or by the
+          # first matrix job to finish). Create it only if it does not, and let
+          # the loser of that race fall through to the upload.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Aurea ${TAG#v}" \
+              --notes "Unsigned build. Windows: SmartScreen will warn. macOS: right-click → Open the first time." \
+              || echo "release appeared while we were creating it — continuing to upload"
+          fi
+          # --clobber so re-running a build replaces its asset instead of
+          # failing on the name already being taken.
+          gh release upload "$TAG" ${{ matrix.artifacts }} \
+            --repo "$GITHUB_REPOSITORY" --clobber
