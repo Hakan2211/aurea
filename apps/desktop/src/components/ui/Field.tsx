@@ -21,7 +21,7 @@ export function Field({
     <div className={cx("space-y-1.5", className)}>
       <SectionLabel right={right}>{label}</SectionLabel>
       {children}
-      {hint && <p className="text-2xs leading-relaxed text-fog/80">{hint}</p>}
+      {hint && <p className="text-2xs leading-relaxed text-fog">{hint}</p>}
     </div>
   );
 }
@@ -29,5 +29,5 @@ export function Field({
 /** the standard text input skin */
 export const inputCls =
   "w-full rounded-card border border-cream/10 bg-ink/40 px-2.5 py-1.5 text-sm text-cream " +
-  "placeholder:text-fog/60 transition-[border-color,box-shadow] focus:border-gold/50 focus:outline-none " +
+  "placeholder:text-fog transition-[border-color,box-shadow] focus:border-gold/50 focus:outline-none " +
   "focus:shadow-[0_0_0_3px_rgba(201,169,110,0.12),0_0_18px_rgba(201,169,110,0.08)]";

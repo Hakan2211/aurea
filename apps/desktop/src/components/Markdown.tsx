@@ -40,7 +40,7 @@ const components: Components = {
     <h3 className="font-serif text-[15px] text-cream [&:not(:first-child)]:mt-3">{children}</h3>
   ),
   h3: ({ children }) => (
-    <h4 className="text-[13px] font-semibold text-cream [&:not(:first-child)]:mt-3">{children}</h4>
+    <h4 className="text-sm font-semibold text-cream [&:not(:first-child)]:mt-3">{children}</h4>
   ),
   blockquote: ({ children }) => (
     <blockquote className="border-l-2 border-gold/40 pl-3 text-cream/70 [&:not(:first-child)]:mt-2">
@@ -51,9 +51,9 @@ const components: Components = {
   code: ({ className, children }) =>
     className ? (
       // block code — react-markdown sets language-* on fenced blocks
-      <code className={cx("font-mono text-[12px] text-cream/90", className)}>{children}</code>
+      <code className={cx("font-mono text-sm text-cream/90", className)}>{children}</code>
     ) : (
-      <code className="rounded bg-ink/60 px-1 py-0.5 font-mono text-[12px] text-gold/90">
+      <code className="rounded bg-ink/60 px-1 py-0.5 font-mono text-sm text-gold/90">
         {children}
       </code>
     ),
@@ -64,7 +64,7 @@ const components: Components = {
   ),
   table: ({ children }) => (
     <div className="overflow-x-auto [&:not(:first-child)]:mt-2">
-      <table className="w-full border-collapse text-[12px]">{children}</table>
+      <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   ),
   th: ({ children }) => (

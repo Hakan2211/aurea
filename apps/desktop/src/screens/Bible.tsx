@@ -22,18 +22,27 @@ import {
   Star,
   Trash2,
   X,
+  Users,
 } from "lucide-react";
 import type { BibleCharacter, BibleLocation, BibleStyle } from "@aurea/shared";
-import { Chip, GhostButton, GoldButton, Waveform, cx } from "@/components/ui";
+import {
+  Chip,
+  EmptyState as SharedEmptyState,
+  GhostButton,
+  GoldButton,
+  Waveform,
+  cx,
+} from "@/components/ui";
+import { CoreGate } from "@/components/CoreGate";
 import { fileToPngBase64 } from "@/components/imageFile";
 import { useBible, useDraft } from "@/hooks";
 
-const sectionLabel = "text-[10px] font-semibold uppercase tracking-[0.16em] text-fog";
+const sectionLabel = "text-2xs font-semibold uppercase tracking-[0.16em] text-fog";
 const card = "rounded-xl border hairline bg-surface p-3";
-const fieldLabel = "mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em] text-fog";
+const fieldLabel = "mb-1 block text-2xs font-semibold uppercase tracking-[0.14em] text-fog";
 const textInput =
-  "w-full rounded-lg border border-cream/10 bg-ink/60 px-2.5 py-1.5 text-[12px] text-cream " +
-  "outline-none placeholder:text-fog/60 focus:border-gold/40";
+  "w-full rounded-lg border border-cream/10 bg-ink/60 px-2.5 py-1.5 text-sm text-cream " +
+  "outline-none placeholder:text-fog focus:border-gold/40";
 const textArea = cx(textInput, "min-h-[64px] resize-y leading-relaxed");
 
 /** The gold "+" that sits beside a section heading (bible-v2 adopt). Every
@@ -78,7 +87,7 @@ function CanonTag({ className }: { className?: string }) {
     <span
       title="Canon — the reference every keyframe and shot prompt is built from"
       className={cx(
-        "rounded-full bg-gold/90 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-ink",
+        "rounded-full bg-gold/90 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wider text-ink",
         className,
       )}
     >
@@ -172,7 +181,7 @@ function Rail({
       });
       selectCharacter(id);
     } else if (tab === "locations") {
-      bible.upsertLocation({ id, name, description: "", stylePrompt: "", refs: [] });
+      bible.upsertLocation({ id, name, description: "", stylePrompt: "", refs: [], roomTone: null });
       selectLocation(id);
     }
     setNewName("");
@@ -182,7 +191,7 @@ function Rail({
   return (
     <aside className="flex w-[232px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <span className="font-serif text-[15px] font-semibold text-cream">Bible</span>
+        <span className="font-serif text-base font-semibold text-cream">Cast &amp; places</span>
         {tab !== "style" && (
           <AddButton
             title={tab === "cast" ? "New character" : "New location"}
@@ -198,7 +207,7 @@ function Rail({
             key={t}
             onClick={() => setTab(t)}
             className={cx(
-              "flex-1 rounded-md px-1 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] transition",
+              "flex-1 rounded-md px-1 py-1 text-2xs font-semibold uppercase tracking-[0.1em] transition",
               tab === t ? "bg-gold/15 text-gold" : "text-fog hover:text-cream",
             )}
           >
@@ -261,12 +270,12 @@ function Rail({
                   )}
                 </span>
                 <span className="min-w-0">
-                  <span className={cx("block truncate text-[12px] font-medium", active ? "text-gold" : "text-cream")}>
+                  <span className={cx("block truncate text-sm font-medium", active ? "text-gold" : "text-cream")}>
                     {c.name}
                   </span>
                   {/* role first — what they do in the story orients faster
                       than what animal they are (bible-v2 adopt) */}
-                  <span className="block truncate text-[10px] text-fog">
+                  <span className="block truncate text-2xs text-fog">
                     {c.role && (
                       <span className="uppercase tracking-[0.1em] text-cream/55">{c.role}</span>
                     )}
@@ -301,17 +310,17 @@ function Rail({
                   {url && <img src={url} alt="" className="h-full w-full object-cover" />}
                 </span>
                 <span className="min-w-0">
-                  <span className={cx("block truncate text-[12px] font-medium", active ? "text-gold" : "text-cream")}>
+                  <span className={cx("block truncate text-sm font-medium", active ? "text-gold" : "text-cream")}>
                     {l.name}
                   </span>
-                  <span className="block truncate text-[10px] text-fog">{l.description || "—"}</span>
+                  <span className="block truncate text-2xs text-fog">{l.description || "—"}</span>
                 </span>
               </button>
             );
           })}
 
         {tab === "style" && (
-          <p className="px-2 pt-1 text-[11px] leading-relaxed text-fog">
+          <p className="px-2 pt-1 text-xs leading-relaxed text-fog">
             Art direction, negative prompt and cinematography notes — the global look every
             keyframe and shot prompt inherits.
           </p>
@@ -329,7 +338,7 @@ function SeedBlock({ bible }: { bible: ReturnType<typeof useBible> }) {
      nothing to do with seeding — don't offer the seed as the way out of it */
   if (!bible.live)
     return (
-      <div className="border-t hairline p-3 text-[10px] leading-relaxed text-fog">
+      <div className="border-t hairline p-3 text-2xs leading-relaxed text-fog">
         Studio core offline — the bible on disk is untouched.
       </div>
     );
@@ -346,15 +355,15 @@ function SeedBlock({ bible }: { bible: ReturnType<typeof useBible> }) {
           {bible.seeding ? "Re-seeding…" : "Re-run seed"}
         </GhostButton>
       )}
-      {bible.seedError && <p className="mt-2 text-[10px] leading-snug text-[#e07a6b]">{bible.seedError}</p>}
+      {bible.seedError && <p className="mt-2 text-2xs leading-snug text-[#e07a6b]">{bible.seedError}</p>}
       {bible.seedResult && !bible.seeding && (
-        <p className="mt-2 text-[10px] leading-snug text-fog">
+        <p className="mt-2 text-2xs leading-snug text-fog">
           {bible.seedResult.copiedFiles} files copied
           {bible.seedResult.warnings.length > 0 && ` · ${bible.seedResult.warnings.length} warnings`}
         </p>
       )}
       {(bible.seedResult?.warnings ?? []).slice(0, 3).map((w, i) => (
-        <p key={i} className="mt-1 truncate text-[9px] text-fog/70" title={w}>
+        <p key={i} className="mt-1 truncate text-2xs text-fog" title={w}>
           {w}
         </p>
       ))}
@@ -367,24 +376,30 @@ function SeedBlock({ bible }: { bible: ReturnType<typeof useBible> }) {
  * "The bible is empty" for the second reads as data loss — the characters are
  * still sitting in bible.json, we just can't see them. */
 function EmptyState({ bible }: { bible: ReturnType<typeof useBible> }) {
+  if (!bible.live) {
+    return (
+      <CoreGate
+        screen="Cast & places"
+        purpose="Cast & places holds who and where the show is about: characters with their looks and voices, locations, and the house style every prompt inherits."
+        icon={Users}
+      />
+    );
+  }
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <span className="font-serif text-xl text-cream">
-        {bible.live ? "The bible is empty" : "Not connected to the studio core"}
-      </span>
-      <p className="max-w-[360px] text-[12px] leading-relaxed text-fog">
-        {bible.live
-          ? "Seed the Animal Sitcom cast from your videofast character sheets, or add a character with the + button."
-          : "Nothing has been lost — your cast, locations and style live in this project's " +
-            "bible.json on disk. Reopening Aurea restarts the core and they come straight back."}
-      </p>
-      {bible.live && (
+    <SharedEmptyState
+      icon={Users}
+      title="No cast yet"
+      action={
         <GoldButton onClick={() => void bible.seed()}>
           <Sparkles size={13} />
           {bible.seeding ? "Seeding…" : "Seed Animal Sitcom"}
         </GoldButton>
-      )}
-    </div>
+      }
+    >
+      Characters, locations and the house style live here, and every prompt in the labs inherits
+      them. Seed the Animal Sitcom cast from your videofast character sheets, or add a character
+      with the + button.
+    </SharedEmptyState>
   );
 }
 
@@ -548,7 +563,7 @@ function CharacterDetail({
         />
 
         <div className="flex items-center justify-between gap-3">
-          <nav className="flex min-w-0 items-center gap-1.5 text-[11px] text-fog">
+          <nav className="flex min-w-0 items-center gap-1.5 text-xs text-fog">
             <span>Bible</span>
             <span className="text-fog/40">/</span>
             <span>Cast</span>
@@ -614,7 +629,7 @@ function CharacterDetail({
 
         <AppearanceCard draft={draft} patch={patch} />
 
-        <footer className="mt-1 flex items-center gap-6 border-t hairline pt-3 text-[10px] uppercase tracking-[0.12em] text-fog">
+        <footer className="mt-1 flex items-center gap-6 border-t hairline pt-3 text-2xs uppercase tracking-[0.12em] text-fog">
           <span>
             Updated <span className="text-cream/80">{fmtDay(bible.bible.updatedAt)}</span>
           </span>
@@ -679,8 +694,8 @@ function HeroCard({
           className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1.5 px-4 text-center transition hover:bg-gold/5"
         >
           <ImagePlus size={22} strokeWidth={1.5} className="text-gold/80" />
-          <span className="text-[12px] font-medium text-cream/90">No picture yet</span>
-          <span className="text-[11px] leading-relaxed text-fog">
+          <span className="text-sm font-medium text-cream/90">No picture yet</span>
+          <span className="text-xs leading-relaxed text-fog">
             Drop a reference anywhere on this page, or click to upload
           </span>
         </button>
@@ -690,7 +705,7 @@ function HeroCard({
         <h1 className="truncate font-serif text-[26px] font-semibold leading-tight tracking-wide text-cream">
           {draft.name}
         </h1>
-        <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-[0.22em] text-gold/85">
+        <p className="mt-0.5 truncate text-2xs font-semibold uppercase tracking-[0.22em] text-gold/85">
           {[draft.role, draft.species].filter(Boolean).join(" · ") || "Character profile"}
         </p>
       </div>
@@ -717,7 +732,7 @@ function TurnaroundCard({
     <div className={cx(card, "p-0")}>
       <div className="flex items-center gap-2 border-b hairline px-3 py-2">
         <span className={sectionLabel}>Turnaround</span>
-        {isSheet && <span className="text-[10px] text-fog/70">contact sheet</span>}
+        {isSheet && <span className="text-2xs text-fog">contact sheet</span>}
       </div>
       {url ? (
         <img
@@ -727,7 +742,7 @@ function TurnaroundCard({
           className="max-h-[150px] w-full cursor-zoom-in bg-ink/40 object-contain p-2"
         />
       ) : (
-        <p className="px-3 py-4 text-[11px] leading-relaxed text-fog">
+        <p className="px-3 py-4 text-xs leading-relaxed text-fog">
           No turnaround yet — pick a reference below and press{" "}
           <span className="text-cream/80">Set turnaround</span>. Front / side / back views keep a
           character on-model when a shot needs an angle the key ref doesn't show.
@@ -771,7 +786,7 @@ function ReferenceGrid({
       <div className="flex items-center justify-between gap-3 border-b hairline px-3 py-2">
         <div className="flex items-center gap-2">
           <span className={sectionLabel}>References</span>
-          <span className="text-[10px] tabular-nums text-fog/70">{entries.length}</span>
+          <span className="text-2xs tabular-nums text-fog">{entries.length}</span>
           <AddButton
             title={bible.uploadingRef ? "Uploading…" : "Upload reference images"}
             busy={bible.uploadingRef}
@@ -781,7 +796,7 @@ function ReferenceGrid({
         {selUrl && (
           <button
             onClick={() => onZoom(selUrl)}
-            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-2xs font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
           >
             <Expand size={11} /> Full size
           </button>
@@ -831,18 +846,18 @@ function ReferenceGrid({
           <span className="flex h-7 w-7 items-center justify-center rounded-full border border-gold/30 text-gold">
             {bible.uploadingRef ? <Loader2 size={13} className="animate-spin" /> : <Plus size={14} />}
           </span>
-          <span className="text-[9px] leading-tight">Upload<br />reference</span>
+          <span className="text-2xs leading-tight">Upload<br />reference</span>
         </button>
       </div>
 
       {selected && (
         <div className="flex flex-wrap items-center gap-1.5 border-t hairline px-3 py-2">
           {selected.roles.map((r) => (
-            <Chip key={r} tone={r === "Key ref" ? "gold" : "muted"} className="text-[10px]">
+            <Chip key={r} tone={r === "Key ref" ? "gold" : "muted"} className="text-2xs">
               {r}
             </Chip>
           ))}
-          <span className="min-w-0 truncate text-[10px] text-fog" title={selected.rel}>
+          <span className="min-w-0 truncate text-2xs text-fog" title={selected.rel}>
             {fileName(selected.rel)}
           </span>
           <span className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -854,7 +869,7 @@ function ReferenceGrid({
                   title={active ? `Clear the ${label.toLowerCase()} slot` : hint}
                   onClick={() => setSlot(slot, active ? null : selected.rel)}
                   className={cx(
-                    "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium transition",
+                    "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-2xs font-medium transition",
                     active
                       ? "border-gold/50 bg-gold/12 text-gold"
                       : "border-cream/10 text-cream/70 hover:border-gold/40 hover:text-gold",
@@ -872,14 +887,14 @@ function ReferenceGrid({
                   : "Remove from this character (the file stays in the library)"
               }
               onClick={() => detach(selected.rel)}
-              className="inline-flex items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[10px] font-medium text-fog transition hover:border-[#e07a6b]/50 hover:text-[#e07a6b]"
+              className="inline-flex items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-2xs font-medium text-fog transition hover:border-[#e07a6b]/50 hover:text-[#e07a6b]"
             >
               <Trash2 size={11} /> {isStaged(selected.rel) ? "Delete" : "Remove"}
             </button>
           </span>
         </div>
       )}
-      {error && <p className="px-3 pb-2 text-[10px] text-[#e07a6b]">{error}</p>}
+      {error && <p className="px-3 pb-2 text-2xs text-[#e07a6b]">{error}</p>}
     </div>
   );
 }
@@ -907,13 +922,13 @@ function ProseCard({
         <h2 className="font-serif text-[17px] font-semibold text-cream">{title}</h2>
         <div className="flex items-center gap-2">
           {maxLength && editing && (
-            <span className="text-[10px] tabular-nums text-fog">
+            <span className="text-2xs tabular-nums text-fog">
               {value.length} / {maxLength}
             </span>
           )}
           <button
             onClick={() => setEditing((e) => !e)}
-            className="flex items-center gap-1 rounded-md px-1 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog transition hover:text-gold"
+            className="flex items-center gap-1 rounded-md px-1 py-0.5 text-2xs font-semibold uppercase tracking-[0.14em] text-fog transition hover:text-gold"
           >
             <Pencil size={11} />
             {editing ? "Done" : "Edit"}
@@ -930,11 +945,11 @@ function ProseCard({
           onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
         />
       ) : value ? (
-        <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-cream/85">{value}</p>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-cream/85">{value}</p>
       ) : (
         <button
           onClick={() => setEditing(true)}
-          className="text-left text-[12px] italic leading-relaxed text-fog transition hover:text-cream/80"
+          className="text-left text-sm italic leading-relaxed text-fog transition hover:text-cream/80"
         >
           {placeholder}
         </button>
@@ -1106,7 +1121,7 @@ function VoiceCard({
   return (
     <div className={cx(card, "p-4")}>
       <h2 className="font-serif text-[19px] font-semibold text-cream">Voice</h2>
-      <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-fog">
+      <p className="mt-0.5 text-2xs font-semibold uppercase tracking-[0.18em] text-fog">
         {draft.name} — main voice
       </p>
 
@@ -1118,7 +1133,7 @@ function VoiceCard({
         className="mt-3 w-full"
       />
       {clip.duration > 0 && (
-        <p className="mt-1 text-right text-[10px] tabular-nums text-fog">
+        <p className="mt-1 text-right text-2xs tabular-nums text-fog">
           {fmtClock(clip.elapsed)} / {fmtClock(clip.duration)}
         </p>
       )}
@@ -1127,7 +1142,7 @@ function VoiceCard({
       <select
         value={draft.voice.voiceId ?? ""}
         onChange={(e) => setVoice({ voiceId: e.target.value || null })}
-        className="w-full rounded-lg border border-cream/10 bg-ink px-2 py-1.5 text-[11px] text-cream outline-none focus:border-gold/40"
+        className="w-full rounded-lg border border-cream/10 bg-ink px-2 py-1.5 text-xs text-cream outline-none focus:border-gold/40"
       >
         <option value="">— not cast yet —</option>
         {bible.voices.map((v) => (
@@ -1149,7 +1164,7 @@ function VoiceCard({
         disabled={!url}
         onClick={clip.toggle}
         className={cx(
-          "mt-2.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-semibold transition",
+          "mt-2.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition",
           url
             ? "bg-gradient-to-b from-gold to-gold-deep text-ink hover:brightness-110"
             : "border border-cream/10 text-fog",
@@ -1178,7 +1193,7 @@ function VoiceCard({
         ] as const
       ).map(([label, key]) => (
         <label key={key} className="mt-2.5 block">
-          <span className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+          <span className="flex items-center justify-between text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
             {label}
             <span className="text-cream/80">{draft.voice[key].toFixed(2)}</span>
           </span>
@@ -1208,13 +1223,13 @@ function LoraCard({ draft }: { draft: BibleCharacter }) {
         <h2 className="font-serif text-[19px] font-semibold text-cream">LoRA</h2>
         <Chip tone={lora ? "sage" : "muted"}>{lora ? "ready" : "S-P2"}</Chip>
       </div>
-      <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-fog">
+      <p className="mt-0.5 truncate text-2xs font-semibold uppercase tracking-[0.18em] text-fog">
         {lora ? lora.trigger || lora.asset : `${draft.id}_lora`}
       </p>
-      <div className="mt-2.5 rounded-lg border border-cream/10 bg-ink/50 px-2.5 py-2 text-[11px] text-fog">
+      <div className="mt-2.5 rounded-lg border border-cream/10 bg-ink/50 px-2.5 py-2 text-xs text-fog">
         {lora ? "Trained — used automatically when this character is boarded." : "Not trained"}
       </div>
-      <p className="mt-2 text-[10px] leading-relaxed text-fog/80">
+      <p className="mt-2 text-2xs leading-relaxed text-fog">
         Character LoRA training lands with shot generation — the reference grid becomes the
         training set.
       </p>
@@ -1239,7 +1254,7 @@ function LocationDetail({
           <h1 className="font-serif text-[32px] font-semibold leading-tight tracking-wide text-cream">
             {draft.name}
           </h1>
-          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-fog">Location</p>
+          <p className="mt-0.5 text-2xs font-semibold uppercase tracking-[0.3em] text-fog">Location</p>
         </div>
         <button
           title="Remove location"
@@ -1269,12 +1284,108 @@ function LocationDetail({
         </label>
 
         <LocationRefs draft={draft} patch={patch} bible={bible} />
-        <p className="text-[10px] leading-relaxed text-fog/80">
+        <p className="text-2xs leading-relaxed text-fog">
           The first still is the set's canon — it goes to qwen-edit as the scene reference when a
           shot here is boarded.
         </p>
+
+        <RoomTone draft={draft} patch={patch} bible={bible} />
       </div>
     </section>
+  );
+}
+
+/** The location's room-tone bed (P3.2): laid at −40 dB under a take that
+ * came back digitally silent with no placed lines, LTX 2.5's habit on a
+ * no-dialogue shot. Seed one from ACE-Step or pick a file from the library. */
+function RoomTone({
+  draft,
+  patch,
+  bible,
+}: {
+  draft: BibleLocation;
+  patch: (p: Partial<BibleLocation>) => void;
+  bible: ReturnType<typeof useBible>;
+}) {
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const live = bible.bible.locations.find((l) => l.id === draft.id)?.roomTone ?? draft.roomTone;
+  const url = bible.refUrl(live);
+  const off = bible.bible.style.roomTone === "off";
+
+  const seed = async () => {
+    setFeedback(null);
+    try {
+      await bible.seedRoomTone(draft.id);
+      setFeedback("Seeding a 30s bed with ACE-Step — it attaches here when the job lands.");
+    } catch (err) {
+      setFeedback(String((err as Error).message));
+    }
+  };
+  const choose = async (rel: string | null) => {
+    setFeedback(null);
+    setPicking(false);
+    try {
+      await bible.seedRoomTone(draft.id, rel);
+      patch({ roomTone: rel });
+    } catch (err) {
+      setFeedback(String((err as Error).message));
+    }
+  };
+
+  return (
+    <div className="rounded-xl border hairline p-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className={fieldLabel}>Room tone</span>
+        {off && (
+          <span className="text-2xs text-fog" title="bible.style.roomTone is off">
+            off for this project
+          </span>
+        )}
+      </div>
+      <p className="mb-2 text-2xs leading-relaxed text-fog">
+        Laid at −40 dB under a take that came back silent with no lines (LTX 2.5 does that on
+        no-dialogue shots). One loopable file per location.
+      </p>
+      {live ? (
+        <div className="mb-2 flex items-center gap-2">
+          <audio controls src={url} className="h-8 min-w-0 flex-1" />
+          <button
+            onClick={() => void choose(null)}
+            title="Clear the bed"
+            className="shrink-0 text-2xs text-fog hover:text-[#e07a6b]"
+          >
+            clear
+          </button>
+        </div>
+      ) : (
+        <p className="mb-2 text-xs text-fog">No bed yet — silent takes here stay silent.</p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <GhostButton onClick={() => void seed()} disabled={bible.seedingRoomTone}>
+          {bible.seedingRoomTone ? "Queueing…" : "Seed with ACE-Step"}
+        </GhostButton>
+        <GhostButton onClick={() => setPicking((p) => !p)} disabled={!bible.libraryAudio.length}>
+          Choose from library
+        </GhostButton>
+      </div>
+      {picking && (
+        <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+          {bible.libraryAudio.map((a) => (
+            <li key={a.relPath}>
+              <button
+                onClick={() => void choose(a.relPath)}
+                className="w-full truncate rounded-md px-2 py-1 text-left text-xs text-cream/80 hover:bg-cream/5"
+                title={a.relPath}
+              >
+                {a.relPath.split("/").pop()}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {feedback && <p className="mt-2 text-xs text-fog">{feedback}</p>}
+    </div>
   );
 }
 
@@ -1319,7 +1430,7 @@ function LocationRefs({
     <div>
       <div className="mb-1 flex items-center gap-2">
         <span className={cx(fieldLabel, "mb-0")}>Reference stills</span>
-        <span className="text-[10px] tabular-nums text-fog/70">{draft.refs.length}</span>
+        <span className="text-2xs tabular-nums text-fog">{draft.refs.length}</span>
         <AddButton
           title={bible.uploadingRef ? "Uploading…" : "Upload reference stills"}
           busy={bible.uploadingRef}
@@ -1381,7 +1492,7 @@ function LocationRefs({
           className="flex h-[76px] w-[120px] shrink-0 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-cream/15 text-fog transition hover:border-gold/50 hover:text-gold"
         >
           {bible.uploadingRef ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-          <span className="text-[10px]">{bible.uploadingRef ? "Uploading…" : "Add stills"}</span>
+          <span className="text-2xs">{bible.uploadingRef ? "Uploading…" : "Add stills"}</span>
         </button>
         <button
           onClick={() => setPicking((p) => !p)}
@@ -1394,13 +1505,13 @@ function LocationRefs({
           )}
         >
           <Images size={14} />
-          <span className="text-[10px]">From library</span>
+          <span className="text-2xs">From library</span>
         </button>
       </div>
       {picking && (
         <div className="mt-2 rounded-lg border hairline p-2">
           {unused.length === 0 ? (
-            <p className="px-1 py-3 text-center text-[10px] text-fog/70">
+            <p className="px-1 py-3 text-center text-2xs text-fog">
               No unused stills in this project yet — generate a set plate in the Image lab.
             </p>
           ) : (
@@ -1424,13 +1535,13 @@ function LocationRefs({
               ))}
             </div>
           )}
-          <p className="mt-1.5 px-1 text-[9px] leading-relaxed text-fog/70">
+          <p className="mt-1.5 px-1 text-2xs leading-relaxed text-fog">
             Library stills are referenced in place — removing one here detaches it, it never
             deletes the file.
           </p>
         </div>
       )}
-      {error && <p className="mt-1 text-[10px] text-[#e07a6b]">{error}</p>}
+      {error && <p className="mt-1 text-2xs text-[#e07a6b]">{error}</p>}
     </div>
   );
 }
@@ -1445,7 +1556,7 @@ function StyleDetail({ bible }: { bible: ReturnType<typeof useBible> }) {
         <h1 className="font-serif text-[32px] font-semibold leading-tight tracking-wide text-cream">
           Style bible
         </h1>
-        <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-fog">
+        <p className="mt-0.5 text-2xs font-semibold uppercase tracking-[0.3em] text-fog">
           Global look &amp; language
         </p>
       </header>
@@ -1454,6 +1565,9 @@ function StyleDetail({ bible }: { bible: ReturnType<typeof useBible> }) {
         {(
           [
             ["Art direction", "artDirection", "min-h-[120px]"],
+            // the one line every composed video prompt ends with; empty = the
+            // first sentence of the art direction (projectLook)
+            ["Look line", "lookLine", "min-h-[48px]"],
             ["Negative prompt", "negativePrompt", "min-h-[80px]"],
             ["Cinematography notes", "cinematographyNotes", "min-h-[80px]"],
             ["Notes", "notes", "min-h-[64px]"],
@@ -1468,6 +1582,22 @@ function StyleDetail({ bible }: { bible: ReturnType<typeof useBible> }) {
             />
           </label>
         ))}
+
+        <label className="block">
+          <span className={fieldLabel}>Room tone under silent takes</span>
+          <select
+            className={textInput}
+            value={draft.roomTone}
+            onChange={(e) => patch({ roomTone: e.target.value as BibleStyle["roomTone"] })}
+          >
+            <option value="auto">auto — lay the location's bed at −40 dB under a silent no-dialogue take</option>
+            <option value="off">off — leave silent takes silent</option>
+          </select>
+          <span className="mt-1 block text-2xs leading-relaxed text-fog">
+            Beds live on each location (Locations → Room tone). Only a take with no placed lines
+            gets one; silence under lines is a broken take.
+          </span>
+        </label>
 
         <CinematographyBank bible={bible} />
       </div>
@@ -1486,7 +1616,7 @@ function CinematographyBank({ bible }: { bible: ReturnType<typeof useBible> }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <span className={fieldLabel}>Cinematography bank</span>
-          <p className="text-[11px] leading-relaxed text-fog">
+          <p className="text-xs leading-relaxed text-fog">
             {installed
               ? "The doc-26 prompt bible as structured banks — shot specs written in its " +
                 "vocabulary (“ws”, “low”, “push-in”, “sitcom.warm-home”) expand to full clauses in " +
@@ -1526,7 +1656,7 @@ function CinematographyBank({ bible }: { bible: ReturnType<typeof useBible> }) {
             <span
               key={label}
               title={ids.join(" · ")}
-              className="cursor-default rounded-full border hairline px-2.5 py-1 text-[10px] text-cream/80"
+              className="cursor-default rounded-full border hairline px-2.5 py-1 text-2xs text-cream/80"
             >
               {label}
             </span>

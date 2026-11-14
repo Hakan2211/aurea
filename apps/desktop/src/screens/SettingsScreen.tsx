@@ -53,7 +53,7 @@ function SectionHeader({ title, sub }: { title: string; sub: string }) {
   return (
     <header>
       <h1 className="font-serif text-[22px] font-semibold tracking-wide text-gold">{title}</h1>
-      <p className="mt-1 text-[12px] text-fog">{sub}</p>
+      <p className="mt-1 text-sm text-fog">{sub}</p>
     </header>
   );
 }
@@ -70,8 +70,8 @@ function ToggleList({
       {items.map((t) => (
         <div key={t.id} className="flex items-center gap-4 px-4 py-3.5">
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-cream">{t.label}</div>
-            <div className="mt-0.5 text-[11px] text-fog">{t.desc}</div>
+            <div className="text-sm font-medium text-cream">{t.label}</div>
+            <div className="mt-0.5 text-xs text-fog">{t.desc}</div>
           </div>
           <Toggle on={t.on} onChange={() => onToggle(t.id, !t.on)} />
         </div>
@@ -96,8 +96,8 @@ function TuningToggle({
   return (
     <div className="flex items-center gap-4">
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] text-cream/85">{label}</div>
-        <div className="mt-0.5 text-[10px] leading-relaxed text-fog">{hint}</div>
+        <div className="text-xs text-cream/85">{label}</div>
+        <div className="mt-0.5 text-2xs leading-relaxed text-fog">{hint}</div>
       </div>
       <Toggle on={on} onChange={() => onChange(!on)} />
     </div>
@@ -118,7 +118,7 @@ function PathInput({ value, onCommit }: { value: string; onCommit: (v: string) =
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
         spellCheck={false}
-        className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:outline-none"
+        className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm tabular-nums text-cream/90 focus:outline-none"
       />
       <span className="px-2.5 text-fog">
         <Folder size={13} />
@@ -142,7 +142,7 @@ function ProviderAuth({ provider }: { provider: Provider }) {
 
   if (auth.kind === "connected")
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 px-3 py-1.5 text-[11px] font-medium text-gold">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 px-3 py-1.5 text-xs font-medium text-gold">
         <Check size={12} /> Connected
       </span>
     );
@@ -150,12 +150,12 @@ function ProviderAuth({ provider }: { provider: Provider }) {
   if (auth.kind === "apiKey")
     return (
       <div className="flex items-center gap-2">
-        <span className="text-[11px] text-fog">API key</span>
+        <span className="text-xs text-fog">API key</span>
         <div className="flex items-center rounded-lg border border-cream/10 bg-surface">
           <input
             readOnly
             value={revealed ? "sk-or-v1-8f2…d41a" : auth.masked}
-            className="w-44 bg-transparent px-3 py-1.5 text-[11px] tracking-wider text-cream/85 focus:outline-none"
+            className="w-44 bg-transparent px-3 py-1.5 text-xs tracking-wider text-cream/85 focus:outline-none"
           />
           <button
             onClick={() => setRevealed((r) => !r)}
@@ -172,11 +172,11 @@ function ProviderAuth({ provider }: { provider: Provider }) {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[11px] text-fog">Model</span>
+      <span className="text-xs text-fog">Model</span>
       <div className="relative">
         <button
           onClick={() => setOpen((o) => !o)}
-          className="flex w-56 items-center gap-2 rounded-lg border border-cream/10 bg-surface px-3 py-1.5 text-[11px] text-cream/85 transition hover:border-gold/35"
+          className="flex w-56 items-center gap-2 rounded-lg border border-cream/10 bg-surface px-3 py-1.5 text-xs text-cream/85 transition hover:border-gold/35"
         >
           <span className="flex-1 truncate text-left">{auth.model}</span>
           <ChevronDown
@@ -191,7 +191,7 @@ function ProviderAuth({ provider }: { provider: Provider }) {
                 key={m}
                 onClick={() => setOpen(false)}
                 className={cx(
-                  "flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition hover:bg-cream/5",
+                  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-cream/5",
                   m === auth.model ? "text-gold" : "text-cream/85",
                 )}
               >
@@ -254,13 +254,13 @@ function ProvidersSection() {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[14px] font-semibold text-cream">{p.name}</span>
-                  {p.tag && <span className="truncate text-[10px] text-gold/80">· {p.tag}</span>}
+                  <span className="text-base font-semibold text-cream">{p.name}</span>
+                  {p.tag && <span className="truncate text-2xs text-gold/80">· {p.tag}</span>}
                 </div>
-                <div className="mt-0.5 text-[11px] text-fog">{p.blurb}</div>
+                <div className="mt-0.5 text-xs text-fog">{p.blurb}</div>
               </div>
               <ProviderAuth provider={p} />
-              <button className="shrink-0 text-fog/60 transition hover:text-cream">
+              <button className="shrink-0 text-fog transition hover:text-cream">
                 <MoreVertical size={14} />
               </button>
             </div>
@@ -268,8 +268,8 @@ function ProvidersSection() {
         })}
       </div>
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
-        <div className="text-[13px] font-medium text-cream">fal.ai API key</div>
-        <div className="mt-0.5 text-[10px] text-fog">
+        <div className="text-sm font-medium text-cream">fal.ai API key</div>
+        <div className="mt-0.5 text-2xs text-fog">
           Unlocks the Seedance cloud video engine in the Video Lab and GPT Image 2 in the Image Lab —
           the one edit model that takes up to 16 references, where local Qwen-Edit stops at 3. Both
           bill to your fal account; the estimated cost shows before every render.
@@ -285,12 +285,12 @@ function ProvidersSection() {
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           spellCheck={false}
           placeholder="key id:key secret"
-          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-sm tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
         />
       </div>
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
-        <div className="text-[13px] font-medium text-cream">Replicate API token</div>
-        <div className="mt-0.5 text-[10px] text-fog">
+        <div className="text-sm font-medium text-cream">Replicate API token</div>
+        <div className="mt-0.5 text-2xs text-fog">
           Unlocks RVC v2 voice training and conversion in the Voice Lab — the highest-quality
           cloned-singing path. Runs bill to your Replicate account; the estimated cost shows on every
           job card before it spends.
@@ -307,7 +307,7 @@ function ProvidersSection() {
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           spellCheck={false}
           placeholder="r8_…"
-          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-sm tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
         />
       </div>
     </div>
@@ -326,24 +326,24 @@ function StorageSection() {
       />
       <div className="grid grid-cols-[1fr_auto] gap-2.5">
         <div className="rounded-2xl border hairline bg-surface/50 p-4">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+          <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
             Data root path
           </div>
           <div className="mt-2.5 flex items-center gap-2">
             <PathInput value={storage.root} onCommit={setDataRoot} />
           </div>
-          <div className="mt-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+          <div className="mt-4 text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
             Videofast pipeline root
           </div>
           <div className="mt-2.5 flex items-center gap-2">
             <PathInput value={storage.videofastDir ?? ""} onCommit={setVideofastDir} />
           </div>
           {!storage.videofastDir && (
-            <div className="mt-1.5 text-[10px] text-fog/70">
+            <div className="mt-1.5 text-2xs text-fog">
               Not detected — point this at your videofast checkout to enable format renders.
             </div>
           )}
-          <div className="mt-4 flex items-baseline justify-between text-[11px]">
+          <div className="mt-4 flex items-baseline justify-between text-xs">
             <span className="text-fog">Usage</span>
             <span className="tabular-nums text-cream/90">
               {storage.used} / {storage.total}
@@ -356,7 +356,7 @@ function StorageSection() {
           </div>
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {storage.segments.map((seg) => (
-              <span key={seg.label} className="flex items-center gap-1.5 text-[10px] text-fog">
+              <span key={seg.label} className="flex items-center gap-1.5 text-2xs text-fog">
                 <i className={cx("h-1.5 w-1.5 rounded-full", seg.dot)} />
                 {seg.label} {seg.size} ({seg.pct}%)
               </span>
@@ -393,13 +393,13 @@ function ModelActions({ m }: { m: ModelEntry }) {
   if (s.state === "installed")
     return (
       <div className="flex items-center gap-2">
-        <Chip tone="sage" className="text-[10px]">
+        <Chip tone="sage" className="text-2xs">
           <Check size={10} /> Installed
         </Chip>
         <button
           onClick={() => remove(m.id)}
           title="Remove from disk"
-          className="text-fog/60 transition hover:text-[#e07a6b]"
+          className="text-fog transition hover:text-[#e07a6b]"
         >
           <Trash2 size={13} />
         </button>
@@ -410,10 +410,10 @@ function ModelActions({ m }: { m: ModelEntry }) {
   if (s.state === "linked")
     return (
       <div className="flex min-w-0 items-center gap-2">
-        <Chip tone="gold" className="shrink-0 text-[10px]">
+        <Chip tone="gold" className="shrink-0 text-2xs">
           <Link2 size={10} /> Linked
         </Chip>
-        <span className="min-w-0 truncate text-[10px] text-fog" title={s.linkedRoot ?? ""}>
+        <span className="min-w-0 truncate text-2xs text-fog" title={s.linkedRoot ?? ""}>
           {s.linkedRoot}
         </span>
       </div>
@@ -454,9 +454,9 @@ function LinkedFoldersCard() {
     <div className="rounded-2xl border hairline bg-surface/50 p-4">
       <div className="flex items-baseline gap-2">
         <Link2 size={13} className="translate-y-0.5 text-gold" />
-        <h3 className="text-[13px] font-medium text-cream">Linked folders</h3>
+        <h3 className="text-sm font-medium text-cream">Linked folders</h3>
       </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-fog">
+      <p className="mt-1 text-xs leading-relaxed text-fog">
         Already have a ComfyUI model library? Point Aurea at it and those weights count as
         installed — no second download. Linked files are mounted read-only: never verified, never
         modified, never deleted. Expects the conventional layout
@@ -471,11 +471,11 @@ function LinkedFoldersCard() {
               className="flex items-center gap-2 rounded-xl border border-cream/10 bg-surface px-3 py-2"
             >
               <FolderOpen size={12} className="shrink-0 text-fog" />
-              <span className="min-w-0 flex-1 truncate text-[11px] text-cream/85">{root}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-cream/85">{root}</span>
               <button
                 onClick={() => void unlinkRoot(root)}
                 title="Unlink (your files are not touched)"
-                className="shrink-0 text-fog/60 transition hover:text-[#e07a6b]"
+                className="shrink-0 text-fog transition hover:text-[#e07a6b]"
               >
                 <Trash2 size={12} />
               </button>
@@ -490,7 +490,7 @@ function LinkedFoldersCard() {
           onChange={(e) => setDraft(e.target.value)}
           placeholder="D:\models"
           spellCheck={false}
-          className="min-w-0 flex-1 rounded-xl border border-cream/10 bg-surface px-3 py-2 text-[12px] text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
+          className="min-w-0 flex-1 rounded-xl border border-cream/10 bg-surface px-3 py-2 text-sm text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
         />
         <GoldButton
           disabled={preview.found.length === 0 || alreadyLinked}
@@ -504,7 +504,7 @@ function LinkedFoldersCard() {
       </div>
 
       {draft.trim().length > 2 && (
-        <p className="mt-2 text-[11px] text-fog">
+        <p className="mt-2 text-xs text-fog">
           {preview.checking
             ? "Scanning…"
             : alreadyLinked
@@ -516,7 +516,7 @@ function LinkedFoldersCard() {
                   )} you won't need to download — ${preview.found.map((m) => m.name).join(", ")}`}
         </p>
       )}
-      {removeError && <p className="mt-2 text-[11px] text-[#e07a6b]">{removeError}</p>}
+      {removeError && <p className="mt-2 text-xs text-[#e07a6b]">{removeError}</p>}
     </div>
   );
 }
@@ -531,7 +531,7 @@ function ModelsSection() {
       />
       {live && <LinkedFoldersCard />}
       {!live ? (
-        <div className="rounded-2xl border hairline bg-surface/50 p-8 text-center text-[12px] text-fog">
+        <div className="rounded-2xl border hairline bg-surface/50 p-8 text-center text-sm text-fog">
           The studio core isn't reachable — model management needs a running studiod.
         </div>
       ) : (
@@ -544,20 +544,20 @@ function ModelsSection() {
                 <div className="flex items-center gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-[13px] font-medium text-cream">{m.name}</span>
-                      <span className="truncate text-[10px] text-fog">{m.engine}</span>
+                      <span className="text-sm font-medium text-cream">{m.name}</span>
+                      <span className="truncate text-2xs text-fog">{m.engine}</span>
                     </div>
-                    <div className="mt-0.5 truncate text-[11px] text-fog/85">{m.description}</div>
+                    <div className="mt-0.5 truncate text-xs text-fog">{m.description}</div>
                     <a
                       href={m.license.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-fog/70 transition hover:text-gold"
+                      className="mt-0.5 inline-flex items-center gap-1 text-2xs text-fog transition hover:text-gold"
                     >
                       {m.license.name} <ExternalLink size={8} />
                     </a>
                   </div>
-                  <span className="shrink-0 text-[11px] tabular-nums text-fog">
+                  <span className="shrink-0 text-xs tabular-nums text-fog">
                     {s.bytes > 0 && s.state !== "installed"
                       ? `${fmtSize(s.bytes)} of ${fmtSize(m.sizeBytes)}`
                       : fmtSize(m.sizeBytes)}
@@ -569,7 +569,7 @@ function ModelsSection() {
                 {busy && (
                   <div className="mt-2.5 flex items-center gap-3">
                     <Progress value={s.progress} className="flex-1" />
-                    <span className="shrink-0 text-[10px] tabular-nums text-fog">
+                    <span className="shrink-0 text-2xs tabular-nums text-fog">
                       {s.progress.toFixed(0)}%
                       {s.bytesPerSec ? ` · ${fmtSize(s.bytesPerSec)}/s` : ""}
                       {s.state === "verifying" ? " · verifying" : ""}
@@ -578,7 +578,7 @@ function ModelsSection() {
                   </div>
                 )}
                 {s.state === "error" && (
-                  <div className="mt-1.5 text-[10px] text-[#e07a6b]">{s.error}</div>
+                  <div className="mt-1.5 text-2xs text-[#e07a6b]">{s.error}</div>
                 )}
               </div>
             );
@@ -600,12 +600,12 @@ function MinimaxTuning() {
   const { mutate } = trpc.settings.update.useMutation({
     onSuccess: (next) => utils.settings.get.setData(undefined, next),
   });
-  const on = live?.engines.minimaxTuning.sageAttention ?? false;
+  const on = live?.engines.minimaxTuning.sageAttention ?? true;
   return (
     <div className="mt-3 border-t border-cream/8 pt-3">
       <TuningToggle
         label="SageAttention (H3 instance)"
-        hint="Roughly halves H3's render time — needs comfyui-kjnodes AND `pip install sageattention` in the MiniMax ComfyUI's python. Dropped silently when the node is missing."
+        hint="INT8 attention kernels. On by default — the managed runtime installs them, and on a 3090 Ti they take H3 from 40 to 30 seconds a step at its native canvas. On an external ComfyUI it needs KJNodes and `pip install sageattention` in that python; dropped silently when the node is missing."
         on={on}
         onChange={(next) => mutate({ engines: { minimaxTuning: { sageAttention: next } } })}
       />
@@ -643,12 +643,12 @@ function EnginesSection() {
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
         <div className="flex items-center gap-4">
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-cream">ComfyUI source</div>
-            <div className="mt-0.5 text-[10px] text-fog">
+            <div className="text-sm font-medium text-cream">ComfyUI source</div>
+            <div className="mt-0.5 text-2xs text-fog">
               Managed uses the runtime above; external talks to a ComfyUI you run yourself.
             </div>
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-xs">
             {(["managed", "external"] as const).map((m) => (
               <button
                 key={m}
@@ -674,20 +674,20 @@ function EnginesSection() {
             onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
             spellCheck={false}
             placeholder="http://127.0.0.1:8000"
-            className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+            className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-sm tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
           />
         )}
       </div>
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
         <div className="flex items-center gap-4">
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-cream">Voice engine</div>
-            <div className="mt-0.5 text-[10px] text-fog">
+            <div className="text-sm font-medium text-cream">Voice engine</div>
+            <div className="mt-0.5 text-2xs text-fog">
               Managed clones character voices in the runtime above; external uses your own
               Chatterbox venv.
             </div>
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-xs">
             {(["managed", "external"] as const).map((m) => (
               <button
                 key={m}
@@ -706,13 +706,13 @@ function EnginesSection() {
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
         <div className="flex items-center gap-4">
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-cream">Music engine</div>
-            <div className="mt-0.5 text-[10px] text-fog">
+            <div className="text-sm font-medium text-cream">Music engine</div>
+            <div className="mt-0.5 text-2xs text-fog">
               Managed composes with the runtime&apos;s own ACE-Step; external uses your own
               checkout.
             </div>
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-xs">
             {(["managed", "external"] as const).map((m) => (
               <button
                 key={m}
@@ -731,13 +731,13 @@ function EnginesSection() {
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
         <div className="flex items-center gap-4">
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-cream">Video engine</div>
-            <div className="mt-0.5 text-[10px] text-fog">
+            <div className="text-sm font-medium text-cream">Video engine</div>
+            <div className="mt-0.5 text-2xs text-fog">
               LTX 2.3 renders. Managed uses the runtime above with the LTX 2.3 22B weight set
               (Settings → Models, ~42 GB); external queues on your ComfyUI URL.
             </div>
           </div>
-          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+          <div className="flex overflow-hidden rounded-lg border border-cream/12 text-xs">
             {(["managed", "external"] as const).map((m) => (
               <button
                 key={m}
@@ -753,8 +753,8 @@ function EnginesSection() {
           </div>
         </div>
         <div className="mt-4 space-y-2 border-t border-cream/8 pt-3">
-          <div className="text-[11px] font-medium text-cream/90">Render tuning</div>
-          <p className="text-[10px] leading-relaxed text-fog">
+          <div className="text-xs font-medium text-cream/90">Render tuning</div>
+          <p className="text-2xs leading-relaxed text-fog">
             Opt-in changes to how LTX renders. All of them need the KJNodes pack; defaults keep
             the render identical to the verified pipeline.
           </p>
@@ -778,12 +778,12 @@ function EnginesSection() {
           />
           <div className="flex items-center gap-4 pt-1">
             <div className="min-w-0 flex-1">
-              <div className="text-[11px] text-cream/85">Sampler</div>
-              <div className="mt-0.5 text-[10px] leading-relaxed text-fog">
+              <div className="text-xs text-cream/85">Sampler</div>
+              <div className="mt-0.5 text-2xs leading-relaxed text-fog">
                 cfg++ runs an ancestral base pass and a cfg++ refine — the official 2.3 pairing.
               </div>
             </div>
-            <div className="flex overflow-hidden rounded-lg border border-cream/12 text-[11px]">
+            <div className="flex overflow-hidden rounded-lg border border-cream/12 text-xs">
               {(["euler", "cfg_pp"] as const).map((s) => (
                 <button
                   key={s}
@@ -802,8 +802,8 @@ function EnginesSection() {
       </div>
       <div className="rounded-2xl border hairline bg-surface/50 p-4">
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-cream">MiniMax-H3 ComfyUI</div>
-          <div className="mt-0.5 text-[10px] leading-relaxed text-fog">
+          <div className="text-sm font-medium text-cream">MiniMax-H3 ComfyUI</div>
+          <div className="mt-0.5 text-2xs leading-relaxed text-fog">
             H3 renders dialogue, sound effects and music in the same pass as the picture, and
             needs ComfyUI 0.30.0 or newer — a separate install from the one LTX 2.3 runs on.
             Point this at that instance; leave it empty to keep the engine off.
@@ -819,7 +819,7 @@ function EnginesSection() {
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           spellCheck={false}
           placeholder="http://127.0.0.1:8189"
-          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+          className="mt-3 w-full rounded-lg border border-cream/10 bg-raised px-3 py-2 text-sm tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
         />
         <MinimaxTuning />
       </div>
@@ -828,23 +828,23 @@ function EnginesSection() {
           <div key={e.id} className="flex items-center gap-4 px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                <span className="text-[13px] font-medium text-cream">{e.name}</span>
-                <span className="text-[10px] text-fog">{e.note}</span>
+                <span className="text-sm font-medium text-cream">{e.name}</span>
+                <span className="text-2xs text-fog">{e.note}</span>
               </div>
             </div>
-            <Chip tone="muted" className="w-14 justify-center text-[9px] uppercase tracking-wider">
+            <Chip tone="muted" className="w-14 justify-center text-2xs uppercase tracking-wider">
               {e.kind}
             </Chip>
             {e.status === "installed" ? (
-              <Chip tone="sage" className="text-[10px]">
+              <Chip tone="sage" className="text-2xs">
                 <Check size={10} /> Installed
               </Chip>
             ) : (
-              <Chip tone="violet" className="text-[10px]">
+              <Chip tone="violet" className="text-2xs">
                 API
               </Chip>
             )}
-            <button className="shrink-0 text-fog/60 transition hover:text-cream">
+            <button className="shrink-0 text-fog transition hover:text-cream">
               <MoreVertical size={14} />
             </button>
           </div>
@@ -870,7 +870,7 @@ function GeneralSection() {
             ["Version", `Aurea Studio v${general.version}`],
           ] as [string, string][]
         ).map(([k, v]) => (
-          <div key={k} className="flex items-center justify-between px-4 py-3.5 text-[12px]">
+          <div key={k} className="flex items-center justify-between px-4 py-3.5 text-sm">
             <span className="text-fog">{k}</span>
             <span className="text-cream/90">{v}</span>
           </div>
@@ -888,12 +888,12 @@ function ShortcutsSection() {
       <div className="divide-y divide-cream/6 rounded-2xl border hairline bg-surface/50">
         {shortcuts.map(([label, keys]) => (
           <div key={label} className="flex items-center justify-between px-4 py-3">
-            <span className="text-[12px] text-cream/90">{label}</span>
+            <span className="text-sm text-cream/90">{label}</span>
             <span className="flex gap-1">
               {keys.split(" + ").map((k) => (
                 <kbd
                   key={k}
-                  className="rounded-md border border-cream/15 bg-raised px-2 py-1 text-[10px] font-medium text-cream/85"
+                  className="rounded-md border border-cream/15 bg-raised px-2 py-1 text-2xs font-medium text-cream/85"
                 >
                   {k}
                 </kbd>
@@ -914,8 +914,8 @@ function AdvancedSection() {
       <ToggleList items={advanced.toggles} onToggle={toggleAdvanced} />
       <button className="flex w-full flex-col items-center gap-1 rounded-2xl border border-dashed border-cream/15 px-4 py-6 transition hover:border-gold/40">
         <SquareTerminal size={20} strokeWidth={1.5} className="text-fog" />
-        <span className="mt-1 text-[13px] font-medium text-cream/90">Open ComfyUI (advanced)</span>
-        <span className="text-[11px] text-fog/70">For power users. You're on your own.</span>
+        <span className="mt-1 text-sm font-medium text-cream/90">Open ComfyUI (advanced)</span>
+        <span className="text-xs text-fog">For power users. You're on your own.</span>
       </button>
     </div>
   );
@@ -929,7 +929,7 @@ export function SettingsScreen() {
   return (
     <div className="flex h-full">
       <aside className="flex w-[216px] shrink-0 flex-col border-r hairline bg-[#0e0e10] p-4">
-        <h2 className="px-2 pb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-fog">
+        <h2 className="px-2 pb-3 text-2xs font-semibold uppercase tracking-[0.16em] text-fog">
           Settings
         </h2>
         <nav className="space-y-1">
@@ -938,7 +938,7 @@ export function SettingsScreen() {
               key={id}
               onClick={() => setSection(id)}
               className={cx(
-                "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[12px] font-medium transition",
+                "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium transition",
                 section === id
                   ? "border-l-2 border-gold bg-gold/10 text-gold"
                   : "text-fog hover:bg-cream/5 hover:text-cream",
@@ -950,12 +950,12 @@ export function SettingsScreen() {
           ))}
         </nav>
         <div className="mt-auto flex items-center gap-2.5 px-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-gold/30 font-serif text-[13px] font-semibold text-gold">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-gold/30 font-serif text-sm font-semibold text-gold">
             A
           </span>
           <div>
-            <div className="text-[11px] font-medium text-cream">Aurea Studio</div>
-            <div className="text-[10px] text-gold/80">Pro plan</div>
+            <div className="text-xs font-medium text-cream">Aurea Studio</div>
+            <div className="text-2xs text-gold/80">Pro plan</div>
           </div>
         </div>
       </aside>

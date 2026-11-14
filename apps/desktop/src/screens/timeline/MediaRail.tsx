@@ -121,18 +121,18 @@ export function MediaRail({
           <h2 className="font-serif text-[15px] font-semibold leading-none text-cream">
             Shots &amp; takes
           </h2>
-          <span className="ml-auto text-[10px] tabular-nums text-fog/70">
+          <span className="ml-auto text-2xs tabular-nums text-fog">
             {inCut}/{pool.length} in cut
           </span>
         </div>
 
         <div className="relative mt-3">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fog/60" />
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fog" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Filter takes"
-            className="w-full rounded-lg border border-cream/8 bg-surface py-1.5 pl-7 pr-2 text-[11px] text-cream/90 placeholder:text-fog/60 transition focus:border-gold/40 focus:outline-none focus:ring-2 focus:ring-gold/15"
+            className="w-full rounded-lg border border-cream/8 bg-surface py-1.5 pl-7 pr-2 text-xs text-cream/90 placeholder:text-fog transition focus:border-gold/40 focus:outline-none focus:ring-2 focus:ring-gold/15"
           />
         </div>
 
@@ -142,7 +142,7 @@ export function MediaRail({
               key={f.id}
               onClick={() => setFilter(f.id)}
               className={cx(
-                "rounded-full px-2 py-0.5 text-[10px] font-medium transition duration-150",
+                "rounded-full px-2 py-0.5 text-2xs font-medium transition duration-150",
                 filter === f.id
                   ? "bg-gold/15 text-gold ring-1 ring-gold/40"
                   : "text-fog hover:bg-cream/5 hover:text-cream",
@@ -164,7 +164,7 @@ export function MediaRail({
                 title={`${label} view`}
                 className={cx(
                   "flex h-5 w-5 items-center justify-center rounded transition duration-150",
-                  view === id ? "bg-cream/10 text-cream" : "text-fog/70 hover:text-cream",
+                  view === id ? "bg-cream/10 text-cream" : "text-fog hover:text-cream",
                 )}
               >
                 <Icon size={11} />
@@ -186,10 +186,10 @@ export function MediaRail({
               <div className="sticky top-0 z-10 -mx-3 mb-2 mt-3 bg-[#0e0e10]/95 px-3 pb-1.5 pt-1 backdrop-blur-sm first:mt-0">
                 <div className="flex items-center gap-1.5 border-b border-cream/10 pb-1.5">
                   <Kind size={11} className="shrink-0 text-gold/80" />
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cream/85">
+                  <span className="text-2xs font-semibold uppercase tracking-[0.16em] text-cream/85">
                     {label}
                   </span>
-                  <span className="ml-auto rounded-full bg-cream/8 px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-fog">
+                  <span className="ml-auto rounded-full bg-cream/8 px-1.5 py-0.5 text-2xs font-semibold tabular-nums text-fog">
                     {items.length}
                   </span>
                 </div>
@@ -228,7 +228,7 @@ export function MediaRail({
           );
         })}
         {matches.length === 0 && (
-          <p className="px-1 pt-3 text-[11px] leading-relaxed text-fog">
+          <p className="px-1 pt-3 text-xs leading-relaxed text-fog">
             {pool.length === 0
               ? "Generate takes in the labs — they land here."
               : filter === "used"
@@ -319,7 +319,7 @@ function UsedBadge({ used, className }: { used: number; className?: string }) {
     <span
       title={`Already in the cut${used > 1 ? ` — ${used} clips` : ""}`}
       className={cx(
-        "flex items-center gap-0.5 rounded-full bg-gold px-1 py-px text-[8px] font-bold text-ink",
+        "flex items-center gap-0.5 rounded-full bg-gold px-1 py-px text-2xs font-bold text-ink",
         className,
       )}
     >
@@ -372,18 +372,18 @@ function GridCard({
         <UsedBadge used={used} className="ml-auto" />
       </span>
       <span className="absolute inset-x-1.5 bottom-1 flex items-end gap-1">
-        <span className="min-w-0 flex-1 truncate text-left text-[9px] text-cream/85">
+        <span className="min-w-0 flex-1 truncate text-left text-2xs text-cream/85">
           {item.name}
         </span>
         {dur != null && (
-          <span className="shrink-0 rounded bg-ink/70 px-1 text-[8.5px] font-medium tabular-nums text-cream/70">
+          <span className="shrink-0 rounded bg-ink/70 px-1 text-2xs font-medium tabular-nums text-cream/70">
             {fmtDur(dur)}
           </span>
         )}
       </span>
 
       <span className="absolute inset-0 flex items-center justify-center bg-ink/55 opacity-0 backdrop-blur-[1px] transition-opacity duration-200 group-hover:opacity-100">
-        <span className="flex items-center gap-1 rounded-full bg-gold px-2 py-0.5 text-[9px] font-semibold text-ink">
+        <span className="flex items-center gap-1 rounded-full bg-gold px-2 py-0.5 text-2xs font-semibold text-ink">
           <Plus size={9} /> Add
         </span>
       </span>
@@ -413,10 +413,10 @@ function ListRow({ item, used, onAdd }: { item: PoolItem; used: number; onAdd: (
           <Icon size={11} className="absolute inset-0 m-auto text-fog" />
         )}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[10.5px] text-cream/85">{item.name}</span>
+      <span className="min-w-0 flex-1 truncate text-2xs text-cream/85">{item.name}</span>
       <UsedBadge used={used} />
       {dur != null && (
-        <span className="shrink-0 text-[9.5px] tabular-nums text-fog/70">{fmtDur(dur)}</span>
+        <span className="shrink-0 text-2xs tabular-nums text-fog">{fmtDur(dur)}</span>
       )}
       <Plus
         size={11}

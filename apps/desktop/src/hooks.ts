@@ -6,6 +6,7 @@ import type {
   BibleStyle,
   DirectorAttachment,
   DirectorRef,
+  DirectorThreads,
   DirectorToolCall,
   Episode,
   ImageDeckGenerate,
@@ -17,6 +18,8 @@ import type {
   LibraryAsset as CoreAsset,
   LibraryKind,
   ModelEntry,
+  Model3dFromPrompt,
+  Model3dGenerate,
   MusicGenerate,
   Production,
   ProductionAddEpisode,
@@ -24,11 +27,15 @@ import type {
   ProductionAddShot,
   RuntimeStatus,
   Scene,
+  CoverageStart,
   Settings,
   Shot,
   StoryboardGenerate,
+  TableRead,
   TtsGenerate,
+  VideoAb,
   VideoGenerate,
+  FixId,
 } from "@aurea/shared";
 import { castRef, characterRef, settingRef } from "@aurea/shared";
 import type { Asset, AssetKind, ChatMessage } from "@/data/sample";
@@ -72,10 +79,19 @@ export function useProjects() {
   const invalidate = { onSuccess: () => utils.projects.invalidate() };
   const { mutate: create } = trpc.projects.create.useMutation(invalidate);
   const { mutate: rename } = trpc.projects.rename.useMutation(invalidate);
+  /* the switcher (P6): the active project lives in studiod's settings, so
+   * every screen — and a shell asking projects.active — opens the same one.
+   * Switching invalidates EVERYTHING: each per-project query re-reads. */
+  const { mutate: setActive } = trpc.projects.setActive.useMutation({
+    onSuccess: () => void utils.invalidate(),
+  });
   const list = query.data ?? projects;
+  const activeId = useActiveProjectId();
   return {
     projects: list,
-    activeId: list[0]?.id ?? "",
+    activeId,
+    active: list.find((p) => p.id === activeId) ?? list[0],
+    setActive: (id: string) => setActive({ id }),
     createProject: (name: string) => create({ name }),
     renameProject: (id: string, name: string) => rename({ id, name }),
   };
@@ -159,30 +175,82 @@ export interface UiChatMessage extends ChatMessage {
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 
-/** LIVE — the Director thread for the active project. director.onUpdate
- * streams every turn (text, tool calls, tool results) into the query cache;
- * tool calls that enqueued jobs get their live Job attached from the jobs
- * stream. Sample data stands in for a dead core. */
-export function useChat() {
+/** LIVE — the Director's threads for the active project, and which one holds
+ * the run lock. Own subscription because director.onUpdate is filtered to a
+ * single thread and so can't report a sibling's run starting or ending. */
+export function useDirectorThreads() {
   const project = useActiveProjectId();
   const utils = trpc.useUtils();
-  const query = trpc.director.get.useQuery({ project }, { enabled: !!project });
-  trpc.director.onUpdate.useSubscription(
+  const query = trpc.director.threads.useQuery({ project }, { enabled: !!project });
+  const write = (next: DirectorThreads) => utils.director.threads.setData({ project }, next);
+  trpc.director.onThreads.useSubscription(
     { project },
-    {
-      enabled: !!project,
-      onData: (state) => utils.director.get.setData({ project }, state),
-    },
+    { enabled: !!project, onData: write },
   );
+  const create = trpc.director.createThread.useMutation({ onSuccess: write });
+  const rename = trpc.director.renameThread.useMutation({ onSuccess: write });
+  const close = trpc.director.closeThread.useMutation({ onSuccess: write });
+  const reopen = trpc.director.reopenThread.useMutation({ onSuccess: write });
+  const remove = trpc.director.deleteThread.useMutation({ onSuccess: write });
+  const setActive = trpc.director.setActiveThread.useMutation({ onSuccess: write });
+
+  const data = query.data;
+  return {
+    threads: data?.threads ?? [],
+    /** "" until the first fetch lands — callers gate on it rather than guessing */
+    activeId: data?.activeId ?? "",
+    runningId: data?.runningId ?? null,
+    live: !!data,
+    create: (title?: string) => create.mutate({ project, title }),
+    rename: (threadId: string, title: string) => rename.mutate({ project, threadId, title }),
+    close: (threadId: string) => close.mutate({ project, threadId }),
+    reopen: (threadId: string) => reopen.mutate({ project, threadId }),
+    remove: (threadId: string) => remove.mutate({ project, threadId }),
+    setActive: (threadId: string) => setActive.mutate({ project, threadId }),
+    /** the last refusal from any thread mutation — "still working in X" et al */
+    error:
+      create.error?.message ??
+      rename.error?.message ??
+      close.error?.message ??
+      reopen.error?.message ??
+      remove.error?.message ??
+      setActive.error?.message ??
+      null,
+  };
+}
+
+/** LIVE — one Director thread. director.onUpdate streams every turn (text, tool
+ * calls, tool results) into the query cache; tool calls that enqueued jobs get
+ * their live Job attached from the jobs stream. Sample data stands in for a
+ * dead core. Omit threadId and the project's active thread answers. */
+export function useChat(threadId?: string) {
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const threads = useDirectorThreads();
+  const id = threadId ?? threads.activeId;
+  const on = !!project && !!id;
+  const key = { project, threadId: id };
+  const query = trpc.director.get.useQuery(key, { enabled: on });
+  trpc.director.onUpdate.useSubscription(key, {
+    enabled: on,
+    onData: (state) => utils.director.get.setData(key, state),
+  });
   const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
   const mutation = trpc.director.send.useMutation({
-    onSuccess: (state) => utils.director.get.setData({ project }, state),
+    onSuccess: (state) => utils.director.get.setData(key, state),
   });
   const stopMutation = trpc.director.stop.useMutation({
-    onSuccess: (state) => utils.director.get.setData({ project }, state),
+    onSuccess: (state) => utils.director.get.setData(key, state),
   });
   const { mutate } = mutation;
   const { mutate: stopMutate } = stopMutation;
+
+  /** a run in ANOTHER thread — this composer stays enabled but the send would
+   * be refused, so the pane says whose turn it is instead */
+  const blockedBy =
+    threads.runningId && threads.runningId !== id
+      ? (threads.threads.find((t) => t.id === threads.runningId)?.title ?? "another thread")
+      : null;
 
   return useMemo(() => {
     const state = query.data;
@@ -191,6 +259,10 @@ export function useChat() {
         messages: chat as UiChatMessage[],
         busy: false,
         live: false,
+        threadId: id,
+        threads,
+        blockedBy,
+        error: null as string | null,
         send: (_text: string, _attachments?: DirectorAttachment[]) => {},
         stop: () => {},
       };
@@ -215,12 +287,29 @@ export function useChat() {
       messages,
       busy: state.status === "thinking" || mutation.isPending,
       live: true,
+      threadId: id,
+      /** the switcher's data, so a pane needs only this one hook (and so only
+       * one onThreads subscription is opened per screen) */
+      threads,
+      blockedBy,
+      error: mutation.error?.message ?? null,
       send: (text: string, attachments: DirectorAttachment[] = []) => {
-        if (text.trim()) mutate({ project, text, attachments });
+        if (text.trim() && id) mutate({ project, threadId: id, text, attachments });
       },
-      stop: () => stopMutate({ project }),
+      stop: () => stopMutate({ project, threadId: id }),
     };
-  }, [query.data, jobsData, project, mutate, stopMutate, mutation.isPending]);
+  }, [
+    query.data,
+    jobsData,
+    project,
+    id,
+    threads,
+    blockedBy,
+    mutate,
+    stopMutate,
+    mutation.isPending,
+    mutation.error,
+  ]);
 }
 
 /* ---------- director model picker (LIVE) ---------- */
@@ -596,10 +685,12 @@ const labFailures = (all: Job[] | undefined, ...types: JobPayload["type"][]): La
       error: j.error ?? "failed without a reason",
     }));
 
-/** the project new lab takes land in — the switcher's active (first) project */
+/** the project every screen acts on — studiod's persisted active project
+ * (P6 switcher), the oldest project until one is chosen */
 function useActiveProjectId(): string {
+  const active = trpc.projects.active.useQuery().data?.id;
   const list = trpc.projects.list.useQuery(undefined, { placeholderData: projects }).data;
-  return list?.[0]?.id ?? "";
+  return active ?? list?.[0]?.id ?? "";
 }
 
 /** shared per-lab live inputs: catalog + assets of the lab's kind + its jobs */
@@ -725,7 +816,11 @@ export function useImageLab() {
     // work — it never appeared in this canvas as a request, so it doesn't
     // appear here as a result either. Both halves have to be filtered: the
     // in-flight job (or the roll grows a phantom tile) and the landed file.
-    const roll = kindAssets.filter((a) => a.meta?.origin !== "musicCover");
+    // covers and 3D concept plates are byproducts of another lab's run —
+    // they belong in Assets, not in the roll of stills you asked for
+    const roll = kindAssets.filter(
+      (a) => a.meta?.origin !== "musicCover" && a.meta?.origin !== "model3dConcept",
+    );
     const active = labJobs(jobsData, "image", "imageDeck", "imageUpscale").filter(
       (j) => !(j.payload.type === "image" && j.payload.cover),
     );
@@ -1202,8 +1297,15 @@ export function useMusicLab() {
       stepsDefault: 8,
       shiftDefault: 3.0,
       metadataManagedOnly: false,
+      // matches MUSIC3_MAX_DURATION — the 3090 Ti's real ceiling, not the card's 5 min
+      music3DurationMax: 120,
     };
-    if (!catalog || !kindAssets) return { ...musicLab, ...advanced, ...trackOps, generate, busy: false };
+    const fallbackEngines = [
+      { id: "acestep", label: "ACE-Step · local", note: "songs + stems", available: false },
+      { id: "minimax-music3", label: "MiniMax-Music3 · local", note: "full songs", available: false },
+    ];
+    if (!catalog || !kindAssets)
+      return { ...musicLab, ...advanced, ...trackOps, engines: fallbackEngines, generate, busy: false };
     // the Music lab owns its own jobs plus the Seed-VC conversions chained off
     // its tracks (context "music") — plain Voice-lab conversions stay out
     const musicJobs = (jobsData ?? []).filter(
@@ -1217,6 +1319,7 @@ export function useMusicLab() {
     advanced.stepsDefault = catalog.stepsDefault ?? 8;
     advanced.shiftDefault = catalog.shiftDefault ?? 3.0;
     advanced.metadataManagedOnly = catalog.metadataManagedOnly ?? false;
+    advanced.music3DurationMax = catalog.music3DurationMax ?? 120;
 
     // covers live in assets/image, addressed from the track's sidecar — index
     // the whole library once by relPath rather than scanning it per track
@@ -1272,10 +1375,10 @@ export function useMusicLab() {
       ...musicLab,
       ...advanced,
       ...trackOps,
-      engine: {
-        label: catalog.engine.label,
-        note: catalog.engine.available ? catalog.engine.note : "not installed",
-      },
+      engines: catalog.engines.map((e) => ({
+        ...e,
+        note: e.available ? e.note : "not installed",
+      })),
       styleLibrary: catalog.styleLibrary,
       durationMin: catalog.durationMin,
       durationMax: catalog.durationMax,
@@ -1298,6 +1401,140 @@ export function useMusicLab() {
     retryJob,
     mutateCover,
     coverMutation.isPending,
+    removeAssets,
+  ]);
+}
+
+/* ---------- 3D lab (LIVE) ---------- */
+
+/** A model on the 3D lab's shelf: a delivered GLB, or a job still making one.
+ * Both stages of the prompt path show as ONE row — the concept still is
+ * scaffolding, and a shelf that lists it separately reads as two things
+ * having been made when one was asked for. */
+export interface Model3dItem {
+  id: string;
+  name: string;
+  /** null while it is still being made */
+  url: string | null;
+  relPath: string | null;
+  /** the concept still it was lifted from, when that image is still around */
+  sourceUrl: string | null;
+  faces?: number;
+  textured?: boolean;
+  sizeBytes?: number;
+  createdAt: string;
+  license?: string;
+  generating?: { jobId: string; progress: number; stage: string };
+}
+
+export function useModel3dLab() {
+  const catalog = trpc.labs.model3d.catalog.useQuery().data;
+  const { media, project, invalidate, jobsData, kindAssets } = useLabData("model3d");
+  const assets = trpc.library.list.useQuery().data?.assets;
+  const meshMutation = trpc.labs.model3d.generate.useMutation(invalidate);
+  const { mutate: mutateMesh } = meshMutation;
+  const promptMutation = trpc.labs.model3d.fromPrompt.useMutation(invalidate);
+  const { mutate: mutatePrompt } = promptMutation;
+  const { mutate: cancelJob } = trpc.jobs.cancel.useMutation(invalidate);
+  const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
+  const removeAssets = useRemoveAssets();
+
+  return useMemo(() => {
+    const fromImage = (input: Omit<Model3dGenerate, "project">) =>
+      mutateMesh({ ...input, project });
+    const fromPrompt = (input: Omit<Model3dFromPrompt, "project">) =>
+      mutatePrompt({ ...input, project });
+
+    // the stills the image lab should NOT show as work of their own, and the
+    // pool the "lift an existing image" picker draws from
+    const stills = (assets ?? []).filter((a) => a.kind === "image");
+    const byRelPath = new Map(stills.map((a) => [a.relPath, a]));
+
+    const done: Model3dItem[] = (kindAssets ?? []).map((a) => ({
+      id: a.relPath,
+      name: a.meta?.title ?? a.name.replace(/\.[^.]+$/, ""),
+      url: media ? media(a.url) : null,
+      relPath: a.relPath,
+      sourceUrl: (() => {
+        const src = a.meta?.source && byRelPath.get(a.meta.source);
+        return src && media ? media(src.url) : null;
+      })(),
+      faces: a.meta?.faces,
+      textured: a.meta?.textured,
+      sizeBytes: a.sizeBytes,
+      createdAt: a.createdAt,
+      license: a.meta?.license,
+    }));
+
+    // A prompt run is an image job that carries a model3d marker followed by
+    // the mesh job it chains. Fold both into one pending row so the shelf
+    // says "making your model", not "making a picture" then "making a model".
+    const pending = labJobs(jobsData, "model3d", "image")
+      .filter((j) => j.payload.type === "model3d" || !!j.payload.model3d)
+      .map((j) => ({
+        id: j.id,
+        name: j.title,
+        url: null,
+        relPath: null,
+        sourceUrl: null,
+        // jobs carry no timestamp; a pending row only has to sort above the
+        // delivered ones, and "now" does that for as long as the job lives
+        createdAt: new Date().toISOString(),
+        generating: {
+          jobId: j.id,
+          progress: j.progress,
+          stage:
+            j.stage ??
+            (j.payload.type === "image" ? "Drawing the concept still" : "Queued"),
+        },
+      })) satisfies Model3dItem[];
+
+    const items = [...pending, ...done].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    return {
+      engines: catalog?.engines ?? [
+        { id: "hunyuan3d-2.1", label: "Hunyuan3D-2.1 · local", note: "not installed", available: false },
+      ],
+      defaults: catalog?.defaults ?? { shapeSteps: 50, octree: 384, maxFaces: 60000, textureSize: 1024 },
+      octreeChoices:
+        catalog?.octreeChoices ?? [{ value: 384, label: "Standard", note: "the shipping default" }],
+      textureSizes: catalog?.textureSizes ?? [512, 1024, 2048],
+      conceptModels: catalog?.conceptModels ?? [],
+      license: catalog?.license ?? "",
+      items,
+      stills: stills.map((a) => ({
+        relPath: a.relPath,
+        name: a.name,
+        url: media ? media(a.url) : "",
+      })),
+      failures: labFailures(jobsData, "model3d"),
+      fromImage,
+      fromPrompt,
+      cancel: (jobId: string) => cancelJob({ id: jobId }),
+      retry: (jobId: string) => retryJob({ id: jobId }),
+      remove: removeAssets.remove,
+      removing: removeAssets.removing,
+      /* Two different questions, and conflating them made the Image lab
+       * unusable once: `sending` is "the enqueue call is in flight" and is
+       * what the button may block on; `busy` is "something of ours is still
+       * rendering" and is only a status. The JobEngine has a queue — refusing
+       * a second model because the first is still going is refusing to use it. */
+      sending: meshMutation.isPending || promptMutation.isPending,
+      busy: pending.length > 0,
+    };
+  }, [
+    catalog,
+    kindAssets,
+    assets,
+    jobsData,
+    media,
+    project,
+    mutateMesh,
+    meshMutation.isPending,
+    mutatePrompt,
+    promptMutation.isPending,
+    cancelJob,
+    retryJob,
     removeAssets,
   ]);
 }
@@ -1397,6 +1634,14 @@ export function useAssetLibrary() {
   }, [query.data, media, projectCount, disk]);
 }
 
+const INBOX_SOURCE_LABEL: Record<string, string> = {
+  midjourney: "Midjourney",
+  gpt: "GPT",
+  krea: "Krea",
+  local: "local",
+  other: "inbox",
+};
+
 export function useVideoLab() {
   const catalog = trpc.labs.video.catalog.useQuery().data;
   // which LTX features this machine's ComfyUI can reach — gates Director mode
@@ -1414,6 +1659,10 @@ export function useVideoLab() {
   const images = allAssets?.filter((a) => a.kind === "image");
   const mutation = trpc.labs.video.generate.useMutation(invalidate);
   const { mutate } = mutation;
+  // finish_take from the lab: a full render over a draft's kept latents, or
+  // the ×2 Pixel Spatial Upscaler pass on the take in the player
+  const finishMutation = trpc.labs.video.finish.useMutation(invalidate);
+  const { mutateAsync: finishAsync } = finishMutation;
   const { mutate: retryJob } = trpc.jobs.retry.useMutation(invalidate);
   /* Staging a picked file as a project ref. It lives under labs.image because
    * that lab needed it first, but nothing about it is image-lab specific: it
@@ -1421,9 +1670,47 @@ export function useVideoLab() {
    * path every ref field in the app takes — including MiniMax's. */
   const addRefMutation = trpc.labs.image.addRef.useMutation();
   const { mutateAsync: addRefAsync } = addRefMutation;
+  /* A still brought in to START from is a library asset, not a ref — it has
+   * to show in the frame roll and carry a media url, which refs never do.
+   * The library list is invalidated on success so the roll re-reads. */
+  const utils = trpc.useUtils();
+  const importStillMutation = trpc.labs.video.importStill.useMutation();
+  const { mutateAsync: importStillAsync } = importStillMutation;
+  /* The project inbox (Midjourney / GPT / Krea drops). Polled, because an
+   * import there is not a job and nothing else would tell the roll to
+   * re-read; a new arrival invalidates the library so it shows up. */
+  const inbox = trpc.projects.inbox.useQuery(
+    { project },
+    { enabled: !!project, refetchInterval: 8_000, staleTime: 4_000 },
+  ).data;
+  const inboxCount = inbox?.recent.length ?? 0;
+  const lastInboxCount = useRef(inboxCount);
+  useEffect(() => {
+    if (inboxCount !== lastInboxCount.current) {
+      lastInboxCount.current = inboxCount;
+      void utils.library.list.invalidate();
+    }
+  }, [inboxCount, utils]);
+  const inboxDir = inbox?.dir;
 
   return useMemo(() => {
     const extras = {
+      /** finish_take: `refine` needs a take whose sidecar kept draft latents
+       * (VideoTake.draft); `upscale` takes any video. Rejections come back
+       * as the thrown message (no latents, no upscaler weights). */
+      finish: (source: string, mode: "refine" | "upscale", strength?: number) =>
+        finishAsync({ project, source, mode, strength }),
+      finishing: finishMutation.isPending,
+      finishError: finishMutation.error?.message ?? null,
+      /** Drop / paste / "From your computer" for a start frame, end frame or
+       * keyframe. Lands in assets/image/imports and comes back as the
+       * dataRoot-relative path every frame field takes. */
+      importStill: async (name: string, pngBase64: string) => {
+        const { relPath } = await importStillAsync({ project, name, pngBase64 });
+        await utils.library.list.invalidate();
+        return relPath;
+      },
+      importingStill: importStillMutation.isPending,
       /** Bring an image in from outside the library — the reference lane's
        * "From your computer". Returns its dataRoot-relative path. Staged refs
        * are NOT library assets (scanLibrary only walks assets/), so the caller
@@ -1432,10 +1719,17 @@ export function useVideoLab() {
         (await addRefAsync({ project, name, pngBase64 })).ref,
       addingRef: addRefMutation.isPending,
       /** every library still, newest first — the Replace-frame picker's roll */
+      /** where to drop stills made elsewhere; they land in the roll below */
+      inboxDir,
       frames: (images ?? []).slice(0, 60).map((a) => ({
         relPath: a.relPath,
         name: a.name,
-        meta: `${fmtBytes(a.sizeBytes)} · ${a.ext.toUpperCase()}`,
+        meta:
+          `${fmtBytes(a.sizeBytes)} · ${a.ext.toUpperCase()}` +
+          (a.meta?.origin === "inbox" && a.meta.importedFrom ? ` · ${INBOX_SOURCE_LABEL[a.meta.importedFrom]}` : ""),
+        /** the prompt the still was made from, when it came in through the
+         * inbox carrying one — the first draft of the prompt that animates it */
+        sourcePrompt: a.meta?.origin === "inbox" ? a.meta.prompt : undefined,
         swatch: labSwatch(a.id),
         url: media ? media(a.url) : undefined,
       })),
@@ -1492,6 +1786,25 @@ export function useVideoLab() {
       /** Is the H3 Turbo distill downloaded? Same download-not-probe rule (and
        * the same renderer-outlives-core optional chain) as the reference head. */
       minimaxTurboAvailable: catalog?.minimax?.turbo?.available ?? false,
+      /** H3's camera-motion LoRA — same download-not-probe rule, same optional
+       * chain (a renderer can outlive its core) */
+      minimaxCamera: {
+        available: catalog?.minimax?.camera?.available ?? false,
+        moves: (catalog?.minimax?.camera?.moves ?? []) as string[],
+      },
+      /** The chunked long-form sampler, and the lengths it unlocks. Same
+       * optional chain, and the same reason: an old core that has never heard
+       * of it must dim one picker, not blank the lab. */
+      /** Which H3 checkpoint each head will load — the 4-bit set wins silently
+       * when it is installed, so the panel has to say so out loud. */
+      minimaxWeights: {
+        fl2va: catalog?.minimax?.weights?.fl2va ?? "gguf",
+        ref2va: catalog?.minimax?.weights?.ref2va ?? "gguf",
+      },
+      minimaxLongForm: {
+        available: catalog?.minimax?.longForm?.available ?? false,
+        durations: catalog?.minimax?.longForm?.durations ?? [],
+      },
       /** shot sizes and moves for the prompt-beat camera pickers; empty until
        * the project's bible has the cinematography bank imported */
       cinematography: cinematography ?? EMPTY_CINEMATOGRAPHY,
@@ -1533,16 +1846,22 @@ export function useVideoLab() {
         }
       : { ...videoLab.startFrame, url: undefined, relPath: undefined };
 
-    /** callers may override startFrame (Replace picker) and attach audio (ia2v).
-     * A MiniMax reference shot is the one case with no start frame at all —
-     * ref2va has no keyframe input, and quietly defaulting one in would be
-     * rejected by the adapter as a contradiction. */
+    /** The panel decides the start frame, not this seam.
+     *
+     * There used to be an `?? startFrame.relPath` fallback here, on the reading
+     * that an absent field meant "the caller didn't say". It doesn't: the panel
+     * sends `undefined` on purpose for the two frameless modes — "No start
+     * frame" (text-to-video, all three engines) and a MiniMax reference shot —
+     * and the fallback quietly put the newest library still back in both. The
+     * visible symptom was H3 renders that all opened on the SAME image: the
+     * still that started the last take is still the newest one in the library,
+     * so every "text-to-video" shot silently animated the previous shot's first
+     * frame. (Found 2026-08-30 — three H3 jobs in a row, same startFrame.)
+     *
+     * The panel already resolves the default itself (`frameRel ?? defaultRel`),
+     * so nothing here has to. It is the only caller. */
     const generate = (input: Omit<VideoGenerate, "project">) =>
-      mutate({
-        ...input,
-        startFrame: input.minimaxRefs ? undefined : (input.startFrame ?? startFrame.relPath),
-        project,
-      });
+      mutate({ ...input, project });
 
     const takes: VideoTake[] = kindAssets.slice(0, 8).map((a, i) => ({
       id: a.id,
@@ -1552,6 +1871,9 @@ export function useVideoLab() {
       relPath: a.relPath,
       engine: a.meta?.engine,
       selected: i === 0,
+      // a draft that kept its latents can be finished into a full render
+      draft: !!a.meta?.draftLatents,
+      finish: a.meta?.finish,
     }));
 
     // the job rail mirrors the lab's most relevant video job
@@ -1609,7 +1931,121 @@ export function useVideoLab() {
       canGenerate: !!frame,
       busy: mutation.isPending || active.length > 0,
     };
-  }, [catalog, capabilities, bible, cinematography, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob, addRefAsync, addRefMutation.isPending]);
+  }, [catalog, capabilities, bible, cinematography, kindAssets, images, allAssets, jobsData, media, project, mutate, mutation.isPending, mutation.error, retryJob, addRefAsync, addRefMutation.isPending, importStillAsync, importStillMutation.isPending, utils, inboxDir]);
+}
+
+/* ---------- video presets (render lanes) ---------- */
+
+/** The Video lab's lanes. Read-only here on purpose: the lab applies a lane,
+ * it doesn't author one — editing lanes belongs with the rest of the prompt
+ * library, and a half-built lane applied to a render is worse than none. */
+export function useVideoPresets() {
+  const project = useActiveProjectId();
+  const presets = trpc.prompts.videoPresets.useQuery(
+    { project },
+    { enabled: !!project, staleTime: 60_000 },
+  );
+  return presets.data ?? [];
+}
+
+/* ---------- the A/B render queue ---------- */
+
+/** One base payload rendered N ways at one seed, and the records that come
+ * back. Deliberately its own hook rather than a corner of useVideoLab: the
+ * Desk reviews runs it never queued, and the lab queues runs it never reviews.
+ * Both ends poll — an experiment is minutes of GPU per variant, so a 4s
+ * refresh is far below the rate anything actually changes. */
+export function useVideoAb() {
+  const project = useActiveProjectId();
+  const media = useMediaBase();
+  const utils = trpc.useUtils();
+  const assets = trpc.library.list.useQuery().data?.assets;
+  const runs = trpc.labs.video.abList.useQuery(
+    { project },
+    { enabled: !!project, refetchInterval: 4000 },
+  );
+  const queue = trpc.labs.video.ab.useMutation({
+    onSuccess: () => {
+      void utils.jobs.invalidate();
+      void utils.labs.video.abList.invalidate();
+    },
+  });
+  const remove = trpc.labs.video.abRemove.useMutation({
+    onSuccess: () => void utils.labs.video.abList.invalidate(),
+  });
+  const { mutate: queueMutate } = queue;
+  const { mutate: removeMutate } = remove;
+
+  return useMemo(
+    () => ({
+      runs: runs.data ?? [],
+      /** The take a finished variant produced, playable.
+       *
+       * A variant records whatever the job's `output` was, and that is an
+       * ABSOLUTE path on disk for a job whose artifact the importer moved
+       * into the library (`C:\Users\…\projects\x\assets\video\take.mp4`),
+       * while the library keys everything by its dataRoot-relative path. So
+       * the match is on the tail, with separators normalised — matching the
+       * two strings verbatim silently found nothing and the A/B card sat on
+       * "rendering…" forever with the file already on disk. */
+      takeUrl: (rel: string | undefined) => {
+        if (!rel || !media) return undefined;
+        const want = rel.split("\\").join("/");
+        const a = (assets ?? []).find(
+          (x) => x.relPath === rel || want.endsWith(`/${x.relPath}`) || want === x.relPath,
+        );
+        return a ? media(a.url) : undefined;
+      },
+      queue: (input: Omit<VideoAb, "project">) => queueMutate({ ...input, project }),
+      remove: (id: string) => removeMutate({ id }),
+      queueing: queue.isPending,
+      error: queue.error?.message ?? null,
+    }),
+    [runs.data, assets, media, project, queueMutate, removeMutate, queue.isPending, queue.error],
+  );
+}
+
+/** Coverage passes — eight angles of one plate, and the runs that made them.
+ *
+ * Reads the run records rather than the library, because the library only has
+ * files: which plate an angle is OF, which location it belongs to, and which
+ * bearing it was shot from live in the record. `angleUrl` resolves an angle's
+ * dataRoot-relative asset the same way the A/B tab resolves a take. */
+export function useCoverage(location?: string) {
+  const project = useActiveProjectId();
+  const media = useMediaBase();
+  const utils = trpc.useUtils();
+  const assets = trpc.library.list.useQuery().data?.assets;
+  const runs = trpc.studio.canon.coverageList.useQuery(
+    { project, location },
+    { enabled: !!project, refetchInterval: 5000 },
+  );
+  const start = trpc.studio.canon.coverage.useMutation({
+    onSuccess: () => {
+      void utils.jobs.invalidate();
+      void utils.studio.canon.coverageList.invalidate();
+    },
+  });
+  const remove = trpc.studio.canon.coverageRemove.useMutation({
+    onSuccess: () => void utils.studio.canon.coverageList.invalidate(),
+  });
+  const { mutate: startMutate } = start;
+  const { mutate: removeMutate } = remove;
+
+  return useMemo(
+    () => ({
+      runs: runs.data ?? [],
+      angleUrl: (rel: string | undefined) => {
+        const a = rel ? (assets ?? []).find((x) => x.relPath === rel) : undefined;
+        return a && media ? media(a.url) : undefined;
+      },
+      start: (input: Omit<CoverageStart, "project">) => startMutate({ ...input, project }),
+      remove: (id: string) => removeMutate({ id }),
+      starting: start.isPending,
+      error: start.error?.message ?? null,
+    }),
+    [runs.data, assets, media, project, startMutate, removeMutate, start.isPending, start.error],
+  );
 }
 
 /* ---------- studio: bible + production (LIVE) ---------- */
@@ -1652,7 +2088,7 @@ const EMPTY_CINEMATOGRAPHY: Bible["cinematography"] = {
   templates: { keyframe: "", ltxCoverage: "", transitionMorph: "", seedanceHero: "" },
   rules: "", negativePrompt: "",
 };
-const EMPTY_BIBLE: Bible = { version: 1, characters: [], locations: [], style: { artDirection: "", negativePrompt: "", cinematographyNotes: "", notes: "" }, cinematography: EMPTY_CINEMATOGRAPHY, updatedAt: "" };
+const EMPTY_BIBLE: Bible = { version: 1, characters: [], locations: [], style: { artDirection: "", negativePrompt: "", cinematographyNotes: "", notes: "", lookLine: "", roomTone: "auto" }, cinematography: EMPTY_CINEMATOGRAPHY, updatedAt: "" };
 
 /** LIVE — the production bible (characters / locations / style) for the active
  * project, plus the cloned-voice roster the character voice picker feeds from.
@@ -1675,6 +2111,13 @@ export function useBible() {
   const removeLocMutation = trpc.studio.bible.removeLocation.useMutation(sync);
   const styleMutation = trpc.studio.bible.updateStyle.useMutation(sync);
   const cineMutation = trpc.studio.bible.importCinematography.useMutation(sync);
+  // room tone (P3.2): a chosen file lands at once; a seeded one arrives by job
+  const roomToneMutation = trpc.studio.bible.seedRoomTone.useMutation({
+    onSuccess: (r) => {
+      utils.studio.bible.get.setData({ project }, r.bible);
+      if (r.job) void utils.jobs.invalidate();
+    },
+  });
   // the Bible manages its own reference images: uploads land in the project's
   // refs/ folder (same staging the image lab uses), and a ref the user drops
   // that came from there is deleted for good rather than left orphaned
@@ -1695,6 +2138,7 @@ export function useBible() {
   const { mutate: removeLoc } = removeLocMutation;
   const { mutate: saveStyle } = styleMutation;
   const { mutate: importCine } = cineMutation;
+  const { mutateAsync: seedRoomToneAsync } = roomToneMutation;
   const { mutateAsync: seedAsync } = seedMutation;
   const { mutateAsync: addRefAsync } = addRefMutation;
   const { remove: removeFiles } = removeAssets;
@@ -1713,6 +2157,12 @@ export function useBible() {
         .filter((a) => a.kind === "image" && a.project === project)
         .slice()
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+      /** every audio/music asset in this project, newest first — the source
+       * list for "Choose from library" on a location's room-tone bed */
+      libraryAudio: (libraryAssets ?? [])
+        .filter((a) => (a.kind === "audio" || a.kind === "music") && a.project === project)
+        .slice()
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       /** cloned-voice roster for the voice picker */
       voices: voices ?? [],
       /** playable ref-clip URL for a roster voice (studio-owned clips only) */
@@ -1727,6 +2177,11 @@ export function useBible() {
       upsertLocation: (location: BibleLocation) => upsertLoc({ project, location }),
       removeLocation: (id: string) => removeLoc({ project, id }),
       updateStyle: (style: BibleStyle) => saveStyle({ project, style }),
+      /** room-tone bed (P3.2): a library relPath to use as-is, null to clear,
+       * undefined to seed one from ACE-Step */
+      seedRoomTone: (locationId: string, source?: string | null, durationSec?: number) =>
+        seedRoomToneAsync({ project, locationId, source, durationSec }),
+      seedingRoomTone: roomToneMutation.isPending,
       /** stage an uploaded reference image; resolves to its dataRoot-relative
        * path, ready to drop into a character's or location's refs */
       uploadRef: async (name: string, pngBase64: string) =>
@@ -1743,13 +2198,17 @@ export function useBible() {
       seedResult: seedMutation.data,
       seedError: seedMutation.error?.message,
     }),
-    [project, query.data, voices, libraryAssets, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, importCine, cineMutation.isPending, addRefAsync, addRefMutation.isPending, removeFiles, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
+    [project, query.data, voices, libraryAssets, media, upsertChar, removeChar, upsertLoc, removeLoc, saveStyle, importCine, cineMutation.isPending, seedRoomToneAsync, roomToneMutation.isPending, addRefAsync, addRefMutation.isPending, removeFiles, seedAsync, seedMutation.isPending, seedMutation.data, seedMutation.error],
   );
 }
 
 /** LIVE — the show structure (seasons → episodes → scenes → shots) for the
  * active project. Granular mutations keep the cache in lockstep so the board,
  * the inspector, and a Director edit all converge on production.json. */
+/** the lane arguments every render-shaped verb shares (CREW_VERBS): the
+ * lane, and the two overrides that pick the COMPOSER — engine and multiShot */
+export type ShotLaneOpts = { preset?: string; engine?: string; multiShot?: boolean; seed?: number };
+
 export function useProduction() {
   const project = useActiveProjectId();
   const utils = trpc.useUtils();
@@ -1769,6 +2228,45 @@ export function useProduction() {
   const removeEpisodeMutation = trpc.studio.production.removeEpisode.useMutation(prodSync);
   const removeSceneMutation = trpc.studio.production.removeScene.useMutation(prodSync);
   const removeShotMutation = trpc.studio.production.removeShot.useMutation(prodSync);
+  // desk verdicts (P1) — approve also lands a clip, so both caches sync
+  const approveShotMutation = trpc.studio.production.approveShot.useMutation({
+    onSuccess: (r) => {
+      syncProd(r.production);
+      utils.timeline.get.setData({ project }, r.timeline);
+    },
+  });
+  const retakeShotMutation = trpc.studio.production.retakeShot.useMutation({
+    onSuccess: (r) => {
+      syncProd(r.production);
+      void utils.jobs.invalidate();
+    },
+  });
+  // hard verification on demand (P3.1) — may swap the take's asset (room tone)
+  const verifyTakeMutation = trpc.studio.production.verifyTake.useMutation({
+    onSuccess: (r) => syncProd(r.production),
+  });
+  // finish_take — a full render from a draft's latents, or the ×2 upscale;
+  // the finished take attaches to the shot when it lands (board delivery)
+  const finishTakeMutation = trpc.labs.video.finish.useMutation({
+    onSuccess: () => void utils.jobs.invalidate(),
+  });
+  const { mutateAsync: finishTakeAsync } = finishTakeMutation;
+  // render / preview (P5) from the desk — the same procedure the
+  // shot_from_storyboard and preview_shot tools call
+  const renderShotMutation = trpc.studio.board.renderShot.useMutation({
+    onSuccess: () => void utils.jobs.invalidate(),
+  });
+  // QC (P6: the Desk's own qc_shot button) — measured verdict + evidence paths
+  const qcShotMutation = trpc.qc.shot.useMutation();
+  // project hygiene (P4) — canvas + order + export; a dry run returns the diff
+  const normalizeMutation = trpc.studio.production.normalize.useMutation({
+    onSuccess: (r) => {
+      if (r.applied) {
+        utils.timeline.get.setData({ project }, r.timeline);
+        void utils.jobs.invalidate();
+      }
+    },
+  });
 
   const { mutate: save } = saveMutation;
   const { mutate: addEpisode } = addEpisodeMutation;
@@ -1780,6 +2278,12 @@ export function useProduction() {
   const { mutate: removeEpisode } = removeEpisodeMutation;
   const { mutate: removeScene } = removeSceneMutation;
   const { mutate: removeShot } = removeShotMutation;
+  const { mutateAsync: approveShotAsync } = approveShotMutation;
+  const { mutateAsync: retakeShotAsync } = retakeShotMutation;
+  const { mutateAsync: verifyTakeAsync } = verifyTakeMutation;
+  const { mutateAsync: renderShotAsync } = renderShotMutation;
+  const { mutateAsync: normalizeAsync } = normalizeMutation;
+  const { mutateAsync: qcShotAsync } = qcShotMutation;
 
   return useMemo(
     () => ({
@@ -1800,9 +2304,67 @@ export function useProduction() {
       removeEpisode: (id: string) => removeEpisode({ project, id }),
       removeScene: (id: string) => removeScene({ project, id }),
       removeShot: (id: string) => removeShot({ project, id }),
+      /** Desk verdict: lock a take, approve the shot, drop it on the sequence */
+      approveShot: (shotId: string, takeId?: string, force = false) =>
+        approveShotAsync({ project, shotId, takeId, force }),
+      approving: approveShotMutation.isPending,
+      verifyTake: (shotId: string, takeId?: string) => verifyTakeAsync({ project, shotId, takeId }),
+      verifying: verifyTakeMutation.isPending,
+      /** Desk verdict: record direction on the shot and re-render with every
+       * note riding the composed prompt (no keyframe = note saved, no render) */
+      retakeShot: (shotId: string, note: string, fix: FixId[] = [], opts: ShotLaneOpts = {}) =>
+        retakeShotAsync({ project, shotId, note, fix, ...opts }),
+      retaking: retakeShotMutation.isPending,
+      /** finish_take: a full render over a draft's kept latents (same
+       * blocking), or the ×2 Pixel Spatial Upscaler pass on any take */
+      finishTake: (shotId: string, source: string, mode: "refine" | "upscale", strength?: number) =>
+        finishTakeAsync({ project, shotId, source, mode, strength }),
+      finishing: finishTakeMutation.isPending,
+      /** Render the shot in a lane, or its PREVIEW (P5: 2s/480p blocking
+       * pass). A render with no seed rolls the approved preview's. */
+      renderShot: (shotId: string, opts: ShotLaneOpts & { preview?: boolean } = {}) =>
+        renderShotAsync({ project, shotId, ...opts }),
+      rendering: renderShotMutation.isPending,
+      /** shot_from_storyboard dryRun: compose the spec, render nothing —
+       * the way to read the placed lines and the rules before paying */
+      checkSpec: (shotId: string, opts: ShotLaneOpts = {}) =>
+        utils.studio.board.shotSpec.fetch({ project, shotId, ...opts }),
+      /** qc_shot from the Desk: measured verdict, checks, evidence paths */
+      qcShot: (shotId: string, takeId?: string) => qcShotAsync({ project, shotId, takeId }),
+      qcing: qcShotMutation.isPending,
+      /** P4: canvas + script order + export; dryRun returns the diff only */
+      normalize: (opts: { lane?: string; dryRun?: boolean; export?: boolean } = {}) =>
+        normalizeAsync({ project, ...opts }),
+      normalizing: normalizeMutation.isPending,
     }),
-    [project, query.data, save, addEpisode, addScene, addShot, updateEpisode, updateScene, updateShot, removeEpisode, removeScene, removeShot],
+    [project, query.data, utils, save, addEpisode, addScene, addShot, updateEpisode, updateScene, updateShot, removeEpisode, removeScene, removeShot, approveShotAsync, approveShotMutation.isPending, retakeShotAsync, retakeShotMutation.isPending, verifyTakeAsync, verifyTakeMutation.isPending, renderShotAsync, renderShotMutation.isPending, normalizeAsync, normalizeMutation.isPending, qcShotAsync, qcShotMutation.isPending, finishTakeAsync, finishTakeMutation.isPending],
   );
+}
+
+/** LIVE — every queued/running job tagged with a shot (payload.board), any
+ * kind: the Production Desk's "what the crew is doing now" line and the
+ * per-card activity dots. */
+export function useDeskJobs() {
+  const project = useActiveProjectId();
+  const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
+  return useMemo(() => {
+    const active = (jobsData ?? []).filter(
+      (j) =>
+        (j.status === "running" || j.status === "queued") &&
+        j.project === `/${project}` &&
+        !!j.payload &&
+        "board" in j.payload &&
+        !!j.payload.board,
+    );
+    return {
+      active,
+      shotJobs: (shotId: string) =>
+        active.filter(
+          (j) =>
+            !!j.payload && "board" in j.payload && j.payload.board?.shotId === shotId,
+        ),
+    };
+  }, [jobsData, project]);
 }
 
 type BoardJob = Job & { payload: Extract<JobPayload, { type: "image" }> };
@@ -1842,6 +2404,49 @@ export function useStoryboard() {
       composeShot: (shotId: string) => utils.studio.board.shotSpec.fetch({ project, shotId }),
     };
   }, [project, jobsData, utils, mutate, mutation.isPending, mutation.error]);
+}
+
+type TtsBoardJob = Job & { payload: Extract<JobPayload, { type: "tts" }> };
+
+/** LIVE — scene table read: one call queues per-line TTS in the characters'
+ * cast voices; this watches the lines in flight (payload.board carries
+ * shotId + lineId). Finished wavs attach to their shot's voTakes server-side
+ * and arrive over studio.onUpdate, the storyboard delivery pattern. */
+export function useTableRead() {
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const media = useMediaBase();
+  const jobsData = trpc.jobs.list.useQuery(undefined, { placeholderData: jobs }).data;
+  const mutation = trpc.studio.voice.tableRead.useMutation({
+    onSuccess: () => void utils.jobs.invalidate(),
+  });
+  const { mutate } = mutation;
+
+  return useMemo(() => {
+    const active = (jobsData ?? []).filter(
+      (j): j is TtsBoardJob =>
+        j.payload?.type === "tts" &&
+        !!j.payload.board &&
+        (j.status === "running" || j.status === "queued"),
+    );
+    return {
+      project,
+      /** whole scene, or single-line retakes via lineIds */
+      read: (input: Omit<TableRead, "project">) => mutate({ ...input, project }),
+      pending: mutation.isPending,
+      error: mutation.error?.message,
+      /** lines the last call could not voice (no cast voice) */
+      skipped: mutation.data?.skipped ?? [],
+      active,
+      /** a TTS job for this line is queued or running */
+      lineActive: (lineId: string) => active.some((j) => j.payload.board?.lineId === lineId),
+      /** playable URL for an attached voice take */
+      takeUrl: (relPath: string) =>
+        media
+          ? media(`/media/${relPath.split("/").map(encodeURIComponent).join("/")}`)
+          : undefined,
+    };
+  }, [project, jobsData, media, mutate, mutation.isPending, mutation.error, mutation.data]);
 }
 
 /* sample toggle ids ↔ persisted settings fields */
@@ -1961,4 +2566,50 @@ export function useSettings() {
       },
     };
   }, [live, disk, update]);
+}
+
+/** Every library asset with its sidecar — for a screen that has a take's
+ * relPath and needs what its provenance says (a draft's kept latents, the
+ * finish that made it) without re-deriving it from the take record. */
+export function useLibraryAssets() {
+  return trpc.library.list.useQuery().data?.assets ?? [];
+}
+
+/** Scene assembly (N1.1): the plan for one scene (re-read while the dialog
+ * is open, so inflight/done move as jobs land), the start mutation, and the
+ * newest batch on that scene, polled while it runs. */
+export function useSceneAssembly(
+  sceneId: string | null,
+  opts: { through: "board" | "render" | "cut"; lane?: string },
+) {
+  const project = useActiveProjectId();
+  const utils = trpc.useUtils();
+  const input = { project, sceneId: sceneId ?? "", through: opts.through, lane: opts.lane || undefined };
+  const plan = trpc.studio.assembly.plan.useQuery(input, {
+    enabled: !!project && !!sceneId,
+    refetchInterval: 4000,
+  });
+  const batches = trpc.studio.assembly.list.useQuery(
+    { project },
+    { enabled: !!project && !!sceneId, refetchInterval: (q) => (q.state.data?.some((b) => b.status === "running") ? 2000 : 8000) },
+  );
+  const start = trpc.studio.assembly.start.useMutation({
+    onSuccess: () => {
+      void utils.studio.assembly.list.invalidate();
+      void utils.studio.assembly.plan.invalidate();
+    },
+  });
+  const cancel = trpc.studio.assembly.cancel.useMutation({
+    onSuccess: () => void utils.studio.assembly.list.invalidate(),
+  });
+  const batch = batches.data?.find((b) => b.sceneId === sceneId) ?? null;
+  return {
+    plan: plan.data ?? null,
+    planError: plan.error?.message ?? null,
+    batch,
+    start: () => start.mutateAsync(input),
+    starting: start.isPending,
+    startError: start.error?.message ?? null,
+    cancel: (id: string) => cancel.mutateAsync({ id }),
+  };
 }

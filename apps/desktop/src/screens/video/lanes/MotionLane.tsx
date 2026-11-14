@@ -55,13 +55,13 @@ export function MotionLane({
       </div>
 
       {!available ? (
-        <p className="mt-1.5 text-2xs leading-relaxed text-fog/70">
+        <p className="mt-1.5 text-2xs leading-relaxed text-fog">
           {note ??
             "Motion transfer needs an LTX IC-LoRA in your ComfyUI's loras folder — " +
               "ltx-2.3-22b-ic-lora-motion-track-control or -union-control."}
         </p>
       ) : !motion ? (
-        <p className="mt-1.5 text-2xs leading-relaxed text-fog/70">
+        <p className="mt-1.5 text-2xs leading-relaxed text-fog">
           Point at a clip and this shot borrows its movement — a dance, a gesture, a camera
           push — while keeping its own cast and set.
         </p>
@@ -75,7 +75,7 @@ export function MotionLane({
             >
               {nameOf(motion.video)}
             </button>
-            <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">ref</span>
+            <span className="shrink-0 text-2xs uppercase tracking-wider text-fog">ref</span>
           </div>
 
           <select
@@ -101,7 +101,7 @@ export function MotionLane({
                 title={title}
                 className="flex min-w-0 flex-1 items-center gap-1 rounded-md border border-cream/10 bg-ink px-1.5 py-1"
               >
-                <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">
+                <span className="shrink-0 text-2xs uppercase tracking-wider text-fog">
                   {label}
                 </span>
                 <input

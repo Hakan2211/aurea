@@ -62,8 +62,15 @@ export interface SurfaceCatalog {
   } | null;
   /** MiniMax's ref2va checkpoint is downloaded (catalog, not a live probe) */
   minimaxRefsAvailable: boolean;
-  /** the H3 Turbo distill LoRA is downloaded — Draft quality on minimax-h3 */
+  /** the H3 Turbo distill LoRAs are downloaded — Draft and Standard quality */
   minimaxTurboAvailable: boolean;
+  /** the chunked long-form sampler is installed, and the lengths it unlocks —
+   * H3-only, because the shared ladder stops where LTX stops fitting */
+  minimaxLongForm: { available: boolean; durations: string[] };
+  /** H3's camera-motion LoRA and the moves it has words for */
+  minimaxCamera: { available: boolean; moves: string[] };
+  /** which checkpoint each H3 head will load */
+  minimaxWeights: { fl2va: "gguf" | "w4a8"; ref2va: "gguf" | "w4a8" };
 }
 
 /** the slice of labs.video.capabilities the surface reads; null mid-probe */
@@ -132,19 +139,61 @@ export function computeEngineSurface(
                 "MiniMax-H3 Reference (GGUF). It is what carries a face, a voice or a " +
                 "camera move into a new shot, and how a finished clip gets edited.",
             ),
-        // Draft on H3 = the Turbo distill (8 steps instead of 25, ~3× faster),
-        // gated on its own download the way references are
+        // H3's ladder has three rungs — the 4-step distill, the 8-step
+        // distill, and the model's own 25-step schedule. The two distilled
+        // ones are gated on their download the way references are.
         quality: catalog.minimaxTurboAvailable
           ? shown
           : locked(
-              "Draft renders with the Turbo distill LoRA — 8 steps instead of 25, about " +
-                "3× faster at preview quality. Settings → Models → MiniMax-H3 Turbo LoRA.",
+              "Draft and Standard render with LightX2V's distilled LoRAs — 4 or 8 steps " +
+                "instead of 25. Settings → Models → MiniMax-H3 Turbo LoRAs.",
             ),
+        /* H3 used to have NO camera control at all — the prompt was the whole
+         * surface and the adapter refused a camera LoRA outright. Jojocodex's
+         * weight gives it one; hidden (not locked) until it is downloaded,
+         * same rule as the LTX set. */
+        camera: catalog.minimaxCamera.available ? shown : hidden,
       },
       resolutions,
-      // 4–15s is what H3 was trained on; the panel keeps its own warning for a
-      // duration carried over from another engine
-      durations: catalog.durations.filter((d) => secondsOf(d) >= 4 && secondsOf(d) <= 15),
+      /* 4–15s is what H3 was trained on, and the panel keeps its own warning
+       * for a duration carried over from another engine. Past that the shot
+       * has to be chunked, so those lengths only appear once the long-form
+       * sampler is installed — and they come from H3's own ladder rather than
+       * the shared one, which stops at 20s because that is where LTX stops
+       * fitting on this card. */
+      durations: [
+        ...catalog.durations.filter((d) => secondsOf(d) >= 4 && secondsOf(d) <= 15),
+        ...(catalog.minimaxLongForm.available ? catalog.minimaxLongForm.durations : []),
+      ],
+    };
+  }
+
+  if (engineId === "ltx25") {
+    /* 2.5 shares ltx2's ComfyUI and its guide-node probe, but not its
+     * dialogue arm, Director timeline or camera LoRAs — those are 2.3-only
+     * for now, so they are hidden (not part of this engine's vocabulary),
+     * never locked. */
+    const probing25 = capabilities === null;
+    const guides25 = probing25 || capabilities.endFrame;
+    const guideReason25 =
+      capabilities?.note ?? "This ComfyUI is missing the core LTX guide nodes.";
+    return {
+      sections: {
+        ...NONE,
+        endFrame: guides25 ? shown : locked(guideReason25),
+        keyframes: guides25 ? shown : locked(guideReason25),
+        adapters: capabilities?.availableLoras.length
+          ? shown
+          : locked(
+              capabilities && !capabilities.reachable
+                ? (capabilities.note ?? "ComfyUI is not reachable.")
+                : "No adapter LoRAs in this install's lora folder.",
+            ),
+        quality: shown,
+        fps: catalog.ltx ? shown : hidden,
+      },
+      resolutions,
+      durations: catalog.durations,
     };
   }
 

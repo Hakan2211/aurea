@@ -209,7 +209,7 @@ export function Tracks({
         </span>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <span className="mr-1 text-2xs tabular-nums text-fog/70">{Math.round(pxPerSec)} px/s</span>
+          <span className="mr-1 text-2xs tabular-nums text-fog">{Math.round(pxPerSec)} px/s</span>
           <ToolButton icon={ZoomOut} label="Zoom out (−)" onClick={() => setPxPerSec((z) => clampZoom(z / 1.5))} />
           <input
             type="range"
@@ -269,7 +269,7 @@ export function Tracks({
                       borderColor: `${kind.accent}66`,
                       background: `${kind.accent}14`,
                     }}
-                    className="shrink-0 rounded border px-1 py-px text-[8.5px] font-bold tabular-nums tracking-wide"
+                    className="shrink-0 rounded border px-1 py-px text-2xs font-bold tabular-nums tracking-wide"
                   >
                     {trackCode(tl, ti)}
                   </span>
@@ -279,7 +279,7 @@ export function Tracks({
                         ? "Clips here appear over the tracks above"
                         : track.name
                     }
-                    className="min-w-0 flex-1 truncate text-[11px] font-medium capitalize text-cream/85"
+                    className="min-w-0 flex-1 truncate text-xs font-medium capitalize text-cream/85"
                   >
                     {track.name}
                   </span>
@@ -309,7 +309,7 @@ export function Tracks({
                     title={track.muted ? "Unmute" : "Mute"}
                     className={cx(
                       "shrink-0 transition",
-                      track.muted ? "text-ember" : "text-fog/70 hover:text-cream",
+                      track.muted ? "text-ember" : "text-fog hover:text-cream",
                     )}
                   >
                     {track.muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
@@ -337,7 +337,7 @@ export function Tracks({
                       background: `linear-gradient(to right, ${kind.accent} ${((track.gain ?? 1) / 2) * 100}%, color-mix(in srgb, var(--color-cream) 10%, transparent) ${((track.gain ?? 1) / 2) * 100}%)`,
                     }}
                   />
-                  <span className="w-7 shrink-0 text-right text-[9px] tabular-nums text-fog/0 transition group-hover:text-fog/70">
+                  <span className="w-7 shrink-0 text-right text-2xs tabular-nums text-fog/0 transition group-hover:text-fog">
                     {Math.round((track.gain ?? 1) * 100)}%
                   </span>
                 </div>
@@ -347,7 +347,7 @@ export function Tracks({
 
           {/* one compact row — three stacked buttons would cost the preview
               50px of height for something clicked once a project */}
-          <div className="flex h-[28px] items-center gap-1.5 px-3 text-[10px] font-medium">
+          <div className="flex h-[28px] items-center gap-1.5 px-3 text-2xs font-medium">
             <Plus size={10} className="shrink-0 text-fog/50" />
             {(
               [
@@ -360,7 +360,7 @@ export function Tracks({
                 key={kind}
                 onClick={() => onApply(withTrack(tl, kind, label))}
                 title={title}
-                className="text-fog/80 transition hover:text-gold"
+                className="text-fog transition hover:text-gold"
               >
                 {label}
               </button>
@@ -390,7 +390,7 @@ export function Tracks({
                     )}
                   >
                     {isMajor && (
-                      <span className="absolute -top-[15px] left-1 whitespace-nowrap text-[9px] font-medium tabular-nums tracking-wide text-fog/80">
+                      <span className="absolute -top-[15px] left-1 whitespace-nowrap text-2xs font-medium tabular-nums tracking-wide text-fog">
                         {rulerLabel(t)}
                       </span>
                     )}

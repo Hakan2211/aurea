@@ -5,8 +5,7 @@ import {
   Heart,
   LayoutGrid,
   Maximize2,
-  PanelRightClose,
-  PanelRightOpen,
+  History,
   Rows3,
   Search,
   Sparkles,
@@ -104,8 +103,8 @@ export function LabHeader({
   setSearch,
   view,
   setView,
-  railOpen,
-  setRailOpen,
+  historyOpen,
+  onToggleHistory,
   onNewGeneration,
   subtitle,
 }: {
@@ -118,8 +117,9 @@ export function LabHeader({
   setSearch: (s: string) => void;
   view: RollView;
   setView: (v: RollView) => void;
-  railOpen: boolean;
-  setRailOpen: (o: boolean) => void;
+  /** the History drawer — days of renders, click one to filter the roll */
+  historyOpen: boolean;
+  onToggleHistory: () => void;
   onNewGeneration: () => void;
   /** the live count line — "36 generations · 4 rendering" */
   subtitle: string;
@@ -149,7 +149,7 @@ export function LabHeader({
        bar — nothing scrolls under this header, so the blur bought nothing. */
     <header className="relative z-30 flex h-[58px] shrink-0 items-center gap-3 border-b hairline bg-[#0c0c0d] px-4">
       <div className="min-w-0">
-        <h1 className="font-serif text-lg font-semibold leading-none text-cream">Image lab</h1>
+        <h1 className="font-serif text-lg font-semibold leading-none text-cream">Image</h1>
         <p className="mt-1 truncate text-2xs tabular-nums text-fog">{subtitle}</p>
       </div>
 
@@ -161,7 +161,7 @@ export function LabHeader({
         <div className="group relative">
           <Search
             size={13}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fog/70 transition group-focus-within:text-gold"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fog transition group-focus-within:text-gold"
           />
           <input
             ref={searchRef}
@@ -170,7 +170,7 @@ export function LabHeader({
             placeholder="Search generations…"
             className={cx(
               "w-[188px] rounded-pill border border-cream/10 bg-ink/50 py-1.5 pl-8 pr-7 text-xs text-cream",
-              "placeholder:text-fog/60 transition-[border-color,box-shadow,width] duration-[var(--dur)]",
+              "placeholder:text-fog transition-[border-color,box-shadow,width] duration-[var(--dur)]",
               "focus:w-[236px] focus:border-gold/50 focus:outline-none",
               "focus:shadow-[0_0_0_3px_rgba(201,169,110,0.12),0_0_18px_rgba(201,169,110,0.08)]",
             )}
@@ -179,7 +179,7 @@ export function LabHeader({
             <button
               onClick={() => setSearch("")}
               title="Clear search"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-fog/70 transition hover:text-cream"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-fog transition hover:text-cream"
             >
               <X size={12} />
             </button>
@@ -205,16 +205,16 @@ export function LabHeader({
         </div>
 
         <button
-          onClick={() => setRailOpen(!railOpen)}
-          title={railOpen ? "Hide history & references" : "Show history & references"}
+          onClick={onToggleHistory}
+          title={historyOpen ? "Hide history" : "History — your renders by day"}
           className={cx(
-            "flex h-7 w-7 items-center justify-center rounded-lg border transition duration-[var(--dur)]",
-            railOpen
+            "flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition duration-[var(--dur)]",
+            historyOpen
               ? "border-gold/40 bg-gold/10 text-gold"
               : "border-cream/10 text-fog hover:border-gold/35 hover:text-cream",
           )}
         >
-          {railOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
+          <History size={13} /> History
         </button>
 
         <GoldButton onClick={onNewGeneration} title="Clear the composer and start a fresh prompt">

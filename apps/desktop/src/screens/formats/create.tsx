@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useDirector } from "@/components/DirectorPanel";
 import { ArrowRight, Bot, Cpu, Layers, Mic2, Palette, X } from "lucide-react";
 import { useProjects, useVideofastAccounts, type FormatRuns } from "@/hooks";
 import { STAGE_LABELS, asksFor, packById, type FormatCard } from "@/data/formats";
@@ -62,7 +62,7 @@ export function CreatePanel({
   runs?: FormatRuns;
   onClose: () => void;
 }) {
-  const navigate = useNavigate();
+  const director = useDirector();
   const { activeId } = useProjects();
   const { accounts, live } = useVideofastAccounts();
   const utils = trpc.useUtils();
@@ -100,14 +100,7 @@ export function CreatePanel({
   const toggle = (layer: Exclude<Layer, null>) => setOpen((v) => (v === layer ? null : layer));
 
   const chatWithDirector = () => {
-    navigate("/", {
-      state: {
-        seed: {
-          text: directorSeedText(format, packId, account, topic, extra, duration),
-          sentAt: Date.now(),
-        },
-      },
-    });
+    director.openWith(directorSeedText(format, packId, account, topic, extra, duration));
   };
 
   const createNow = () => {

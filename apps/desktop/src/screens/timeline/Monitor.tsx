@@ -95,15 +95,15 @@ export function Monitor({
           {/* in-frame HUD — timecode left, format right, the way a monitor
               overlays them rather than a caption bar stealing height */}
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3">
-            <span className="rounded-lg bg-black/45 px-2.5 py-1 font-medium tabular-nums tracking-[0.06em] text-gold backdrop-blur-md text-[13px] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]">
+            <span className="rounded-lg bg-black/45 px-2.5 py-1 font-medium tabular-nums tracking-[0.06em] text-gold backdrop-blur-md text-sm shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]">
               {fmtTc(playhead, hours)}
             </span>
-            <span className="rounded-lg bg-black/45 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cream/70 backdrop-blur-md shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]">
+            <span className="rounded-lg bg-black/45 px-2 py-1 text-2xs font-semibold uppercase tracking-[0.14em] text-cream/70 backdrop-blur-md shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]">
               {FPS} fps
             </span>
           </div>
           {active && (
-            <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-4 pb-2.5 pt-8 text-[11px] text-cream/70">
+            <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-4 pb-2.5 pt-8 text-xs text-cream/70">
               {active.clip.label || asset?.name}
             </span>
           )}
@@ -134,7 +134,7 @@ export function Monitor({
           <span className="font-medium tabular-nums tracking-[0.04em] text-cream text-[19px]">
             {fmtTc(playhead, hours)}
           </span>
-          <span className="text-xs tabular-nums text-fog/70">/ {fmtTc(end, hours)}</span>
+          <span className="text-xs tabular-nums text-fog">/ {fmtTc(end, hours)}</span>
         </span>
 
         <div className="flex items-center gap-1 rounded-full border hairline bg-surface/70 px-1.5 py-1 backdrop-blur">
@@ -171,7 +171,7 @@ export function Monitor({
           />
         </div>
 
-        <span className="absolute right-5 text-2xs text-fog/60">
+        <span className="absolute right-5 text-2xs text-fog">
           ← → step a frame · ⇧ a second
         </span>
       </div>

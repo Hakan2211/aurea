@@ -78,8 +78,15 @@ export function usePromptDecks() {
 export function usePromptEnhance() {
   const mutation = trpc.prompts.enhance.useMutation();
   return {
-    enhance: (prompt: string, projectId: string | undefined, intent: "image" | "video") =>
-      mutation.mutateAsync({ prompt, projectId, intent }),
+    enhance: (input: {
+      prompt: string;
+      projectId: string | undefined;
+      intent: "image" | "video";
+      /** video: the active look's prose steers the expansion (freeform.ts) */
+      look?: string;
+      /** video: i2v keeps the expansion motion-only */
+      mode?: "i2v" | "t2v";
+    }) => mutation.mutateAsync(input),
     running: mutation.isPending,
     error: mutation.error?.message ?? null,
     reset: () => mutation.reset(),

@@ -56,7 +56,7 @@ export function ShotInspector({
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center justify-between border-b hairline px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[12px] text-cream">{code}</span>
+          <span className="font-mono text-sm text-cream">{code}</span>
           <Chip tone={STATUS_TONE[draft.status]}>{draft.status}</Chip>
         </div>
         <div className="flex items-center gap-0.5">
@@ -105,7 +105,7 @@ export function ShotInspector({
             {keyframeUrl ? (
               <img src={keyframeUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <div className="flex h-full items-center justify-center px-4 text-center text-[10px] leading-relaxed text-fog">
+              <div className="flex h-full items-center justify-center px-4 text-center text-2xs leading-relaxed text-fog">
                 Keyframe slot — board this shot from the Director to generate stills from the bible
                 refs + camera spec.
               </div>
@@ -148,7 +148,7 @@ export function ShotInspector({
                   key={c.id}
                   onClick={() => toggleCharacter(c.id)}
                   className={cx(
-                    "rounded-full border px-2 py-0.5 text-[10px] font-medium transition",
+                    "rounded-full border px-2 py-0.5 text-2xs font-medium transition",
                     on
                       ? "border-gold/50 bg-gold/15 text-gold"
                       : "border-cream/10 text-fog hover:border-cream/25 hover:text-cream",
@@ -247,7 +247,7 @@ export function ShotInspector({
                   ],
                 })
               }
-              className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-fog transition hover:text-gold"
+              className="flex items-center gap-1 text-2xs font-semibold uppercase tracking-[0.1em] text-fog transition hover:text-gold"
             >
               <Plus size={11} /> Line
             </button>
@@ -295,7 +295,7 @@ export function ShotInspector({
               </div>
             ))}
             {draft.scriptLines.length === 0 && (
-              <p className="text-[10px] leading-relaxed text-fog/80">
+              <p className="text-2xs leading-relaxed text-fog">
                 No lines yet — dialogue assigned here drives voice takes and lip-sync.
               </p>
             )}

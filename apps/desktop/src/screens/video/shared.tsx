@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Timer } from "lucide-react";
-import type { DirectorSpec } from "@aurea/shared";
+import type { CameraSpec, DirectorSpec } from "@aurea/shared";
 import { cx } from "@/components/ui";
 
 /* The Video lab's shared grammar: the small types every panel speaks
@@ -77,6 +77,9 @@ export interface ShotPrefill {
   durationSec: number;
   director: DirectorSpec;
   notes: string[];
+  /** the shot's own camera spec, in bank ids — the shot picker opens on what
+   * the board already decided rather than on nothing */
+  camera?: CameraSpec;
 }
 
 /** One library still as the pickers see it — the shape `useVideoLab().frames`
@@ -200,7 +203,7 @@ export function BankSelect({
       onChange={(e) => onChange(e.target.value)}
       style={{ colorScheme: "dark" }}
       title={entries.find((e) => e.id === value)?.use ?? placeholder}
-      className={cx(selectInput, className ?? "min-w-0 flex-1", !value && "text-fog/70")}
+      className={cx(selectInput, className ?? "min-w-0 flex-1", !value && "text-fog")}
     >
       <option value="">{placeholder}</option>
       {entries.map((e) => (
@@ -214,7 +217,7 @@ export function BankSelect({
 
 export function PickerHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="sticky top-0 bg-raised px-3 py-1 text-[9px] uppercase tracking-wider text-fog/60">
+    <div className="sticky top-0 bg-raised px-3 py-1 text-2xs uppercase tracking-wider text-fog">
       {children}
     </div>
   );

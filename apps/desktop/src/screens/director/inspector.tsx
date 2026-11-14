@@ -111,9 +111,12 @@ export function ShotInspector({
           durationSec: spec.durationSec,
           director: spec.director,
           notes: spec.notes,
+          // the board already answered the camera questions — the lab's shot
+          // picker opens on those rather than making them again
+          camera: shot.camera,
         },
       };
-      navigate("/video", { state });
+      navigate("/create/video", { state });
     } catch (err) {
       setSendError(String((err as Error).message));
     } finally {
@@ -131,9 +134,9 @@ export function ShotInspector({
     >
       <header className="flex items-center justify-between border-b hairline px-3 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="font-mono text-[12px] text-cream">{code}</span>
+          <span className="font-mono text-sm text-cream">{code}</span>
           <Chip tone={STATUS_TONE[shot.status]}>{shot.status}</Chip>
-          <span className="truncate text-[11px] text-fog">{shot.title}</span>
+          <span className="truncate text-xs text-fog">{shot.title}</span>
         </div>
         <button
           onClick={close}
@@ -151,12 +154,12 @@ export function ShotInspector({
             {previewUrl ? (
               <img src={previewUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <div className="flex h-full items-center justify-center px-4 text-center text-[10px] leading-relaxed text-fog">
+              <div className="flex h-full items-center justify-center px-4 text-center text-2xs leading-relaxed text-fog">
                 No keyframes yet — generate the first takes below.
               </div>
             )}
             {selected?.approved && (
-              <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-ink/80 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-sage">
+              <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-ink/80 px-2 py-0.5 text-2xs font-semibold uppercase tracking-[0.1em] text-sage">
                 <Check size={10} /> approved
               </span>
             )}
@@ -233,7 +236,7 @@ export function ShotInspector({
               })}
             </div>
           ) : (
-            <p className="text-[10px] leading-relaxed text-fog/80">
+            <p className="text-2xs leading-relaxed text-fog">
               No references — give this shot characters (with bible refs) in the Studio inspector,
               or seed the Animal Sitcom bible.
             </p>
@@ -247,18 +250,18 @@ export function ShotInspector({
             {override !== null && (
               <button
                 onClick={() => setOverride(null)}
-                className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-fog transition hover:text-gold"
+                className="flex items-center gap-1 text-2xs font-semibold uppercase tracking-[0.1em] text-fog transition hover:text-gold"
               >
                 <RotateCcw size={10} /> Recompose
               </button>
             )}
           </div>
           <textarea
-            className={cx(textArea, "min-h-[96px] text-[11px]")}
+            className={cx(textArea, "min-h-[96px] text-xs")}
             value={prompt}
             onChange={(e) => setOverride(e.target.value)}
           />
-          <p className="mt-1 text-[9px] leading-relaxed text-fog/70">
+          <p className="mt-1 text-2xs leading-relaxed text-fog">
             Composed from script lines · camera · location · style bible. Edit to override this run.
           </p>
         </div>
@@ -307,23 +310,23 @@ export function ShotInspector({
         {jobs.length > 0 && (
           <div className="rounded-lg border border-gold/25 bg-gold/5 px-2.5 py-2">
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gold">
+              <span className="text-2xs font-semibold uppercase tracking-[0.12em] text-gold">
                 {jobs[0].status === "queued" ? "Queued" : (jobs[0].stage ?? "Rendering")}
               </span>
-              <span className="text-[10px] text-fog">{Math.round(jobs[0].progress)}%</span>
+              <span className="text-2xs text-fog">{Math.round(jobs[0].progress)}%</span>
             </div>
             <Progress value={jobs[0].progress} />
           </div>
         )}
 
         {board.error && (
-          <p className="rounded-lg border border-ember/40 bg-ember/10 px-2.5 py-2 text-[10px] leading-relaxed text-[#e0968b]">
+          <p className="rounded-lg border border-ember/40 bg-ember/10 px-2.5 py-2 text-2xs leading-relaxed text-[#e0968b]">
             {board.error}
           </p>
         )}
 
         {sendError && (
-          <p className="rounded-lg border border-ember/40 bg-ember/10 px-2.5 py-2 text-[10px] leading-relaxed text-[#e0968b]">
+          <p className="rounded-lg border border-ember/40 bg-ember/10 px-2.5 py-2 text-2xs leading-relaxed text-[#e0968b]">
             {sendError}
           </p>
         )}

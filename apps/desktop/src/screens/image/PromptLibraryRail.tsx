@@ -17,7 +17,8 @@ import { cx } from "@/components/ui";
 import { CATEGORY_ORDER } from "./PromptBuilder";
 import { usePromptLibrary } from "./promptHooks";
 
-/* The docked prompt library — Image Lab.jpg's second column. The modal
+/* The prompt library drawer (was Image Lab.jpg's second column; a drawer
+ * since the UI simplify plan, Stage 3 — the drawer supplies the title bar). The modal
  * (PromptLibraryPanel) is still the place to *manage* the library; this rail
  * is the place to *compose* from it: always visible next to the composer,
  * grouped, searchable, starrable, one click to append.
@@ -100,7 +101,7 @@ function PresetRow({
           "absolute right-2 top-1/2 -translate-y-1/2 transition duration-[var(--dur)]",
           starred
             ? "text-gold opacity-100"
-            : "text-fog/60 opacity-0 hover:text-gold group-hover/row:opacity-100",
+            : "text-fog opacity-0 hover:text-gold group-hover/row:opacity-100",
         )}
       >
         <Star size={12} fill={starred ? "currentColor" : "none"} />
@@ -144,7 +145,7 @@ function Group({
         >
           {title}
         </span>
-        <span className="shrink-0 text-2xs tabular-nums text-fog/60">{count}</span>
+        <span className="shrink-0 text-2xs tabular-nums text-fog">{count}</span>
       </button>
       {open && <div className="mt-0.5 space-y-0.5">{children}</div>}
     </section>
@@ -153,11 +154,9 @@ function Group({
 
 export function PromptLibraryRail({
   onPick,
-  onClose,
   onManage,
 }: {
   onPick: (preset: PromptPreset) => void;
-  onClose: () => void;
   /** open the full library modal — where presets are saved and deleted */
   onManage: () => void;
 }) {
@@ -198,25 +197,11 @@ export function PromptLibraryRail({
   const total = filtered.length + packs.reduce((n, p) => n + p.presets.length, 0);
 
   return (
-    <aside className="flex w-[268px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
-      <div className="flex shrink-0 items-center gap-2 border-b hairline px-3 py-2.5">
-        <BookOpen size={13} className="shrink-0 text-gold/80" />
-        <h2 className="min-w-0 flex-1 truncate text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
-          Prompt library
-        </h2>
-        <button
-          onClick={onClose}
-          title="Hide the library"
-          className="text-fog/60 transition hover:text-cream"
-        >
-          <X size={13} />
-        </button>
-      </div>
-
+    <div className="flex h-full flex-col">
       <div className="relative shrink-0 px-3 py-2.5">
         <Search
           size={12}
-          className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-fog/60"
+          className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-fog"
         />
         <input
           value={search}
@@ -224,7 +209,7 @@ export function PromptLibraryRail({
           placeholder="Search fragments…"
           className={cx(
             "w-full rounded-pill border border-cream/10 bg-ink/50 py-1.5 pl-7 pr-2.5 text-xs text-cream",
-            "placeholder:text-fog/60 transition-[border-color,box-shadow] focus:border-gold/50 focus:outline-none",
+            "placeholder:text-fog transition-[border-color,box-shadow] focus:border-gold/50 focus:outline-none",
             "focus:shadow-[0_0_0_3px_rgba(201,169,110,0.12)]",
           )}
         />
@@ -302,6 +287,6 @@ export function PromptLibraryRail({
       >
         <BookOpen size={11} /> Manage library…
       </button>
-    </aside>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
+  Box,
   Check,
   FileAudio,
   FileImage,
@@ -27,6 +28,7 @@ const kindIcon = {
   image: FileImage,
   tts: FileAudio,
   music: FileMusic,
+  model3d: Box,
 } as const;
 
 const priorityChip: Record<Job["priority"], { tone: "gold" | "sage" | "muted"; label: string }> = {
@@ -69,12 +71,12 @@ function VramGauge({ used, total }: { used: number; total: number }) {
         </defs>
       </svg>
       <div>
-        <div className="text-[11px] uppercase tracking-[0.14em] text-fog">VRAM</div>
+        <div className="text-xs uppercase tracking-[0.14em] text-fog">VRAM</div>
         <div className="font-serif text-[30px] leading-tight text-cream">
           {used}
           <span className="text-[15px] text-fog"> / {total} GB</span>
         </div>
-        <div className="text-[11px] text-fog">{Math.round(pct * 100)}% in use</div>
+        <div className="text-xs text-fog">{Math.round(pct * 100)}% in use</div>
       </div>
     </div>
   );
@@ -89,7 +91,7 @@ function TempSparkline({ tempC }: { tempC: number }) {
   }
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-[0.14em] text-fog">GPU temperature</div>
+      <div className="text-xs uppercase tracking-[0.14em] text-fog">GPU temperature</div>
       <div className="mt-0.5 flex items-end gap-3">
         <div className="font-serif text-[30px] leading-tight text-cream">
           {tempC}
@@ -137,7 +139,7 @@ function JobActions({ job, ctl }: { job: Job; ctl: JobControls }) {
       <div className="flex items-center gap-2">
         <a
           href="#/assets"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-sage/25 px-3 py-1.5 text-[12px] font-medium text-sage transition hover:border-sage/60"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-sage/25 px-3 py-1.5 text-sm font-medium text-sage transition hover:border-sage/60"
         >
           <Check size={12} /> View result
         </a>
@@ -249,19 +251,19 @@ function JobTableRow({ job, ctl }: { job: Job; ctl: JobControls }) {
 
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
-          <span className="truncate text-[13px] font-medium text-cream">{job.title}</span>
+          <span className="truncate text-sm font-medium text-cream">{job.title}</span>
           <Chip tone={prio.tone}>{prio.label}</Chip>
         </div>
-        <div className="mt-0.5 truncate text-[11px] text-fog">
+        <div className="mt-0.5 truncate text-xs text-fog">
           {job.detail && <span>{job.detail} · </span>}
           {job.engine}
-          {job.project && <span className="text-fog/60"> · {job.project}</span>}
+          {job.project && <span className="text-fog"> · {job.project}</span>}
         </div>
         {running && (
           <div className="mt-2 flex items-center gap-3">
             <Progress value={job.progress} className="max-w-[320px]" />
-            <span className="text-[12px] font-semibold text-gold">{job.progress}%</span>
-            <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-gold/80">
+            <span className="text-sm font-semibold text-gold">{job.progress}%</span>
+            <span className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-gold/80">
               <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold" />
               {job.stage}
             </span>
@@ -269,7 +271,7 @@ function JobTableRow({ job, ctl }: { job: Job; ctl: JobControls }) {
         )}
         {job.status === "queued" && job.stage && (
           // scheduler wait reason (external batch owns the GPU, VRAM headroom)
-          <div className="mt-2 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-fog">
+          <div className="mt-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-fog">
             <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-fog/60" />
             {job.stage}
           </div>
@@ -279,14 +281,14 @@ function JobTableRow({ job, ctl }: { job: Job; ctl: JobControls }) {
       <div className="w-[88px] text-right">
         {job.status === "queued" ? (
           <>
-            <div className="text-[13px] text-fog">—</div>
-            <div className="text-[11px] text-fog/70">Queued</div>
+            <div className="text-sm text-fog">—</div>
+            <div className="text-xs text-fog">Queued</div>
           </>
         ) : (
           <>
-            <div className="text-[13px] tabular-nums text-cream/85">{job.elapsed}</div>
+            <div className="text-sm tabular-nums text-cream/85">{job.elapsed}</div>
             <div
-              className={cx("text-[11px]", failed && !canceled ? "text-[#e07a6b]" : "text-fog/70")}
+              className={cx("text-xs", failed && !canceled ? "text-[#e07a6b]" : "text-fog")}
             >
               {running ? `ETA ${job.eta}` : canceled ? "Canceled" : failed ? job.error : "Completed"}
             </div>
@@ -312,7 +314,7 @@ function RailCard({
 }) {
   return (
     <section className="rounded-xl bg-surface p-4">
-      <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+      <h3 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
         <Icon size={13} className="text-gold/70" />
         {title}
       </h3>
@@ -334,8 +336,8 @@ function RightRail() {
   return (
     <aside className="flex w-[300px] shrink-0 flex-col gap-3 overflow-y-auto border-l hairline bg-[#0e0e10] p-3">
       <RailCard icon={Gauge} title="VRAM preflight">
-        <p className="mt-2.5 text-[12px] leading-relaxed text-cream/85">{preflight.message}</p>
-        <div className="mt-2.5 flex items-center justify-between rounded-lg bg-cream/4 px-2.5 py-2 text-[11px]">
+        <p className="mt-2.5 text-sm leading-relaxed text-cream/85">{preflight.message}</p>
+        <div className="mt-2.5 flex items-center justify-between rounded-lg bg-cream/4 px-2.5 py-2 text-xs">
           <span className="text-fog">Estimated after unload</span>
           <span className="font-semibold text-gold">{preflight.after}</span>
         </div>
@@ -344,7 +346,7 @@ function RightRail() {
       <RailCard icon={HardDrive} title="System">
         <dl className="mt-2.5 space-y-1.5">
           {specs.map(([k, v]) => (
-            <div key={k} className="flex items-baseline justify-between gap-3 text-[11px]">
+            <div key={k} className="flex items-baseline justify-between gap-3 text-xs">
               <dt className="text-fog">{k}</dt>
               <dd className="text-right text-cream/85">{v}</dd>
             </div>
@@ -353,11 +355,11 @@ function RightRail() {
       </RailCard>
 
       <RailCard icon={Lightbulb} title="Tips">
-        <p className="mt-2.5 text-[11px] leading-relaxed text-fog">
+        <p className="mt-2.5 text-xs leading-relaxed text-fog">
           Enable <span className="text-cream/80">Auto unload</span> in Settings to reclaim VRAM
           between jobs automatically.
         </p>
-        <a href="#/settings" className="mt-2 inline-block text-[11px] text-gold hover:underline">
+        <a href="#/settings" className="mt-2 inline-block text-xs text-gold hover:underline">
           Go to Settings →
         </a>
       </RailCard>
@@ -385,7 +387,7 @@ export function JobCenter() {
         <header className="flex items-stretch gap-4 border-b hairline px-6 py-4">
           <div className="mr-2 flex flex-col justify-center">
             <h1 className="font-serif text-[26px] leading-tight text-cream">Render queue</h1>
-            <p className="text-[11px] text-fog">Manage and monitor jobs on your GPU</p>
+            <p className="text-xs text-fog">Manage and monitor jobs on your GPU</p>
           </div>
 
           <div className="glass flex items-center rounded-2xl px-5 py-3">
@@ -396,7 +398,7 @@ export function JobCenter() {
           </div>
 
           <div className="glass ml-auto flex flex-col justify-center gap-2 rounded-2xl px-5 py-3">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+            <span className="text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
               Queue status
             </span>
             <button
@@ -410,7 +412,7 @@ export function JobCenter() {
                     : "Hold queued jobs — anything already rendering finishes"
               }
               className={cx(
-                "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition",
+                "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition",
                 "disabled:cursor-not-allowed disabled:opacity-40",
                 paused
                   ? "border border-gold/40 bg-gold/12 text-gold hover:bg-gold/20"
@@ -420,14 +422,14 @@ export function JobCenter() {
               {paused ? <Play size={12} /> : <Pause size={12} />}
               {paused ? "Resume queue" : "Pause queue"}
             </button>
-            <span className="text-[11px] text-fog">
+            <span className="text-xs text-fog">
               {inQueue} job{inQueue === 1 ? "" : "s"} in queue
               {paused && <span className="text-gold"> · held</span>}
             </span>
           </div>
         </header>
 
-        <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-5 px-10 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog/70">
+        <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-5 px-10 pb-1 pt-4 text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
           <span className="w-11" />
           <span>Job</span>
           <span className="w-[88px] text-right">Elapsed</span>
@@ -439,11 +441,11 @@ export function JobCenter() {
             <JobTableRow key={j.id} job={j} ctl={ctl} />
           ))}
           {shown.length === 0 && (
-            <p className="py-16 text-center text-[12px] text-fog">The queue is empty.</p>
+            <p className="py-16 text-center text-sm text-fog">The queue is empty.</p>
           )}
         </div>
 
-        <footer className="flex items-center gap-4 border-t hairline px-6 py-2.5 text-[11px] text-fog">
+        <footer className="flex items-center gap-4 border-t hairline px-6 py-2.5 text-xs text-fog">
           <span>{jobs.length} jobs</span>
           {queued.length > 0 && (
             <button

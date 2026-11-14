@@ -9,6 +9,7 @@ import { Clapperboard, Loader2 } from "lucide-react";
 import type { Timeline, TimelineClip, TimelineTrack } from "@aurea/shared";
 import { useTimeline } from "@/hooks";
 import { GoldButton, cx } from "@/components/ui";
+import { CoreGate } from "@/components/CoreGate";
 import { Inspector } from "./Inspector";
 import { MediaRail, type PoolItem } from "./MediaRail";
 import { Monitor } from "./Monitor";
@@ -37,7 +38,7 @@ const ZONE_MIN = 190;
 const ZONE_MAX = 700;
 
 export function TimelineScreen() {
-  const { project, initial, loading, pool, resolve, save, exportCut, exportJob, exporting } =
+  const { project, initial, pool, resolve, save, exportCut, exportJob, exporting } =
     useTimeline();
   const [tl, setTl] = useState<Timeline | null>(null);
   const [selected, setSelected] = useState<{ track: string; clip: string } | null>(null);
@@ -272,10 +273,14 @@ export function TimelineScreen() {
   };
 
   if (!tl) {
+    // CoreGate tells "core down" from "still loading" itself — `loading` alone
+    // stays true forever against a dead core
     return (
-      <div className="flex h-full items-center justify-center text-xs text-fog">
-        {loading ? "Loading sequence…" : "Timeline needs a running studio core."}
-      </div>
+      <CoreGate
+        screen="Timeline"
+        purpose="The timeline is where approved takes become an episode: cut, trim, layer voice and music, then export."
+        icon={Clapperboard}
+      />
     );
   }
 

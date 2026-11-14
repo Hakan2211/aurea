@@ -39,7 +39,7 @@ function WelcomeStep() {
       <h1 className="mt-6 font-serif text-[26px] font-semibold tracking-wide text-cream">
         Welcome to <span className="text-gold">Aurea</span>
       </h1>
-      <p className="mt-3 max-w-md text-[13px] leading-relaxed text-fog">
+      <p className="mt-3 max-w-md text-sm leading-relaxed text-fog">
         Your studio runs entirely on this machine — images, voices, music and video are
         generated on your own GPU, and your work never leaves your disk. A few quick steps
         set up storage and the local engines.
@@ -63,7 +63,7 @@ function StorageStep() {
         sub="Projects, generated assets and downloaded models are stored under one folder."
       />
       <div className="rounded-2xl border hairline bg-raised/50 p-4">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+        <div className="text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
           Data root
         </div>
         <input
@@ -72,16 +72,16 @@ function StorageStep() {
           onBlur={commit}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           spellCheck={false}
-          className="mt-2 w-full rounded-lg border border-cream/10 bg-surface px-3 py-2 text-[12px] tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
+          className="mt-2 w-full rounded-lg border border-cream/10 bg-surface px-3 py-2 text-sm tabular-nums text-cream/90 focus:border-gold/35 focus:outline-none"
         />
-        <div className="mt-3 flex items-baseline justify-between text-[11px]">
+        <div className="mt-3 flex items-baseline justify-between text-xs">
           <span className="text-fog">Free on this volume</span>
           <span className="tabular-nums text-cream/90">
             {storage.used} used / {storage.total}
           </span>
         </div>
       </div>
-      <p className="text-[11px] text-fog/80">
+      <p className="text-xs text-fog">
         Large video models need room — 60 GB free is a comfortable start. You can move this
         later under Settings → Storage.
       </p>
@@ -129,24 +129,24 @@ function EnginesStep({ settings }: { settings: Settings }) {
         {rows.map((r) => (
           <div key={r.label} className="flex items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-cream">{r.label}</div>
-              <div className="mt-0.5 truncate text-[10px] tabular-nums text-fog">
+              <div className="text-sm font-medium text-cream">{r.label}</div>
+              <div className="mt-0.5 truncate text-2xs tabular-nums text-fog">
                 {r.value ?? r.note}
               </div>
             </div>
             {r.value ? (
-              <Chip tone="sage" className="text-[10px]">
+              <Chip tone="sage" className="text-2xs">
                 <Check size={10} /> Detected
               </Chip>
             ) : (
-              <Chip tone="muted" className="text-[10px]">
+              <Chip tone="muted" className="text-2xs">
                 Not found
               </Chip>
             )}
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-fog/80">
+      <p className="text-xs text-fog">
         Paths are editable any time under Settings → Storage &amp; Engines.
       </p>
     </div>
@@ -189,14 +189,14 @@ function ModelRow({
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-[13px] font-medium text-cream">{m.name}</span>
-            <span className="truncate text-[10px] text-fog">{m.engine}</span>
+            <span className="text-sm font-medium text-cream">{m.name}</span>
+            <span className="truncate text-2xs text-fog">{m.engine}</span>
           </div>
-          <div className="mt-0.5 truncate text-[11px] text-fog/85">{m.description}</div>
+          <div className="mt-0.5 truncate text-xs text-fog">{m.description}</div>
         </div>
-        <span className="shrink-0 text-[11px] tabular-nums text-fog">{fmtSize(m.sizeBytes)}</span>
+        <span className="shrink-0 text-xs tabular-nums text-fog">{fmtSize(m.sizeBytes)}</span>
         {done && (
-          <Chip tone="sage" className="shrink-0 text-[10px]">
+          <Chip tone="sage" className="shrink-0 text-2xs">
             <Check size={10} /> Installed
           </Chip>
         )}
@@ -204,17 +204,17 @@ function ModelRow({
       {busy && (
         <div className="mt-2 flex items-center gap-3 pl-7">
           <Progress value={s.progress} className="flex-1" />
-          <span className="shrink-0 text-[10px] tabular-nums text-fog">
+          <span className="shrink-0 text-2xs tabular-nums text-fog">
             {s.progress.toFixed(0)}%{s.bytesPerSec ? ` · ${fmtRate(s.bytesPerSec)}` : ""}
             {s.state === "verifying" ? " · verifying" : ""}
           </span>
         </div>
       )}
       {s.state === "error" && (
-        <div className="mt-1.5 pl-7 text-[10px] text-[#e07a6b]">{s.error}</div>
+        <div className="mt-1.5 pl-7 text-2xs text-[#e07a6b]">{s.error}</div>
       )}
       {needsLicense && selected && !busy && !done && (
-        <label className="mt-2 flex cursor-pointer items-center gap-2 pl-7 text-[11px] text-fog">
+        <label className="mt-2 flex cursor-pointer items-center gap-2 pl-7 text-xs text-fog">
           <input
             type="checkbox"
             checked={accepted}
@@ -269,7 +269,7 @@ function ModelsStep() {
         sub="Weights install into your data root, resume if interrupted, and are checksum-verified. You can keep going — downloads run in the background."
       />
       {!live ? (
-        <div className="rounded-2xl border hairline bg-raised/50 p-6 text-center text-[12px] text-fog">
+        <div className="rounded-2xl border hairline bg-raised/50 p-6 text-center text-sm text-fog">
           Waiting for the studio core…
         </div>
       ) : (
@@ -311,7 +311,7 @@ function ModelsStep() {
               </GhostButton>
             )}
             {blocked > 0 && (
-              <span className="text-[11px] text-fog">
+              <span className="text-xs text-fog">
                 {blocked} selected {blocked === 1 ? "model needs" : "models need"} a license
                 acceptance above
               </span>
@@ -332,7 +332,7 @@ function ReadyStep({ downloading }: { downloading: number }) {
       <h2 className="mt-5 font-serif text-[22px] font-semibold tracking-wide text-cream">
         The studio is yours
       </h2>
-      <p className="mt-3 max-w-md text-[13px] leading-relaxed text-fog">
+      <p className="mt-3 max-w-md text-sm leading-relaxed text-fog">
         {downloading > 0
           ? `${downloading} ${downloading === 1 ? "download is" : "downloads are"} still running — watch them under Settings → Models. `
           : ""}
@@ -361,7 +361,7 @@ function StepHeader({
       </span>
       <div>
         <h2 className="font-serif text-[18px] font-semibold tracking-wide text-cream">{title}</h2>
-        <p className="mt-1 text-[11px] leading-relaxed text-fog">{sub}</p>
+        <p className="mt-1 text-xs leading-relaxed text-fog">{sub}</p>
       </div>
     </header>
   );

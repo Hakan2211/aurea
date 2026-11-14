@@ -28,7 +28,7 @@ function Chain() {
       {beats.map((b, i) => (
         <span key={b.label} className="flex items-center gap-1.5">
           {i > 0 && <ArrowRight size={9} className="text-cream/35" />}
-          <span className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-cream/70">
+          <span className="flex items-center gap-1 text-2xs uppercase tracking-wider text-cream/70">
             <b.icon size={10} strokeWidth={1.6} className="text-gold/80" />
             {b.label}
           </span>
@@ -76,7 +76,7 @@ export function FormatTile({
       )}
     >
       <Poster format={format} className="aspect-[2/3]">
-        <span className="absolute left-3 top-3 rounded-pill bg-black/45 px-2 py-0.5 text-[9px] font-medium tracking-wide text-cream/80 backdrop-blur-sm">
+        <span className="absolute left-3 top-3 rounded-pill bg-black/45 px-2 py-0.5 text-2xs font-medium tracking-wide text-cream/80 backdrop-blur-sm">
           {pack.label}
         </span>
         {/* v1's graft: the selected tile carries a checkmark, not just a ring */}
@@ -86,7 +86,7 @@ export function FormatTile({
           </span>
         ) : (
           format.featured && (
-            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-pill bg-gold px-2 py-0.5 text-[9px] font-semibold text-ink">
+            <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-pill bg-gold px-2 py-0.5 text-2xs font-semibold text-ink">
               <Sparkles size={9} /> Meta
             </span>
           )
@@ -117,7 +117,7 @@ export function FormatTile({
             <p className="truncate font-serif text-xs italic text-cream/55">{format.poster}</p>
             <p className="text-xs leading-relaxed text-cream/85">{format.tagline}</p>
             <Chain />
-            <span className="inline-flex items-center gap-1 rounded-pill border border-cream/20 bg-black/35 px-2 py-0.5 text-[9px] text-cream/75">
+            <span className="inline-flex items-center gap-1 rounded-pill border border-cream/20 bg-black/35 px-2 py-0.5 text-2xs text-cream/75">
               <Cpu size={9} className="text-gold/70" /> {languages(format)}
             </span>
           </div>

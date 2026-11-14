@@ -12,6 +12,7 @@ import { cx } from "@/components/ui";
 /** display metadata the catalog has no business carrying */
 const ENGINE_LOOK: Record<string, { maker: string; badge: string }> = {
   ltx2: { maker: "by Lightricks", badge: "Best quality" },
+  ltx25: { maker: "by Lightricks", badge: "Newest" },
   // the mockup's H3 badge reads FAST; on this machine H3 is ~10× LTX's render
   // time, so the badge says the thing that's actually true and actually rare
   "minimax-h3": { maker: "by MiniMax", badge: "Native audio" },
@@ -137,7 +138,7 @@ export function EnginePicker({
         </button>
       </div>
 
-      <div className="mt-2 grid grid-cols-3 gap-1.5">
+      <div className={cx("mt-2 grid gap-1.5", engines.length > 3 ? "grid-cols-2" : "grid-cols-3")}>
         {engines.map((e) => {
           const on = e.id === value;
           const look = ENGINE_LOOK[e.id];
@@ -166,20 +167,20 @@ export function EnginePicker({
 
               <span
                 className={cx(
-                  "mt-2 w-full truncate text-center text-[11px] font-medium leading-tight",
+                  "mt-2 w-full truncate text-center text-xs font-medium leading-tight",
                   on ? "text-cream" : "text-cream/85",
                 )}
               >
                 {e.label}
               </span>
-              <span className="w-full truncate text-center text-[8px] leading-tight text-fog/80">
+              <span className="w-full truncate text-center text-2xs leading-tight text-fog">
                 {look?.maker ?? e.sub}
               </span>
 
               {look && (
                 <span
                   className={cx(
-                    "mt-1.5 w-full truncate rounded-[3px] border px-1 py-px text-center text-[7px] font-semibold uppercase tracking-[0.08em]",
+                    "mt-1.5 w-full truncate rounded-[3px] border px-1 py-px text-center text-2xs font-semibold uppercase tracking-[0.08em]",
                     on ? "border-gold/45 bg-gold/10 text-gold" : "border-cream/12 text-fog",
                   )}
                 >
@@ -191,7 +192,7 @@ export function EnginePicker({
         })}
       </div>
 
-      {note && <p className="mt-1.5 text-2xs leading-relaxed text-fog/70">{note}</p>}
+      {note && <p className="mt-1.5 text-2xs leading-relaxed text-fog">{note}</p>}
     </section>
   );
 }

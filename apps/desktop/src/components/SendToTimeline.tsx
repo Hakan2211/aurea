@@ -59,7 +59,7 @@ export function SendToTimeline({
         );
       }}
       className={cx(
-        "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] transition",
+        "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition",
         ...TONE[tone],
         state === "failed" && "text-ember",
         className,

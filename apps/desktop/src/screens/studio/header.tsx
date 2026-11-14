@@ -77,7 +77,7 @@ export function StudioHeader({
                 <div
                   key={episode.id}
                   className={cx(
-                    "flex w-full items-center rounded-lg pr-2 text-[12px] transition",
+                    "flex w-full items-center rounded-lg pr-2 text-sm transition",
                     episode.id === current?.episode.id
                       ? "bg-gold/10 text-gold"
                       : "text-cream hover:bg-cream/5",
@@ -106,7 +106,7 @@ export function StudioHeader({
                   prod.addEpisode({ title: `Episode ${episodes.length + 1}` });
                   setOpen(false);
                 }}
-                className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-fog transition hover:bg-cream/5 hover:text-gold"
+                className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-fog transition hover:bg-cream/5 hover:text-gold"
               >
                 <Plus size={12} /> New episode
               </button>
@@ -114,7 +114,7 @@ export function StudioHeader({
           </>
         )}
         {current?.episode.logline && (
-          <p className="mt-0.5 truncate font-serif text-[12px] italic text-fog">
+          <p className="mt-0.5 truncate font-serif text-sm italic text-fog">
             {current.episode.logline}
           </p>
         )}
@@ -149,7 +149,7 @@ export function StudioHeader({
               ).map(([value, label]) => (
                 <div key={label}>
                   <p className="font-serif text-[16px] font-semibold text-cream">{value}</p>
-                  <p className="text-[9px] uppercase tracking-[0.14em] text-fog">{label}</p>
+                  <p className="text-2xs uppercase tracking-[0.14em] text-fog">{label}</p>
                 </div>
               ))}
             </div>
@@ -159,7 +159,7 @@ export function StudioHeader({
               title={`${stats.approved} of ${stats.shots} shots approved`}
             >
               <ProgressRing pct={pct} />
-              <span className="hidden text-[11px] text-cream/80 @6xl:block">
+              <span className="hidden text-xs text-cream/80 @6xl:block">
                 {stats.approved}/{stats.shots} approved
               </span>
             </div>
@@ -174,7 +174,7 @@ export function StudioHeader({
  * so the control reads as a view switch rather than a minor option */
 function ViewLabel({ children }: { children: string }) {
   return (
-    <span className="block py-0.5 text-[11px] font-semibold uppercase tracking-normal @2xl:px-1.5 @2xl:tracking-[0.16em]">
+    <span className="block py-0.5 text-xs font-semibold uppercase tracking-normal @2xl:px-1.5 @2xl:tracking-[0.16em]">
       {children}
     </span>
   );

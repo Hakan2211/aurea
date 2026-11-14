@@ -57,7 +57,7 @@ function Section({
           onClick={() => sections.toggle(id)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
-          <h3 className="font-serif text-[14px] text-cream">{title}</h3>
+          <h3 className="font-serif text-base text-cream">{title}</h3>
           <ChevronDown
             size={13}
             className={cx("shrink-0 text-fog transition-transform", open && "rotate-180")}
@@ -81,14 +81,14 @@ const SECTION_TAG = /^\s*\[[^\]]+\]\s*$/;
 function LyricsBody({ track }: { track: MusicTrack }) {
   if (track.arrangement !== "vocals") {
     return (
-      <p className="text-[12px] leading-relaxed text-fog">
+      <p className="text-sm leading-relaxed text-fog">
         Instrumental take — switch the arrangement to Vocals to write lyrics.
       </p>
     );
   }
   if (!track.lyrics?.trim()) {
     return (
-      <p className="text-[12px] leading-relaxed text-fog">
+      <p className="text-sm leading-relaxed text-fog">
         {track.origin
           ? // verified on a real run: ACE-Step's LM returns bpm/key/caption and
             // hands the DiT an empty lyric block — it sings, it doesn't write
@@ -110,7 +110,7 @@ function LyricsBody({ track }: { track: MusicTrack }) {
         ) : line.trim() === "" ? (
           <div key={i} className="h-2" />
         ) : (
-          <p key={i} className="text-[12px] leading-relaxed text-cream/85">
+          <p key={i} className="text-sm leading-relaxed text-cream/85">
             {line}
           </p>
         ),
@@ -179,7 +179,7 @@ export function TrackInspector({
                 </button>
               )}
             </div>
-            <p className="mt-1 text-[10px] tabular-nums text-fog">
+            <p className="mt-1 text-2xs tabular-nums text-fog">
               {duration} · {track.bpm ? `${track.bpm} BPM` : "—"} · {track.key || "—"}
             </p>
           </div>
@@ -215,9 +215,9 @@ export function TrackInspector({
 
         <Section id="brief" title="Brief" sections={sections}>
           {track.prompt ? (
-            <p className="text-[11px] leading-relaxed text-fog">{track.prompt}</p>
+            <p className="text-xs leading-relaxed text-fog">{track.prompt}</p>
           ) : (
-            <p className="text-[11px] leading-relaxed text-fog/70">
+            <p className="text-xs leading-relaxed text-fog">
               No brief kept with this take — it predates the provenance sidecar.
             </p>
           )}
@@ -226,7 +226,7 @@ export function TrackInspector({
               {track.styles.map((s) => (
                 <span
                   key={s}
-                  className="rounded-full bg-gold/10 px-2 py-0.5 text-[10px] text-gold/85"
+                  className="rounded-full bg-gold/10 px-2 py-0.5 text-2xs text-gold/85"
                 >
                   {s}
                 </span>
@@ -236,7 +236,7 @@ export function TrackInspector({
         </Section>
 
         <Section id="stems" title="Stems" sections={sections}>
-          <p className="text-2xs leading-relaxed text-fog/70">
+          <p className="text-2xs leading-relaxed text-fog">
             Stem separation isn't wired to the engine yet — these controls are a preview of the
             coming mixer and don't change the file.
           </p>
@@ -249,13 +249,13 @@ export function TrackInspector({
                     <Icon size={14} className={stem.on ? "text-gold/80" : "text-fog/50"} />
                     <span
                       className={cx(
-                        "flex-1 text-[12px]",
+                        "flex-1 text-sm",
                         stem.on ? "text-cream" : "text-fog line-through decoration-fog/40",
                       )}
                     >
                       {stem.label}
                     </span>
-                    <span className="w-14 text-right text-[11px] tabular-nums text-cream/85">
+                    <span className="w-14 text-right text-xs tabular-nums text-cream/85">
                       {stem.gainDb > 0 ? "+" : ""}
                       {stem.gainDb.toFixed(1)} dB
                     </span>
@@ -296,7 +296,7 @@ export function TrackInspector({
                 ["Format", "WAV · 48 kHz"],
               ] as [string, string][]
             ).map(([k, v]) => (
-              <div key={k} className="flex justify-between gap-3 text-[11px]">
+              <div key={k} className="flex justify-between gap-3 text-xs">
                 <span className="shrink-0 text-fog">{k}</span>
                 <span className="truncate text-right text-cream/85">{v}</span>
               </div>
@@ -306,12 +306,12 @@ export function TrackInspector({
             * control that matters is "draw another" — and it belongs down here
             * with the facts about the file, not competing with the title */}
           <div className="mt-3 flex items-center justify-between gap-2 border-t hairline pt-3">
-            <span className="text-[11px] text-fog">Cover art</span>
+            <span className="text-xs text-fog">Cover art</span>
             <button
               onClick={() => track.relPath && lab.recover(track.relPath)}
               disabled={!track.relPath || lab.recovering}
               title="Draw new cover art for this track"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-cream/10 px-2 py-1 text-[10px] text-cream/80 transition hover:border-gold/40 hover:text-gold disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-cream/10 px-2 py-1 text-2xs text-cream/80 transition hover:border-gold/40 hover:text-gold disabled:opacity-40"
             >
               <ImageIcon size={11} />
               {lab.recovering ? "Queued…" : track.coverUrl ? "Draw another" : "Draw one"}
@@ -360,14 +360,14 @@ export function TrackInspector({
                       void downloads.download(track, format);
                     }}
                     disabled={format === "mp3" ? !track.relPath || !!downloads.busy : !track.url}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
                   >
                     <Download size={11} />
                     {downloads.busy === format ? "Converting…" : label}
                   </button>
                 ))}
                 {downloads.error && (
-                  <p className="px-2.5 py-1.5 text-[10px] leading-relaxed text-[#e07a6b]">
+                  <p className="px-2.5 py-1.5 text-2xs leading-relaxed text-[#e07a6b]">
                     {downloads.error}
                   </p>
                 )}

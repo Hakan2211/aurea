@@ -59,14 +59,14 @@ function PresetChip({
                 onRemove(preset.id);
                 setArmed(false);
               }}
-              className="rounded-pill bg-red-500/80 px-1.5 py-0.5 text-[9px] font-semibold text-cream transition hover:bg-red-500 disabled:opacity-50"
+              className="rounded-pill bg-red-500/80 px-1.5 py-0.5 text-2xs font-semibold text-cream transition hover:bg-red-500 disabled:opacity-50"
             >
               Sure?
             </button>
             <button
               title="Keep it"
               onClick={() => setArmed(false)}
-              className="text-fog/70 transition hover:text-cream"
+              className="text-fog transition hover:text-cream"
             >
               <X size={10} />
             </button>
@@ -93,7 +93,7 @@ function PackSection({ pack, onPick }: { pack: StylePack; onPick: (p: PromptPres
       <div className="flex items-baseline gap-2">
         <h4 className="text-sm font-semibold text-cream">{pack.title}</h4>
         {pack.fromBible && (
-          <Chip tone="gold" className="text-[9px]">
+          <Chip tone="gold" className="text-2xs">
             from this project's bible
           </Chip>
         )}
@@ -105,7 +105,7 @@ function PackSection({ pack, onPick }: { pack: StylePack; onPick: (p: PromptPres
         ))}
       </div>
       {pack.negative && (
-        <p className="mt-2 text-2xs leading-relaxed text-fog/70">
+        <p className="mt-2 text-2xs leading-relaxed text-fog">
           <span className="font-semibold text-fog">Avoids:</span> {pack.negative}
         </p>
       )}
@@ -200,7 +200,7 @@ export function PromptLibraryPanel({
 
         {byCategory.map(({ cat, presets }) => (
           <section key={cat}>
-            <SectionLabel right={<span className="text-2xs tabular-nums text-fog/60">{presets.length}</span>}>
+            <SectionLabel right={<span className="text-2xs tabular-nums text-fog">{presets.length}</span>}>
               {CATEGORY_LABEL[cat]}
             </SectionLabel>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -215,7 +215,7 @@ export function PromptLibraryPanel({
               ))}
             </div>
             {cat === "negative" && (
-              <p className="mt-1.5 text-2xs leading-relaxed text-fog/60">
+              <p className="mt-1.5 text-2xs leading-relaxed text-fog">
                 Negatives ride along as dashed chips — they're kept out of this model's prompt and
                 apply via style packs on video / bible flows.
               </p>
@@ -256,7 +256,7 @@ export function PromptLibraryPanel({
                   onClick={() => setSaveCategory(c)}
                   title={CATEGORY_LABEL[c]}
                   className={cx(
-                    "rounded-pill border px-2 py-1 text-[9px] font-medium capitalize transition",
+                    "rounded-pill border px-2 py-1 text-2xs font-medium capitalize transition",
                     saveCategory === c
                       ? CATEGORY_CHIP[c]
                       : "border-cream/10 text-fog hover:text-cream",
@@ -288,7 +288,7 @@ export function PromptLibraryPanel({
               Cancel
             </button>
             {!prompt.trim() && (
-              <span className="text-2xs text-fog/70">Write a prompt first — this saves it.</span>
+              <span className="text-2xs text-fog">Write a prompt first — this saves it.</span>
             )}
           </div>
         ) : (

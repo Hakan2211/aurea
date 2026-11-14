@@ -69,16 +69,16 @@ export function CastLane({
       </div>
 
       {!available ? (
-        <p className="mt-1.5 text-2xs leading-relaxed text-fog/70">
+        <p className="mt-1.5 text-2xs leading-relaxed text-fog">
           {note ??
             "Cast references need WhatDreamsCost-ComfyUI v2.0.4+ and the LTX Ingredients " +
               "IC-LoRA (ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors, a gated download " +
               "from huggingface.co/Lightricks) in your ComfyUI's loras folder."}
         </p>
       ) : blocked ? (
-        <p className="mt-1.5 text-2xs leading-relaxed text-fog/70">{blocked}</p>
+        <p className="mt-1.5 text-2xs leading-relaxed text-fog">{blocked}</p>
       ) : refs.length === 0 ? (
-        <p className="mt-1.5 text-2xs leading-relaxed text-fog/70">
+        <p className="mt-1.5 text-2xs leading-relaxed text-fog">
           Name the cast and LTX holds them on-model through the whole take — including
           characters who never appear in the start frame.
         </p>
@@ -104,7 +104,7 @@ export function CastLane({
                   value={ref.name}
                   onChange={(e) => patch(i, { name: e.target.value })}
                   placeholder="Name"
-                  className="min-w-0 flex-1 bg-transparent text-xs text-cream/85 outline-none placeholder:text-fog/60"
+                  className="min-w-0 flex-1 bg-transparent text-xs text-cream/85 outline-none placeholder:text-fog"
                 />
                 <select
                   value={ref.kind}
@@ -129,9 +129,9 @@ export function CastLane({
                 onChange={(e) => patch(i, { description: e.target.value })}
                 rows={2}
                 placeholder="What must stay true — build, wardrobe, markings"
-                className="w-full resize-none rounded-md border border-cream/10 bg-ink p-1.5 text-2xs leading-relaxed text-cream/85 outline-none placeholder:text-fog/60 focus:border-gold/40"
+                className="w-full resize-none rounded-md border border-cream/10 bg-ink p-1.5 text-2xs leading-relaxed text-cream/85 outline-none placeholder:text-fog focus:border-gold/40"
               />
-              <div className="text-[9px] uppercase tracking-wider text-fog/60">
+              <div className="text-2xs uppercase tracking-wider text-fog">
                 {layout.cells[i]?.label}
               </div>
             </div>
@@ -152,7 +152,7 @@ export function CastLane({
               {strength.toFixed(2)}
             </span>
           </div>
-          <p className="text-2xs leading-relaxed text-fog/70">
+          <p className="text-2xs leading-relaxed text-fog">
             {refs.length} on a {layout.cols === 1 ? "single-cell" : `${layout.cols}×${layout.rows}`}{" "}
             sheet — the descriptions go in front of the shot prompt, so keep each to a line or two.
           </p>
@@ -169,7 +169,7 @@ export function CastLane({
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
             >
               <span className="min-w-0 flex-1 truncate">{c.name}</span>
-              <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">cast</span>
+              <span className="shrink-0 text-2xs uppercase tracking-wider text-fog">cast</span>
             </button>
           ))}
           {sets.map((s) => (
@@ -179,7 +179,7 @@ export function CastLane({
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
             >
               <span className="min-w-0 flex-1 truncate">{s.name}</span>
-              <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">set</span>
+              <span className="shrink-0 text-2xs uppercase tracking-wider text-fog">set</span>
             </button>
           ))}
           <PickerHeading>From the library</PickerHeading>

@@ -48,8 +48,8 @@ export function PlayerBar({
           <span className="h-9 w-9 shrink-0 rounded-lg bg-cream/8" />
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[12px] text-cream">{track?.title ?? "No track"}</div>
-          <div className="truncate text-[10px] text-fog">
+          <div className="truncate text-sm text-cream">{track?.title ?? "No track"}</div>
+          <div className="truncate text-2xs text-fog">
             {track ? track.arrangement : "Nothing selected"}
           </div>
         </div>
@@ -94,14 +94,14 @@ export function PlayerBar({
         </button>
       </div>
 
-      <span className="text-[10px] tabular-nums text-fog">{loaded ? player.position : "0:00"}</span>
+      <span className="text-2xs tabular-nums text-fog">{loaded ? player.position : "0:00"}</span>
       <ScrubBar
         className="min-w-0 flex-1"
         value={loaded ? player.played : 0}
         onSeek={player.seekFraction}
         title={loaded ? "Scrub" : "Play a track to scrub it"}
       />
-      <span className="text-[10px] tabular-nums text-fog">
+      <span className="text-2xs tabular-nums text-fog">
         {loaded ? player.total : probed || "0:00"}
       </span>
 
@@ -127,7 +127,7 @@ export function PlayerBar({
           onClick={() => setRateOpen((o) => !o)}
           title="Playback speed"
           className={cx(
-            "flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] tabular-nums transition",
+            "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs tabular-nums transition",
             player.rate === 1
               ? "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold"
               : "border-gold/45 text-gold",
@@ -148,7 +148,7 @@ export function PlayerBar({
                     setRateOpen(false);
                   }}
                   className={cx(
-                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11px] tabular-nums transition hover:bg-cream/5",
+                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs tabular-nums transition hover:bg-cream/5",
                     r === player.rate ? "text-gold" : "text-cream/85",
                   )}
                 >

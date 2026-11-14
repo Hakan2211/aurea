@@ -105,7 +105,7 @@ export function TakeCard({
         {index != null && (
           <span
             className={cx(
-              "shrink-0 rounded px-1.5 py-px text-[10px] font-semibold tabular-nums",
+              "shrink-0 rounded px-1.5 py-px text-2xs font-semibold tabular-nums",
               active ? "bg-gold text-ink" : "bg-cream/12 text-cream/80",
             )}
           >
@@ -114,7 +114,7 @@ export function TakeCard({
         )}
         <span
           className={cx(
-            "min-w-0 flex-1 truncate text-[11px] font-medium",
+            "min-w-0 flex-1 truncate text-xs font-medium",
             active ? "text-gold" : "text-cream/80",
           )}
         >
@@ -122,7 +122,7 @@ export function TakeCard({
         </span>
         <span
           className={cx(
-            "shrink-0 text-[10px] tabular-nums",
+            "shrink-0 text-2xs tabular-nums",
             active ? "text-gold/80" : "text-fog",
           )}
         >

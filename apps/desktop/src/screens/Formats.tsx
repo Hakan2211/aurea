@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useDirector } from "@/components/DirectorPanel";
 import { BLEND_KEY, useFormatRuns, useFormats, type FormatRunResult } from "@/hooks";
 import { Gallery } from "./formats/gallery";
 import { CreatePanel } from "./formats/create";
@@ -16,7 +16,7 @@ import { RunPreview } from "./formats/shared";
  * (the escape hatch). Runs report back on the tile they came from. */
 
 export function Formats() {
-  const navigate = useNavigate();
+  const director = useDirector();
   const { formats } = useFormats();
   const runs = useFormatRuns();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -25,17 +25,11 @@ export function Formats() {
   const selected = formats.find((f) => f.id === selectedId) ?? null;
 
   const createWithAi = () => {
-    navigate("/", {
-      state: {
-        seed: {
-          text:
-            "I want to make a social-media short but haven't picked a format yet. " +
-            "Walk me through the videofast formats, help me match one to my idea, " +
-            "then launch create_video once we've agreed on a topic and style pack.",
-          sentAt: Date.now(),
-        },
-      },
-    });
+    director.openWith(
+      "I want to make a social-media short but haven't picked a format yet. " +
+        "Walk me through the videofast formats, help me match one to my idea, " +
+        "then launch create_video once we've agreed on a topic and style pack.",
+    );
   };
 
   return (

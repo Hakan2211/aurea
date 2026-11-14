@@ -40,10 +40,10 @@ function GeneratingCard({ track, onCancel }: { track: MusicTrack; onCancel: () =
             <span className="min-w-0 flex-1 truncate font-serif text-[15px] text-cream">
               {track.title}
             </span>
-            <span className="shrink-0 rounded-full bg-gold/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-gold">
+            <span className="shrink-0 rounded-full bg-gold/15 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wider text-gold">
               Generating
             </span>
-            <span className="shrink-0 text-[12px] font-medium tabular-nums text-gold">
+            <span className="shrink-0 text-sm font-medium tabular-nums text-gold">
               {g.progress}%
             </span>
           </div>
@@ -56,12 +56,12 @@ function GeneratingCard({ track, onCancel }: { track: MusicTrack; onCancel: () =
           <div className="mt-1.5 flex items-center justify-between gap-2">
             {/* v2's status line: the stage is engine vocabulary ("Loading DiT"),
               * so it needs a sentence in front of it saying what's happening */}
-            <p className="min-w-0 truncate text-[10px] text-fog/80">
+            <p className="min-w-0 truncate text-2xs text-fog">
               Generating your track… {g.stage}
             </p>
             <button
               onClick={onCancel}
-              className="shrink-0 rounded-lg border border-cream/10 px-2 py-1 text-[10px] text-cream/80 transition hover:border-gold/40 hover:text-gold"
+              className="shrink-0 rounded-lg border border-cream/10 px-2 py-1 text-2xs text-cream/80 transition hover:border-gold/40 hover:text-gold"
             >
               Cancel
             </button>
@@ -127,7 +127,7 @@ function TrackCard({
             <span className="min-w-0 flex-1 truncate font-serif text-[15px] text-cream">
               {track.title}
             </span>
-            <span className="shrink-0 text-[12px] tabular-nums text-cream/80">
+            <span className="shrink-0 text-sm tabular-nums text-cream/80">
               {track.duration || probed || "—"}
             </span>
             {track.relPath && (
@@ -152,7 +152,7 @@ function TrackCard({
                 setMenu((m) => !m);
                 setArmed(false);
               }}
-              className="shrink-0 text-fog/60 transition hover:text-cream"
+              className="shrink-0 text-fog transition hover:text-cream"
             >
               <MoreVertical size={14} />
             </button>
@@ -182,7 +182,7 @@ function TrackCard({
           </div>
 
           {track.createdAt && (
-            <div className="mt-1 text-[10px] tabular-nums text-fog/70">
+            <div className="mt-1 text-2xs tabular-nums text-fog">
               {fmtStamp(track.createdAt)}
             </div>
           )}
@@ -206,7 +206,7 @@ function TrackCard({
                 onSend();
               }}
               disabled={sending || !track.relPath}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
             >
               <ListPlus size={12} /> {sending ? "Sending…" : "Send to timeline"}
             </button>
@@ -220,7 +220,7 @@ function TrackCard({
                 void downloads.download(track, "wav");
               }}
               disabled={!track.url}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
             >
               <Download size={12} /> Download WAV
             </button>
@@ -231,7 +231,7 @@ function TrackCard({
                 void downloads.download(track, "mp3");
               }}
               disabled={!track.relPath || !!downloads.busy}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
             >
               <Download size={12} /> {downloads.busy === "mp3" ? "Converting…" : "Download MP3"}
             </button>
@@ -243,7 +243,7 @@ function TrackCard({
               }}
               disabled={!track.relPath}
               title="Draw new cover art for this track"
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
             >
               <ImageIcon size={12} /> {track.coverUrl ? "New cover art" : "Make cover art"}
             </button>
@@ -258,7 +258,7 @@ function TrackCard({
                 setArmed(false);
                 onDelete();
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-[#e07a6b] transition hover:bg-cream/5"
             >
               <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
             </button>
@@ -306,7 +306,7 @@ export function TracksPanel({
           <button
             onClick={() => setNewestFirst((n) => !n)}
             title="Toggle sort order"
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-cream/10 px-2.5 text-[11px] text-cream/80 transition hover:border-gold/35"
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-cream/10 px-2.5 text-xs text-cream/80 transition hover:border-gold/35"
           >
             {newestFirst ? "Newest" : "Oldest"}
             <ChevronDown
@@ -322,7 +322,7 @@ export function TracksPanel({
             }
             title={`Filter: ${filter} — click to cycle`}
             className={cx(
-              "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition",
+              "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition",
               filter === "all"
                 ? "border-cream/10 text-fog hover:border-gold/35 hover:text-gold"
                 : "border-gold/40 text-gold",
@@ -335,7 +335,7 @@ export function TracksPanel({
             onClick={() => setStarredOnly((s) => !s)}
             title={starredOnly ? "Show every track" : "Show starred tracks only"}
             className={cx(
-              "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] transition",
+              "flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition",
               starredOnly
                 ? "border-gold/45 text-gold"
                 : "border-cream/10 text-cream/70 hover:border-gold/40 hover:text-gold",
@@ -354,24 +354,24 @@ export function TracksPanel({
             <div key={f.id} className="rounded-xl border border-red-500/30 bg-red-500/6 p-3">
               <div className="flex items-center gap-2">
                 <CircleAlert size={14} className="shrink-0 text-red-400" />
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-cream">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-cream">
                   {f.title}
                 </span>
                 <button
                   onClick={() => lab.retry(f.id)}
-                  className="shrink-0 rounded-lg border border-cream/15 px-2 py-1 text-[10px] text-cream/85 transition hover:border-gold/45 hover:text-gold"
+                  className="shrink-0 rounded-lg border border-cream/15 px-2 py-1 text-2xs text-cream/85 transition hover:border-gold/45 hover:text-gold"
                 >
                   Retry
                 </button>
                 <button
                   onClick={() => setDismissed((prev) => [...prev, f.id])}
                   title="Dismiss"
-                  className="shrink-0 text-fog/60 transition hover:text-cream"
+                  className="shrink-0 text-fog transition hover:text-cream"
                 >
                   <X size={13} />
                 </button>
               </div>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-red-300">{f.error}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-red-300">{f.error}</p>
             </div>
           ))}
 
@@ -380,10 +380,10 @@ export function TracksPanel({
         ))}
 
         {shown.length === 0 && generating.length === 0 && (
-          <p className="px-1 py-8 text-center text-[11px] leading-relaxed text-fog/70">
+          <p className="px-1 py-8 text-center text-xs leading-relaxed text-fog">
             {starredOnly || filter !== "all"
               ? "Nothing matches that filter."
-              : "No tracks yet. Describe one on the left and hit Compose."}
+              : "No tracks yet. Describe one below and hit Compose."}
           </p>
         )}
 
@@ -411,7 +411,7 @@ export function TracksPanel({
         {rest > 0 && (
           <button
             onClick={() => setLimit((l) => l + TRACK_PAGE)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-cream/10 py-2 text-[12px] text-cream/80 transition hover:border-gold/40 hover:text-gold"
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-cream/10 py-2 text-sm text-cream/80 transition hover:border-gold/40 hover:text-gold"
           >
             <ChevronDown size={13} /> Load more tracks · {rest}
           </button>

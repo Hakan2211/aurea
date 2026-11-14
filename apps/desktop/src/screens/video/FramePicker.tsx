@@ -5,8 +5,10 @@ import {
   Grid2x2,
   Grid3x3,
   ImageOff,
+  Loader2,
   Maximize2,
   Search,
+  Upload,
   X,
 } from "lucide-react";
 import { GoldButton, cx } from "@/components/ui";
@@ -42,6 +44,8 @@ export function FramePicker({
   selectedRel,
   onPick,
   onClose,
+  onImport,
+  importing,
 }: {
   frames: PickerFrame[];
   /** one picker, three jobs — the copy has to say which frame it's choosing */
@@ -49,6 +53,11 @@ export function FramePicker({
   selectedRel?: string;
   onPick: (relPath: string) => void;
   onClose: () => void;
+  /** a picture from outside the library — dropped on the picker or chosen
+   * from disk. The caller imports it and picks it; the picker only hands the
+   * files over. Absent = the roll is all there is. */
+  onImport?: (files: FileList | File[]) => void;
+  importing?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [size, setSize] = useState<TileSize>(storedTileSize);
@@ -169,6 +178,14 @@ export function FramePicker({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onDragOver={(e) => {
+          if (onImport) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          if (!onImport) return;
+          e.preventDefault();
+          if (e.dataTransfer.files.length) onImport(e.dataTransfer.files);
+        }}
         className="flex h-[min(92vh,1000px)] w-[min(1520px,96vw)] flex-col overflow-hidden rounded-3xl border border-cream/10 bg-raised shadow-2xl"
       >
         <header className="flex shrink-0 items-center gap-4 border-b hairline px-5 py-3.5">
@@ -178,11 +195,31 @@ export function FramePicker({
             </h3>
             <p className="mt-0.5 text-xs text-fog">
               {q ? `${shown.length} of ${frames.length}` : `${frames.length}`} stills · newest first
-              · generate more in the Image lab
+              {onImport ? " · drop a picture anywhere here to bring it in" : " · generate more in the Image lab"}
             </p>
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            {onImport && (
+              <label
+                className={cx(
+                  "inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 px-3 py-1.5 text-xs text-gold transition hover:bg-gold/20",
+                  importing && "pointer-events-none opacity-60",
+                )}
+              >
+                {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                From your computer
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) onImport(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            )}
             <div className="relative">
               <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fog" />
               <input
@@ -190,7 +227,7 @@ export function FramePicker({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Filter by name…"
-                className="w-52 rounded-full border border-cream/10 bg-surface py-1.5 pl-7 pr-7 text-xs text-cream placeholder:text-fog/70 focus:border-gold/40 focus:outline-none"
+                className="w-52 rounded-full border border-cream/10 bg-surface py-1.5 pl-7 pr-7 text-xs text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
               />
               {query && (
                 <button
@@ -198,7 +235,7 @@ export function FramePicker({
                     setQuery("");
                     searchRef.current?.focus();
                   }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-fog/70 transition hover:text-cream"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-fog transition hover:text-cream"
                 >
                   <X size={11} />
                 </button>
@@ -226,7 +263,7 @@ export function FramePicker({
             <button
               onClick={onClose}
               title="Close (Esc)"
-              className="rounded-full p-1.5 text-fog/70 transition hover:bg-cream/5 hover:text-cream"
+              className="rounded-full p-1.5 text-fog transition hover:bg-cream/5 hover:text-cream"
             >
               <X size={16} />
             </button>
@@ -294,7 +331,9 @@ export function FramePicker({
             {shown.length === 0 && (
               <p className="col-span-full py-16 text-center text-sm text-fog">
                 {frames.length === 0
-                  ? "No stills in the library yet — generate one in the Image lab."
+                  ? onImport
+                    ? "No stills in the library yet — drop a picture here, paste one, or generate one in the Image lab."
+                    : "No stills in the library yet — generate one in the Image lab."
                   : `Nothing matches “${query.trim()}”.`}
               </p>
             )}
@@ -316,7 +355,7 @@ export function FramePicker({
                       className="relative h-full w-full object-contain"
                     />
                   ) : (
-                    <ImageOff size={22} className="relative text-fog/60" />
+                    <ImageOff size={22} className="relative text-fog" />
                   )}
                 </div>
                 <h4 className="mt-4 break-words text-sm leading-snug text-cream/95">
@@ -335,7 +374,7 @@ export function FramePicker({
                 >
                   {cta}
                 </GoldButton>
-                <p className="mt-2 shrink-0 text-center text-2xs leading-relaxed text-fog/70">
+                <p className="mt-2 shrink-0 text-center text-2xs leading-relaxed text-fog">
                   Arrow keys browse · <CornerDownLeft size={9} className="inline" /> chooses · type
                   to filter · Esc closes
                 </p>

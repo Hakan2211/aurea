@@ -17,6 +17,19 @@ export { Segmented } from "./ui/Segmented";
 export { ScrubBar } from "./ui/ScrubBar";
 export { Slider } from "./ui/Slider";
 export { StatusBar } from "./ui/StatusBar";
+export { EmptyState } from "./ui/EmptyState";
+export {
+  AdvancedButton,
+  ChoiceChips,
+  ComposerBar,
+  DrawerField,
+  DrawerSection,
+  GenerateButton,
+  LabDrawer,
+  customsSummary,
+  drawerInput,
+  useLabDrawer,
+} from "./ui/Lab";
 
 import { cx } from "./ui/cx";
 
@@ -48,7 +61,7 @@ export function Chip({
   title?: string;
 }) {
   const cls = cx(
-    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tracking-wide",
+    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tracking-wide",
     chipTones[tone],
     active && "bg-gold/15 text-gold ring-1 ring-gold/50",
     onClick &&
@@ -135,7 +148,7 @@ export function ProgressRing({
         className={cx(
           "absolute font-semibold tabular-nums text-cream/90",
           // the label has to grow with the ring or a big ring reads as empty
-          size >= 40 ? "text-[11px]" : "text-[9px]",
+          size >= 40 ? "text-xs" : "text-2xs",
         )}
       >
         {children ?? `${Math.round(clamped)}%`}
@@ -165,7 +178,7 @@ export function GoldButton({
       title={title}
       className={cx(
         "inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-[#dcc08e] via-gold to-gold-deep px-3 py-1.5",
-        "text-[12px] font-semibold text-ink transition hover:brightness-110 active:brightness-95",
+        "text-sm font-semibold text-ink transition hover:brightness-110 active:brightness-95",
         "shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_2px_10px_rgba(201,169,110,0.18)]",
         "hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_18px_rgba(201,169,110,0.35)]",
         "disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none disabled:hover:brightness-100",
@@ -198,7 +211,7 @@ export function GhostButton({
       title={title}
       className={cx(
         "inline-flex items-center gap-1.5 rounded-lg border border-cream/10 px-3 py-1.5",
-        "text-[12px] font-medium text-cream/80 transition hover:border-gold/40 hover:text-gold",
+        "text-sm font-medium text-cream/80 transition hover:border-gold/40 hover:text-gold",
         "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-cream/10 disabled:hover:text-cream/80",
         className,
       )}

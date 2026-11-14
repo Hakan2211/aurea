@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useDirector } from "@/components/DirectorPanel";
 import { Blend, Mic2, Palette, X } from "lucide-react";
 import { useProjects, useVideofastAccounts, type FormatRuns } from "@/hooks";
 import {
@@ -34,7 +34,7 @@ import {
 type Layer = "mix" | "pack" | "channel" | null;
 
 export function BlendPanel({ runs, onClose }: { runs?: FormatRuns; onClose: () => void }) {
-  const navigate = useNavigate();
+  const director = useDirector();
   const { activeId } = useProjects();
   const { accounts, live } = useVideofastAccounts();
   const utils = trpc.useUtils();
@@ -142,7 +142,7 @@ export function BlendPanel({ runs, onClose }: { runs?: FormatRuns; onClose: () =
         (duration ? `, durationSec ${duration}` : "") +
         ` and narrativeArc "${arc}" once we agree.`,
     ];
-    navigate("/", { state: { seed: { text: lines.join("\n"), sentAt: Date.now() } } });
+    director.openWith(lines.join("\n"));
   };
 
   const createNow = () => {

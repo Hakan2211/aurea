@@ -42,26 +42,26 @@ export function StudioRail({
             )}
           >
             <span className="flex items-baseline gap-1.5">
-              <span className="shrink-0 font-mono text-[10px] font-semibold text-gold/80">
+              <span className="shrink-0 font-mono text-2xs font-semibold text-gold/80">
                 {pad2(i + 1)}
               </span>
-              <span className="line-clamp-2 min-w-0 flex-1 font-mono text-[10px] uppercase leading-snug text-cream/90">
+              <span className="line-clamp-2 min-w-0 flex-1 font-mono text-2xs uppercase leading-snug text-cream/90">
                 {scene.slugline}
               </span>
               {/* shot-count badge — adopted from studio-v2 */}
-              <span className="shrink-0 rounded-full bg-cream/8 px-1.5 text-[9px] tabular-nums text-fog">
+              <span className="shrink-0 rounded-full bg-cream/8 px-1.5 text-2xs tabular-nums text-fog">
                 {scene.shots.length}
               </span>
             </span>
             {scene.summary && (
-              <span className="mt-0.5 line-clamp-2 pl-[22px] text-[10px] leading-snug text-fog">
+              <span className="mt-0.5 line-clamp-2 pl-[22px] text-2xs leading-snug text-fog">
                 {scene.summary}
               </span>
             )}
           </button>
         ))}
         {episode && episode.scenes.length === 0 && (
-          <p className="px-2 text-[10px] leading-relaxed text-fog/80">
+          <p className="px-2 text-2xs leading-relaxed text-fog">
             No scenes yet — outline by hand, or let the Director draft one.
           </p>
         )}
@@ -74,7 +74,7 @@ export function StudioRail({
               slugline: `INT. THE LOFT — SCENE ${episode.scenes.length + 1}`,
             })
           }
-          className="mt-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
+          className="mt-2 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-2xs font-semibold uppercase tracking-[0.12em] text-fog transition hover:text-gold"
         >
           <Plus size={11} /> Add scene
         </button>
@@ -90,15 +90,15 @@ export function StudioRail({
                 {url ? (
                   <img src={url} alt="" className="h-full w-full object-cover object-top" />
                 ) : (
-                  <span className="font-serif text-[11px] text-gold">{c.name.charAt(0)}</span>
+                  <span className="font-serif text-xs text-gold">{c.name.charAt(0)}</span>
                 )}
               </span>
               <span className="min-w-0">
-                <span className="block truncate text-[11px] font-medium text-cream">{c.name}</span>
+                <span className="block truncate text-xs font-medium text-cream">{c.name}</span>
                 {/* one-line description under the name — adopted from studio-v2 */}
                 <span
                   title={c.personality || undefined}
-                  className="block truncate text-[9px] leading-snug text-fog"
+                  className="block truncate text-2xs leading-snug text-fog"
                 >
                   {characterBlurb(c.personality, c.species)}
                 </span>
@@ -107,7 +107,7 @@ export function StudioRail({
           );
         })}
         {bible.bible.characters.length === 0 && (
-          <p className="px-1.5 text-[10px] leading-relaxed text-fog/80">
+          <p className="px-1.5 text-2xs leading-relaxed text-fog">
             Empty — seed the cast on the Bible screen.
           </p>
         )}
@@ -117,12 +117,12 @@ export function StudioRail({
       <div className="mt-2 space-y-0.5 pb-2">
         {bible.bible.locations.map((l) => (
           <div key={l.id} className="rounded-lg px-1.5 py-1">
-            <span className="block truncate text-[11px] font-medium text-cream">{l.name}</span>
-            <span className="block truncate text-[9px] text-fog">{l.description || "—"}</span>
+            <span className="block truncate text-xs font-medium text-cream">{l.name}</span>
+            <span className="block truncate text-2xs text-fog">{l.description || "—"}</span>
           </div>
         ))}
         {bible.bible.locations.length === 0 && (
-          <p className="px-1.5 text-[10px] leading-relaxed text-fog/80">No locations yet.</p>
+          <p className="px-1.5 text-2xs leading-relaxed text-fog">No locations yet.</p>
         )}
       </div>
     </aside>

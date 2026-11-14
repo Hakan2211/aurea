@@ -1,10 +1,18 @@
 /* The global status strip — GPU, VRAM and the queue, one line across the top
  * of every screen. It exists because the Director/Storyboard merge evicted the
  * job rail: the numbers you glance at belong to the machine, not to one route,
- * and the full queue is a click away in Jobs. */
+ * and the full queue is a click away in Jobs.
+ *
+ * It also carries the stale-build warning, because there is nowhere else a
+ * person would think to look. Electron loads dist-electron/studiod.js once at
+ * startup; rebuild it while the app is open and the app keeps serving the old
+ * backend, looking perfectly healthy. That is how an engine fix can be shipped,
+ * verified end to end, and still appear not to work at all — the app was never
+ * running it. This line is the only thing standing between that and an
+ * afternoon of debugging code that isn't executing. */
 
 import { NavLink } from "react-router";
-import { Loader2, Pause } from "lucide-react";
+import { Loader2, Pause, RefreshCw } from "lucide-react";
 import { useJobs, useSystem } from "@/hooks";
 import { cx } from "@/components/ui";
 
@@ -34,6 +42,16 @@ export function GlobalStatus() {
           {vram.used.toFixed(1)} / {vram.total} GB
         </span>
       </span>
+
+      {system.staleBuild && (
+        <span
+          title="Quit and reopen Aurea — the launcher rebuilds anything stale on the way up"
+          className="flex shrink-0 items-center gap-1.5 rounded-md bg-gold/12 px-2 py-0.5 font-medium text-gold"
+        >
+          <RefreshCw size={10} />
+          Update ready — restart Aurea
+        </span>
+      )}
 
       <NavLink
         to="/jobs"

@@ -20,7 +20,7 @@ function StageRow({ stage, index, last }: { stage: VideoStage; index: number; la
       {!last && <span className="absolute bottom-0 left-[10px] top-5 w-px bg-gold/25" />}
       <span
         className={cx(
-          "z-[1] flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[9px] font-semibold tabular-nums",
+          "z-[1] flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-2xs font-semibold tabular-nums",
           done
             ? "border-gold bg-gradient-to-b from-gold to-gold-deep text-ink"
             : running
@@ -37,18 +37,18 @@ function StageRow({ stage, index, last }: { stage: VideoStage; index: number; la
           </span>
           <span
             className={cx(
-              "shrink-0 text-[9px]",
-              done ? "text-fog" : running ? "text-gold" : "text-fog/60",
+              "shrink-0 text-2xs",
+              done ? "text-fog" : running ? "text-gold" : "text-fog",
             )}
           >
             {done ? "Completed" : running ? "In progress" : "Pending"}
           </span>
         </div>
-        {stage.detail && <div className="truncate text-[10px] text-fog">{stage.detail}</div>}
+        {stage.detail && <div className="truncate text-2xs text-fog">{stage.detail}</div>}
         {running && stage.progress != null && (
           <div className="mt-1.5 flex items-center gap-2">
             <Progress value={stage.progress} className="flex-1" />
-            <span className="text-[10px] tabular-nums text-cream/80">{stage.progress}%</span>
+            <span className="text-2xs tabular-nums text-cream/80">{stage.progress}%</span>
           </div>
         )}
       </div>
@@ -75,19 +75,19 @@ function QueueRow({ job, onCancel }: { job: Job; onCancel?: () => void }) {
           "flex h-[52px] w-[52px] shrink-0 items-center justify-center overflow-hidden rounded-lg border",
           running
             ? "border-gold/30 bg-gold/8 text-gold/80"
-            : "border-cream/10 bg-cream/4 text-fog/60",
+            : "border-cream/10 bg-cream/4 text-fog",
         )}
       >
         <Film size={18} />
       </span>
 
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium text-cream">{job.title}</div>
-        <div className="truncate text-[10px] text-fog">
+        <div className="truncate text-sm font-medium text-cream">{job.title}</div>
+        <div className="truncate text-2xs text-fog">
           {job.engine}
           {job.detail ? ` · ${job.detail}` : ""}
         </div>
-        <div className={cx("mt-0.5 text-[10px] font-semibold", running ? "text-gold" : "text-fog/70")}>
+        <div className={cx("mt-0.5 text-2xs font-semibold", running ? "text-gold" : "text-fog")}>
           {running ? (job.stage ?? "Rendering") : "Queued"}
         </div>
       </div>
@@ -95,7 +95,7 @@ function QueueRow({ job, onCancel }: { job: Job; onCancel?: () => void }) {
       <div className="flex shrink-0 flex-col items-center gap-1">
         <ProgressRing value={running ? job.progress : 0} size={42} stroke={3} />
         {running && job.eta && (
-          <span className="text-[9px] tabular-nums text-fog">{job.eta} left</span>
+          <span className="text-2xs tabular-nums text-fog">{job.eta} left</span>
         )}
       </div>
 
@@ -103,7 +103,7 @@ function QueueRow({ job, onCancel }: { job: Job; onCancel?: () => void }) {
         <button
           onClick={onCancel}
           title="Cancel this render"
-          className="absolute right-1 top-1 rounded-full p-1 text-fog/60 opacity-0 transition hover:text-[#e07a6b] group-hover:opacity-100"
+          className="absolute right-1 top-1 rounded-full p-1 text-fog opacity-0 transition hover:text-[#e07a6b] group-hover:opacity-100"
         >
           <X size={11} />
         </button>
@@ -134,12 +134,12 @@ export function JobRail() {
             <h2 className="flex items-center gap-2 text-2xs font-semibold uppercase tracking-[0.16em] text-cream">
               Render queue
               {queue.length > 0 && (
-                <span className="rounded-pill bg-gold/15 px-1.5 py-px text-[9px] font-semibold tabular-nums text-gold">
+                <span className="rounded-pill bg-gold/15 px-1.5 py-px text-2xs font-semibold tabular-nums text-gold">
                   {queue.length}
                 </span>
               )}
             </h2>
-            <ListOrdered size={13} className="text-fog/60" />
+            <ListOrdered size={13} className="text-fog" />
           </div>
           {queue.length > 0 ? (
             <div className="space-y-2">
@@ -152,7 +152,7 @@ export function JobRail() {
               ))}
             </div>
           ) : (
-            <p className="rounded-xl border border-cream/8 bg-surface/30 px-3 py-5 text-center text-2xs text-fog/70">
+            <p className="rounded-xl border border-cream/8 bg-surface/30 px-3 py-5 text-center text-2xs text-fog">
               Nothing rendering — the queue is clear.
             </p>
           )}

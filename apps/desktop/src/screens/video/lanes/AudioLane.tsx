@@ -100,7 +100,7 @@ export function AudioLane({
       </div>
 
       {lane.length === 0 && !picking ? (
-        <p className="mt-1.5 text-2xs leading-relaxed text-fog/70">
+        <p className="mt-1.5 text-2xs leading-relaxed text-fog">
           The shot scores itself. Add voice takes to lock dialogue to exact timecodes — each
           character lip-syncs their own line, in one continuous render.
         </p>
@@ -153,7 +153,7 @@ export function AudioLane({
               <span className="min-w-0 flex-1 truncate text-xs text-cream/85">
                 {nameOf(t.take)}
               </span>
-              <span className="shrink-0 text-[9px] tabular-nums text-fog/60">
+              <span className="shrink-0 text-2xs tabular-nums text-fog">
                 {blocks[i].length !== undefined ? fmtTime(blocks[i].length!) : "…"}
               </span>
               <input
@@ -176,7 +176,7 @@ export function AudioLane({
               />
               <button
                 onClick={() => setLane((l) => l.filter((_, j) => j !== i))}
-                className="shrink-0 text-fog/60 transition hover:text-red-400"
+                className="shrink-0 text-fog transition hover:text-red-400"
               >
                 <X size={12} />
               </button>
@@ -218,7 +218,7 @@ export function AudioLane({
               Timeline instead.
             </p>
           ) : (
-            <p className="text-2xs leading-relaxed text-fog/70">
+            <p className="text-2xs leading-relaxed text-fog">
               {roomTone
                 ? "Locked lines drive lip-sync. Short gaps between them come back near-silent, which is usually what a scene wants."
                 : "Gaps stay silent — nothing is generated between the lines."}
@@ -255,7 +255,7 @@ export function AudioLane({
             >
               <span className="min-w-0 flex-1 truncate">{a.name}</span>
               {durations[a.relPath] ? (
-                <span className="shrink-0 text-[9px] tabular-nums text-fog/60">
+                <span className="shrink-0 text-2xs tabular-nums text-fog">
                   {fmtTime(durations[a.relPath])}
                 </span>
               ) : null}

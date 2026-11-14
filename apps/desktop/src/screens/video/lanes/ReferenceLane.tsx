@@ -1,6 +1,12 @@
 import { useRef, useState } from "react";
 import { AudioLines, Film, ListPlus, Upload, X } from "lucide-react";
-import { minimaxRefLabels, unknownMinimaxRefTags, type DirectorRef, type MinimaxRefs } from "@aurea/shared";
+import {
+  minimaxRefLabels,
+  unknownMinimaxRefTags,
+  withStyleRefs,
+  type DirectorRef,
+  type MinimaxRefs,
+} from "@aurea/shared";
 import { cx } from "@/components/ui";
 import { PickerHeading, selectInput } from "../shared";
 
@@ -57,7 +63,8 @@ export function ReferenceLane({
   const fileInput = useRef<HTMLInputElement>(null);
   const labels = minimaxRefLabels(refs);
   const count = refs.images.length + refs.videos.length + refs.audios.length;
-  const missing = count ? unknownMinimaxRefTags(prompt, refs) : [];
+  // a style still is named by the adapter's own clause, not by the director
+  const missing = count ? unknownMinimaxRefTags(withStyleRefs(prompt, refs), refs) : [];
   const nameOf = (list: { relPath: string; name: string }[], rel: string) =>
     imported[rel]?.name ?? list.find((s) => s.relPath === rel)?.name ?? (rel.split("/").pop() ?? rel);
   const thumb = (rel: string) => imported[rel]?.url ?? frames.find((f) => f.relPath === rel)?.url;
@@ -66,7 +73,7 @@ export function ReferenceLane({
     <button
       onClick={() => typeof children === "string" && onUseTag(children)}
       title="Click to write this tag into the prompt"
-      className="shrink-0 rounded bg-gold/15 px-1.5 py-0.5 font-mono text-[9px] text-gold transition hover:bg-gold/25"
+      className="shrink-0 rounded bg-gold/15 px-1.5 py-0.5 font-mono text-2xs text-gold transition hover:bg-gold/25"
     >
       {children}
     </button>
@@ -103,7 +110,9 @@ export function ReferenceLane({
       <div className="flex items-center justify-end gap-2">
         {count > 0 && (
           <button
-            onClick={() => setRefs(() => ({ ...refs, images: [], videos: [], audios: [] }))}
+            onClick={() =>
+              setRefs(() => ({ ...refs, images: [], imageRoles: [], videos: [], audios: [] }))
+            }
             className="inline-flex items-center gap-1 text-2xs text-fog transition hover:text-red-400"
           >
             <X size={10} /> Clear
@@ -133,7 +142,7 @@ export function ReferenceLane({
           <span className="inline-flex items-center gap-1.5 text-2xs font-medium text-cream">
             <ListPlus size={12} /> Add references
           </span>
-          <span className="text-2xs leading-relaxed text-fog/70">
+          <span className="text-2xs leading-relaxed text-fog">
             Hand H3 up to 9 stills, 3 clips and 3 sound clips to keep — a character, a set, a
             voice, a camera move. Drop an image here to use one straight off your computer.
             Reference a clip and describe the change and it re-performs it: that is the edit path.
@@ -161,8 +170,41 @@ export function ReferenceLane({
               <span className="min-w-0 flex-1 truncate text-xs text-cream/85">
                 {nameOf(frames, rel)}
               </span>
+              {/* what the still is FOR: a subject the shot carries on-model, or
+                  style footage whose palette and grade are borrowed and whose
+                  content never appears (the adapter writes that wording) */}
               <button
-                onClick={() => setRefs((r) => ({ ...r, images: r.images.filter((_, j) => j !== i) }))}
+                onClick={() =>
+                  setRefs((r) => {
+                    const roles = r.images.map((_, j) => r.imageRoles[j] ?? "subject");
+                    roles[i] = roles[i] === "style" ? "subject" : "style";
+                    return { ...r, imageRoles: roles };
+                  })
+                }
+                title={
+                  (refs.imageRoles[i] ?? "subject") === "style"
+                    ? "Style reference — its look is borrowed, nothing in it appears in the shot. Click for subject."
+                    : "Subject — the shot carries it on-model. Click for style reference."
+                }
+                className={cx(
+                  "shrink-0 rounded-md border px-1.5 py-0.5 text-2xs uppercase tracking-wider transition",
+                  (refs.imageRoles[i] ?? "subject") === "style"
+                    ? "border-gold/40 text-gold"
+                    : "border-cream/10 text-fog hover:text-cream",
+                )}
+              >
+                {(refs.imageRoles[i] ?? "subject") === "style" ? "style" : "subject"}
+              </button>
+              <button
+                onClick={() =>
+                  setRefs((r) => ({
+                    ...r,
+                    images: r.images.filter((_, j) => j !== i),
+                    imageRoles: r.images
+                      .map((_, j) => r.imageRoles[j] ?? "subject")
+                      .filter((_, j) => j !== i),
+                  }))
+                }
                 title="Remove"
                 className="shrink-0 text-fog transition hover:text-red-300"
               >
@@ -204,7 +246,7 @@ export function ReferenceLane({
                     title={title}
                     className="flex min-w-0 flex-1 items-center gap-1 rounded-md border border-cream/10 bg-ink px-1.5 py-1"
                   >
-                    <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">
+                    <span className="shrink-0 text-2xs uppercase tracking-wider text-fog">
                       {label}
                     </span>
                     <input
@@ -289,7 +331,7 @@ export function ReferenceLane({
           )}
 
           {refs.videos.length > 0 && (
-            <p className="text-2xs leading-relaxed text-fog/70">
+            <p className="text-2xs leading-relaxed text-fog">
               A reference clip costs a few GB of VRAM more than stills do, so the render clears
               the card first and the weights reload — add a minute or two.
             </p>
@@ -301,7 +343,7 @@ export function ReferenceLane({
               {labels.all.join(", ")}.
             </p>
           ) : (
-            <p className="text-2xs leading-relaxed text-fog/70">
+            <p className="text-2xs leading-relaxed text-fog">
               Name them in the prompt — {labels.all.join(", ")}. An unnamed reference still colours
               the shot, but nothing tells H3 what part it plays. Click a tag to write it in.
             </p>
@@ -313,7 +355,7 @@ export function ReferenceLane({
         <p
           className={cx(
             "mt-1.5 text-2xs leading-relaxed",
-            importError ? "text-red-300" : "text-fog/70",
+            importError ? "text-red-300" : "text-fog",
           )}
         >
           {importError ?? "Copying the image into this project…"}
@@ -376,7 +418,7 @@ export function ReferenceLane({
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
                   >
                     <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                    <span className="shrink-0 text-[9px] uppercase tracking-wider text-fog/60">
+                    <span className="shrink-0 text-2xs uppercase tracking-wider text-fog">
                       cast
                     </span>
                   </button>

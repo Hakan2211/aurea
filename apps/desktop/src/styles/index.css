@@ -22,16 +22,20 @@
 
   /* Type scale — replaces the ad-hoc text-[9..13px] brackets. Six named
    * steps; if a screen needs a seventh, the scale is wrong, not the screen.
-   * Tailwind v4 derives text-2xs/xs/sm/base/lg/display utilities from these. */
-  --text-2xs: 10px;
+   * Tailwind v4 derives text-2xs/xs/sm/base/lg/display utilities from these.
+   * Raised 2026-11-14 (UI-SIMPLIFY Stage 4): nothing renders under 12px.
+   * Secondary text is plain `text-fog` (5.0-5.7:1 on ink/surface/raised);
+   * fog at /60-/80 fell to 2.7-4:1 and was folded into it. fog/50 and below
+   * is for disabled and decorative marks only. */
+  --text-2xs: 12px;
   --text-2xs--line-height: 1.4;
-  --text-xs: 11px;
+  --text-xs: 13px;
   --text-xs--line-height: 1.45;
-  --text-sm: 12.5px;
+  --text-sm: 14px;
   --text-sm--line-height: 1.5;
-  --text-base: 14px;
+  --text-base: 15px;
   --text-base--line-height: 1.55;
-  --text-lg: 17px;
+  --text-lg: 18px;
   --text-lg--line-height: 1.4;
   --text-display: 24px;
   --text-display--line-height: 1.2;
@@ -129,7 +133,7 @@
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--color-gold) 45%, transparent);
     color: var(--color-gold);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     flex: none;
@@ -161,7 +165,9 @@
   }
   .drag-region a,
   .drag-region button,
-  .drag-region input {
+  .drag-region input,
+  .drag-region select,
+  .drag-region label {
     -webkit-app-region: no-drag;
   }
 

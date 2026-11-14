@@ -5,20 +5,33 @@ import {
   ChevronRight,
   Download,
   ListPlus,
+  Dices,
+  Film,
   Maximize2,
   Minimize2,
   MoreVertical,
   Pause,
   Play,
   Scissors,
+  Sparkles,
   Trash2,
   Volume1,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
-import { downloadAsset, useLikes, useRemoveAssets, useSendToTimeline, useVideoLab } from "@/hooks";
-import { cx } from "@/components/ui";
+import type { AbRun, VideoGenerate } from "@aurea/shared";
+import {
+  downloadAsset,
+  useLikes,
+  useRemoveAssets,
+  useJobs,
+  useSendToTimeline,
+  useVideoAb,
+  useVideoLab,
+} from "@/hooks";
+import type { Job, VideoStage } from "@/data/sample";
+import { ProgressRing, cx } from "@/components/ui";
 import { useVideoPlayer, type VideoPlayer } from "@/components/useVideoPlayer";
 import { TakeCard } from "./TakeCard";
 import { MIN_RETAKE_SEC, fmtTime, type RetakeDraft } from "./shared";
@@ -167,6 +180,160 @@ function VolumeControl({ player }: { player: VideoPlayer }) {
 /** The takes rail. Cards keep a real size instead of dividing whatever width is
  * left between them, so the strip scrolls — and the arrows only appear when
  * there is somewhere to scroll to. */
+/* The seed-spray contact sheet (VIDEO-LAB-FREEFORM-PLAN.md §2.5). A spray
+ * is an A/B run whose variants differ only by seed, rendered at the sketch
+ * tier; the sheet shows the four sketches side by side with their seeds, and
+ * a click re-renders the panel's real payload (the run's base — full length,
+ * full canvas, the chosen tier) at exactly that seed. The sketches are never
+ * the deliverable, so they live here rather than among the takes. */
+function SprayContactSheet({
+  runs,
+  takeUrl,
+  onPromote,
+  onRemove,
+}: {
+  runs: AbRun[];
+  takeUrl: (rel: string | undefined) => string | undefined;
+  onPromote: (run: AbRun, seed: number) => void;
+  onRemove: (id: string) => void;
+}) {
+  if (!runs.length) return null;
+  return (
+    <div className="pt-4">
+      {runs.map((run) => {
+        const done = run.variants.filter((v) => v.status === "completed").length;
+        return (
+          <div key={run.id} className="mb-3">
+            <div className="flex items-center justify-between pb-2">
+              <h3 className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.16em] text-cream">
+                <Dices size={11} className="text-gold" /> Seeds{" "}
+                <span className="tabular-nums text-fog">
+                  ({done}/{run.variants.length} sketched)
+                </span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="truncate text-2xs text-fog">{run.title.replace(/^Seeds — /, "")}</span>
+                <button
+                  onClick={() => onRemove(run.id)}
+                  title="Dismiss this spray (the sketches stay in the library)"
+                  className="text-fog transition hover:text-red-300"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              {run.variants.map((v) => {
+                const url = takeUrl(v.output);
+                return (
+                  <div
+                    key={v.jobId}
+                    className="overflow-hidden rounded-xl border border-cream/10 bg-ink/60"
+                  >
+                    <div className="aspect-video bg-black/60">
+                      {url ? (
+                        <video
+                          src={url}
+                          muted
+                          loop
+                          autoPlay
+                          playsInline
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-2xs text-fog">
+                          {v.status === "failed" ? "failed" : v.status === "running" ? "sketching…" : "queued"}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2 py-1.5">
+                      <span className="min-w-0 flex-1 truncate text-2xs tabular-nums text-fog">
+                        seed {v.seed ?? run.seed}
+                      </span>
+                      {v.status === "completed" && v.seed !== undefined && (
+                        <button
+                          onClick={() => onPromote(run, v.seed as number)}
+                          title="Render the full take at exactly this seed"
+                          className="shrink-0 text-2xs font-medium text-gold hover:underline"
+                        >
+                          Render full
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A render in flight, as a card at the head of the takes strip — where its
+ * take will land. Replaces the old right-hand job rail (UI simplify plan,
+ * Stage 2): the running card names its stage, how far in, and what's left;
+ * a queued one waits its turn. Same 184px footprint as a take. */
+function RenderCard({
+  job,
+  stages,
+  onCancel,
+}: {
+  job: Job;
+  /** the stage breakdown, for the one render this lab is following */
+  stages?: VideoStage[];
+  onCancel?: () => void;
+}) {
+  const running = job.status === "running";
+  const at = stages?.findIndex((st) => st.status === "running") ?? -1;
+  return (
+    <div
+      title={job.detail ? `${job.title} · ${job.engine} · ${job.detail}` : `${job.title} · ${job.engine}`}
+      className={cx(
+        "group relative w-[184px] shrink-0 overflow-hidden rounded-xl border",
+        running
+          ? "border-gold/40 shadow-[0_0_18px_rgba(201,169,110,0.12)]"
+          : "border-dashed border-cream/15",
+      )}
+    >
+      <div className="relative flex aspect-video w-full flex-col items-center justify-center gap-1 bg-[#111113]">
+        {running ? (
+          <>
+            <ProgressRing value={job.progress} size={44} stroke={3} />
+            <span className="max-w-[90%] truncate text-2xs text-gold">
+              {at >= 0 && stages
+                ? `${at + 1}/${stages.length} · ${stages[at].label}`
+                : (job.stage ?? "Rendering")}
+            </span>
+            {job.eta && <span className="text-2xs tabular-nums text-fog">{job.eta} left</span>}
+          </>
+        ) : (
+          <>
+            <Film size={18} className="text-fog" />
+            <span className="text-2xs text-fog">Queued</span>
+          </>
+        )}
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            title="Cancel this render"
+            className="absolute right-1.5 top-1.5 rounded-full p-1 text-fog opacity-0 transition hover:text-[#e07a6b] group-hover:opacity-100"
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 border-t border-cream/8 bg-[#17171a] px-2 py-1.5">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-cream/80">{job.title}</span>
+        <span className="shrink-0 text-2xs tabular-nums text-fog">
+          {running ? `${Math.round(job.progress)}%` : job.engine}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function TakeStrip({ children }: { children: React.ReactNode }) {
   const railRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
@@ -235,6 +402,14 @@ export function PreviewPanel({
   setRetake: (r: RetakeDraft | null) => void;
 }) {
   const lab = useVideoLab();
+  const ab = useVideoAb();
+  const { jobs, live, cancel } = useJobs();
+  /** every video job on the engine, not just the one this lab last started */
+  const inFlight = jobs.filter(
+    (j) => j.kind === "video" && (j.status === "running" || j.status === "queued"),
+  );
+  /** the newest sprays — a sheet is for picking now, not for the archive */
+  const sprays = ab.runs.filter((r) => r.seedPolicy === "spray").slice(0, 2);
   const navigate = useNavigate();
   const { isLiked, toggleLike } = useLikes();
   const timeline = useSendToTimeline();
@@ -400,6 +575,40 @@ export function PreviewPanel({
                 >
                   <Scissors size={12} /> Fix this bit
                 </button>
+                {/* the two finishing passes (Video Lab quality plan Q1 + Q2):
+                    a full render over a draft's kept latents, and the ×2
+                    Pixel Spatial Upscaler on any take. Both queue a job that
+                    lands as a new take in this lab. */}
+                <button
+                  onClick={() => {
+                    setMenu(false);
+                    if (take?.relPath) void lab.finish(take.relPath, "refine").catch(() => {});
+                  }}
+                  disabled={!take?.relPath || !take?.draft || lab.finishing}
+                  title={
+                    take?.draft
+                      ? "Full render over this draft's kept latents — the same blocking at full size, guaranteed"
+                      : "Only an LTX 2.5 draft rendered since the finish pass existed keeps its latents"
+                  }
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+                >
+                  <Sparkles size={12} /> Full render from draft
+                </button>
+                <button
+                  onClick={() => {
+                    setMenu(false);
+                    if (take?.relPath) void lab.finish(take.relPath, "upscale").catch(() => {});
+                  }}
+                  disabled={!take?.relPath || lab.finishing || lab.capabilities?.finishUpscale === false}
+                  title={
+                    lab.capabilities?.finishUpscale === false
+                      ? "Needs the LTX 2.5 Pixel Spatial Upscaler IC-LoRA — Settings → Models"
+                      : "×2 finish: the Pixel Spatial Upscaler IC-LoRA re-renders this take at twice the size with reinvented detail (LTX 2.5)"
+                  }
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
+                >
+                  <Sparkles size={12} /> Finish ×2 (upscaler)
+                </button>
                 <button
                   onClick={() => {
                     setMenu(false);
@@ -527,24 +736,40 @@ export function PreviewPanel({
           >
             Review
           </button>
-          <span className="min-w-0 flex-1 truncate text-right text-2xs text-fog/70">
-            {marking.prompt.trim() ? "Describe it and re-render on the left." : "Describe the fix on the left."}
+          <span className="min-w-0 flex-1 truncate text-right text-2xs text-fog">
+            {marking.prompt.trim() ? "Re-render it from the composer below." : "Describe the fix in the composer below."}
           </span>
           <button
             onClick={() => setRetake(null)}
             title="Cancel the retake"
-            className="shrink-0 text-fog/60 transition hover:text-red-400"
+            className="shrink-0 text-fog transition hover:text-red-400"
           >
             <X size={12} />
           </button>
         </div>
       )}
 
+      <SprayContactSheet
+        runs={sprays}
+        takeUrl={ab.takeUrl}
+        onRemove={ab.remove}
+        onPromote={(run, seed) =>
+          // the run's base is the panel payload as it was: full length, full
+          // canvas, the chosen tier — only the seed is pinned
+          lab.generate({ ...(run.base as Omit<VideoGenerate, "project">), seed })
+        }
+      />
+
       {/* takes */}
       <div className="pt-4">
         <div className="flex items-center justify-between pb-2.5">
           <h3 className="text-2xs font-semibold uppercase tracking-[0.16em] text-cream">
             Takes <span className="tabular-nums text-fog">({lab.takes.length})</span>
+            {inFlight.length > 0 && (
+              <span className="ml-2 font-normal normal-case tracking-normal text-gold">
+                · {inFlight.length} rendering
+              </span>
+            )}
           </h3>
           <button
             onClick={() => navigate("/assets")}
@@ -554,6 +779,19 @@ export function PreviewPanel({
           </button>
         </div>
         <TakeStrip>
+          {inFlight.map((j) => (
+            <RenderCard
+              key={j.id}
+              job={j}
+              // the lab follows one render's stages — the first running one
+              stages={
+                j.id === inFlight.find((x) => x.status === "running")?.id && lab.job.stages.length > 0
+                  ? lab.job.stages
+                  : undefined
+              }
+              onCancel={live ? () => cancel(j.id) : undefined}
+            />
+          ))}
           {lab.takes.map((t, i) => (
             <TakeCard
               key={t.id}

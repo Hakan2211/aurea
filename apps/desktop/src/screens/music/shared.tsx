@@ -103,19 +103,19 @@ export function TrackTags({ track, max = 3 }: { track: MusicTrack; max?: number 
   const extra = (track.styles?.length ?? 0) - styles.length;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1">
-      <span className="inline-flex items-center gap-1 text-[10px] text-fog">
+      <span className="inline-flex items-center gap-1 text-2xs text-fog">
         {track.arrangement === "vocals" ? <Mic size={9} /> : <Music2 size={9} />}
         {track.arrangement}
       </span>
       {styles.map((s) => (
         <span
           key={s}
-          className="truncate rounded-full bg-gold/10 px-1.5 py-px text-[10px] text-gold/85"
+          className="truncate rounded-full bg-gold/10 px-1.5 py-px text-2xs text-gold/85"
         >
           {s}
         </span>
       ))}
-      {extra > 0 && <span className="text-[10px] text-fog/70">+{extra}</span>}
+      {extra > 0 && <span className="text-2xs text-fog">+{extra}</span>}
     </div>
   );
 }

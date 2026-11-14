@@ -348,8 +348,8 @@ export function Clip({
 
       {/* label plate — a scrim over picture, a plain line over waveforms */}
       {kind === "voice" && (line || speaker) ? (
-        <span className="pointer-events-none absolute inset-x-2 top-1 flex items-baseline gap-1.5 overflow-hidden whitespace-nowrap text-[9.5px] leading-none">
-          <span style={{ color: accent }} className="text-[7px]">
+        <span className="pointer-events-none absolute inset-x-2 top-1 flex items-baseline gap-1.5 overflow-hidden whitespace-nowrap text-2xs leading-none">
+          <span style={{ color: accent }} className="text-2xs">
             ◆
           </span>
           {speaker && (
@@ -361,7 +361,7 @@ export function Clip({
         </span>
       ) : kind === "video" ? (
         !tight && (
-          <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-ink/90 via-ink/55 to-transparent px-2 pb-1 pt-4 text-[9.5px] font-medium leading-none text-cream/90">
+          <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-ink/90 via-ink/55 to-transparent px-2 pb-1 pt-4 text-2xs font-medium leading-none text-cream/90">
             <span className="truncate">{label}</span>
             <span className="ml-auto shrink-0 tabular-nums text-cream/45">
               {fmtDur(clip.duration)}
@@ -369,13 +369,13 @@ export function Clip({
           </span>
         )
       ) : (
-        <span className="pointer-events-none absolute inset-x-2 top-1 truncate text-[9.5px] font-medium leading-none text-cream/70">
+        <span className="pointer-events-none absolute inset-x-2 top-1 truncate text-2xs font-medium leading-none text-cream/70">
           {label}
         </span>
       )}
 
       {missing && (
-        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-ember/15 text-[9px] font-semibold uppercase tracking-wider text-[#e07a6b]">
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-ember/15 text-2xs font-semibold uppercase tracking-wider text-[#e07a6b]">
           missing
         </span>
       )}

@@ -74,7 +74,7 @@ export function Inspector({
                   )}
                 </div>
                 {exportState.error && (
-                  <p className="mt-2 text-[10.5px] leading-relaxed text-[#e07a6b]">
+                  <p className="mt-2 text-2xs leading-relaxed text-[#e07a6b]">
                     {exportState.error}
                   </p>
                 )}
@@ -82,7 +82,7 @@ export function Inspector({
             </>
           )}
 
-          <p className="mt-6 text-[10.5px] leading-relaxed text-fog/70">
+          <p className="mt-6 text-2xs leading-relaxed text-fog">
             Select a clip to see the take behind it — its slice of the source, the engine that
             rendered it, and the line it speaks.
           </p>
@@ -116,7 +116,7 @@ function ClipInspector({
         right={
           <span
             style={{ color: kind.accent, borderColor: `${kind.accent}55`, background: `${kind.accent}12` }}
-            className="rounded border px-1.5 py-px text-[9px] font-bold uppercase tracking-wider"
+            className="rounded border px-1.5 py-px text-2xs font-bold uppercase tracking-wider"
           >
             {kind.label}
           </span>
@@ -138,7 +138,7 @@ function ClipInspector({
         ) : (
           <div
             style={{ background: `linear-gradient(135deg, ${kind.accent}22, transparent)` }}
-            className="flex aspect-video w-full items-center justify-center text-[10px] uppercase tracking-widest text-fog"
+            className="flex aspect-video w-full items-center justify-center text-2xs uppercase tracking-widest text-fog"
           >
             {asset ? kind.label : "missing file"}
           </div>
@@ -195,7 +195,7 @@ function ClipInspector({
       {asset?.meta?.text && (
         <>
           <SectionLabel className="mt-6">Line</SectionLabel>
-          <p className="mt-2 rounded-lg border border-cream/6 bg-surface/60 p-3 text-[11.5px] italic leading-relaxed text-cream/85">
+          <p className="mt-2 rounded-lg border border-cream/6 bg-surface/60 p-3 text-xs italic leading-relaxed text-cream/85">
             “{asset.meta.text}”
           </p>
         </>
@@ -203,7 +203,7 @@ function ClipInspector({
       {!asset?.meta?.text && asset?.meta?.prompt && (
         <>
           <SectionLabel className="mt-6">Prompt</SectionLabel>
-          <p className="mt-2 max-h-32 overflow-y-auto rounded-lg border border-cream/6 bg-surface/60 p-3 text-[11px] leading-relaxed text-fog">
+          <p className="mt-2 max-h-32 overflow-y-auto rounded-lg border border-cream/6 bg-surface/60 p-3 text-xs leading-relaxed text-fog">
             {asset.meta.prompt}
           </p>
         </>
@@ -211,7 +211,7 @@ function ClipInspector({
 
       <button
         onClick={onDelete}
-        className="mt-6 flex w-full items-center justify-center gap-1.5 rounded-lg border border-cream/10 py-2 text-[11.5px] font-medium text-fog transition hover:border-ember/50 hover:text-[#e07a6b]"
+        className="mt-6 flex w-full items-center justify-center gap-1.5 rounded-lg border border-cream/10 py-2 text-xs font-medium text-fog transition hover:border-ember/50 hover:text-[#e07a6b]"
       >
         <Trash2 size={12} /> Remove clip
       </button>
@@ -222,8 +222,8 @@ function ClipInspector({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between bg-surface/50 px-3 py-1.5">
-      <span className="text-[11px] text-fog">{label}</span>
-      <span className="text-[11.5px] tabular-nums text-cream/90">{value}</span>
+      <span className="text-xs text-fog">{label}</span>
+      <span className="text-xs tabular-nums text-cream/90">{value}</span>
     </div>
   );
 }
@@ -242,9 +242,9 @@ function NumRow({
 }) {
   return (
     <div className="flex items-center justify-between bg-surface/50 px-3 py-1.5">
-      <span className="text-[11px] text-fog">{label}</span>
+      <span className="text-xs text-fog">{label}</span>
       <span className="flex items-center gap-2">
-        <span className="text-[10px] tabular-nums text-fog/60">{hint}</span>
+        <span className="text-2xs tabular-nums text-fog">{hint}</span>
         <input
           type="number"
           step={0.1}
@@ -252,7 +252,7 @@ function NumRow({
           value={Number(value.toFixed(2))}
           onChange={(e) => Number.isFinite(Number(e.target.value)) && onChange(Number(e.target.value))}
           className={cx(
-            "w-16 rounded border border-cream/10 bg-ink px-1.5 py-0.5 text-right text-[11.5px] tabular-nums text-cream/90",
+            "w-16 rounded border border-cream/10 bg-ink px-1.5 py-0.5 text-right text-xs tabular-nums text-cream/90",
             "transition focus:border-gold/45 focus:outline-none focus:ring-2 focus:ring-gold/15",
           )}
         />

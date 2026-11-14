@@ -22,7 +22,7 @@ export type JobStatus = "running" | "queued" | "completed" | "failed";
 export interface Job {
   id: string;
   title: string;
-  kind: "video" | "image" | "tts" | "music";
+  kind: "video" | "image" | "tts" | "music" | "model3d";
   engine: string;
   status: JobStatus;
   progress: number;
@@ -179,6 +179,7 @@ export const system = {
   storage: "2.1 TB free",
   tempC: 62,
   queuePaused: false,
+  staleBuild: false,
 };
 
 export const preflight = {
@@ -359,7 +360,6 @@ export interface MusicTrack {
 }
 
 export const musicLab = {
-  engine: { label: "ACE-Step · local", note: "songs + stems · $0.00" },
   description:
     "A punchy sitcom sting — retro funk brass over tight drums, walking bassline, warm analog keys, ends on a comedic button.",
   descriptionMax: 500,
@@ -744,6 +744,11 @@ export interface VideoTake {
   /** engine that rendered it, off the asset's sidecar — the preview slate
    * names it, and only when the file actually recorded one */
   engine?: string;
+  /** an LTX 2.5 draft that kept its base-pass latents — finishable into a
+   * full render with the same blocking (finish_take refine) */
+  draft?: boolean;
+  /** which finishing pass made it, when one did */
+  finish?: "refine" | "upscale";
 }
 
 export interface VideoStage {

@@ -13,11 +13,23 @@ export function useEnhanceControl({
   prompt,
   projectId,
   onAccept,
+  intent = "image",
+  look,
+  mode,
+  title,
 }: {
   prompt: string;
   projectId: string | undefined;
   /** replace the prompt (and the caller's chips) with the enhanced text */
   onAccept: (enhanced: string) => void;
+  /** "video" carries the freeform composer's rules in its system prompt */
+  intent?: "image" | "video";
+  /** video: the active look's prose — the steer when there is no bible */
+  look?: string;
+  /** video: i2v keeps the expansion motion-only */
+  mode?: "i2v" | "t2v";
+  /** the button's hover text; the image default speaks of art direction */
+  title?: string;
 }) {
   const { enhance, running, reset } = usePromptEnhance();
   /** the before/after pair the card shows — held locally so the card survives
@@ -30,7 +42,7 @@ export function useEnhanceControl({
     if (!before || running) return;
     setError(null);
     setResult(null);
-    enhance(before, projectId, "image")
+    enhance({ prompt: before, projectId, intent, look: look?.trim() || undefined, mode })
       .then((r) => setResult({ before, after: r.enhanced.trim() }))
       // the throw is usually "local Claude isn't logged in" — actionable, so inline
       .catch((err) => setError(String((err as Error).message ?? err)));
@@ -46,7 +58,7 @@ export function useEnhanceControl({
     <button
       onClick={run}
       disabled={running || !prompt.trim()}
-      title="Expand this prompt with the project's art direction (local Claude)"
+      title={title ?? "Expand this prompt with the project's art direction (local Claude)"}
       className={cx(
         "flex items-center gap-1 rounded-pill border border-gold/40 bg-gold/10 px-2 py-0.5 text-2xs font-semibold text-gold",
         "transition duration-[var(--dur)] hover:bg-gold/20 disabled:opacity-40 disabled:hover:bg-gold/10",
@@ -61,17 +73,17 @@ export function useEnhanceControl({
     error !== null ? (
       <div className="anim-fade mt-1.5 flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/8 px-2.5 py-1.5">
         <p className="min-w-0 flex-1 text-2xs leading-relaxed text-red-300">{error}</p>
-        <button onClick={dismiss} title="Dismiss" className="text-fog/60 transition hover:text-cream">
+        <button onClick={dismiss} title="Dismiss" className="text-fog transition hover:text-cream">
           <X size={11} />
         </button>
       </div>
     ) : result !== null ? (
       <div className="anim-scale-in mt-1.5 rounded-xl border border-gold/30 bg-surface p-2.5">
         {/* the old prompt stays visible but quiet — the diff is the point */}
-        <p className="text-2xs leading-relaxed text-fog/60 line-through decoration-fog/40">
+        <p className="text-2xs leading-relaxed text-fog line-through decoration-fog/40">
           {result.before}
         </p>
-        <p className="mt-1.5 rounded-lg bg-gold/8 px-2 py-1.5 text-[11px] leading-relaxed text-cream">
+        <p className="mt-1.5 rounded-lg bg-gold/8 px-2 py-1.5 text-xs leading-relaxed text-cream">
           {result.after}
         </p>
         <div className="mt-2 flex gap-1.5">
@@ -80,13 +92,13 @@ export function useEnhanceControl({
               onAccept(result.after);
               dismiss();
             }}
-            className="rounded-lg bg-gold/15 px-2.5 py-1 text-[11px] font-semibold text-gold transition hover:bg-gold/25"
+            className="rounded-lg bg-gold/15 px-2.5 py-1 text-xs font-semibold text-gold transition hover:bg-gold/25"
           >
             Accept
           </button>
           <button
             onClick={dismiss}
-            className="rounded-lg border border-cream/15 px-2.5 py-1 text-[11px] text-cream/80 transition hover:border-cream/30"
+            className="rounded-lg border border-cream/15 px-2.5 py-1 text-xs text-cream/80 transition hover:border-cream/30"
           >
             Undo
           </button>

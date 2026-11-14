@@ -70,7 +70,8 @@ function createWindow() {
     titleBarOverlay: {
       color: INK,
       symbolColor: CREAM,
-      height: 36,
+      // matches the renderer's single top bar (components/TopBar.tsx, h-12)
+      height: 48,
     },
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

@@ -322,7 +322,7 @@ export function RecentRuns({
 }) {
   return (
     <div>
-      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-cream/55">
+      <p className="text-2xs font-semibold uppercase tracking-[0.14em] text-cream/55">
         Recent runs
       </p>
       <div className="mt-1.5 flex gap-1.5">

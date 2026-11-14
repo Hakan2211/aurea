@@ -31,7 +31,7 @@ export function SceneTabs({
           onClick={() => select(s.id)}
           title={s.slugline}
           className={cx(
-            "shrink-0 rounded-t-lg border-x border-t px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] transition",
+            "shrink-0 rounded-t-lg border-x border-t px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition",
             i === sceneIdx
               ? "border-cream/10 bg-surface text-gold"
               : "border-transparent text-fog hover:text-cream",
@@ -81,7 +81,7 @@ export function SceneBoard({
         <input
           value={draft.slugline}
           onChange={(e) => patch({ slugline: e.target.value })}
-          className="w-[340px] rounded-lg border border-transparent bg-transparent px-2 py-1 font-mono text-[12px] uppercase tracking-wide text-cream/90 outline-none transition focus:border-cream/10 focus:bg-ink/60"
+          className="w-[340px] rounded-lg border border-transparent bg-transparent px-2 py-1 font-mono text-sm uppercase tracking-wide text-cream/90 outline-none transition focus:border-cream/10 focus:bg-ink/60"
         />
         <select
           value={draft.location ?? ""}
@@ -117,7 +117,7 @@ export function SceneBoard({
               <div className="flex items-center gap-2 px-3 py-2">
                 <span className={cx("h-1.5 w-1.5 rounded-full", STATUS_DOT[status])} />
                 <span className={sectionLabel}>{status}</span>
-                <span className="ml-auto rounded-full bg-cream/8 px-1.5 text-[10px] text-fog">
+                <span className="ml-auto rounded-full bg-cream/8 px-1.5 text-2xs text-fog">
                   {shots.length}
                 </span>
               </div>
@@ -139,7 +139,7 @@ export function SceneBoard({
                 {status === "draft" && (
                   <button
                     onClick={() => prod.addShot({ sceneId: scene.id })}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream/15 py-2 text-[11px] text-fog transition hover:border-gold/40 hover:text-gold"
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-cream/15 py-2 text-xs text-fog transition hover:border-gold/40 hover:text-gold"
                   >
                     <Plus size={12} /> Add shot
                   </button>
@@ -169,6 +169,8 @@ function ShotCard({
   onClick: () => void;
 }) {
   const takes = shot.videoTakes.length;
+  const picked = shot.videoTakes.find((t) => t.id === shot.selectedTake) ?? shot.videoTakes[takes - 1];
+  const broken = picked?.verify?.status === "broken" ? picked.verify.reasons.join("; ") : null;
   return (
     <button
       onClick={onClick}
@@ -182,16 +184,25 @@ function ShotCard({
       </div>
       <div className="space-y-1 bg-surface px-2 py-1.5">
         <div className="flex items-center justify-between gap-1">
-          <span className="font-mono text-[10px] text-cream/90">{code}</span>
-          <Chip tone={STATUS_TONE[shot.status]} className="!px-1.5 !text-[9px]">
-            {shot.status}
-          </Chip>
+          <span className="font-mono text-2xs text-cream/90">{code}</span>
+          <span className="flex items-center gap-1">
+            {broken && (
+              <span title={`Broken take: ${broken}`}>
+                <Chip tone="ember" className="!px-1.5 !text-2xs">
+                  broken
+                </Chip>
+              </span>
+            )}
+            <Chip tone={STATUS_TONE[shot.status]} className="!px-1.5 !text-2xs">
+              {shot.status}
+            </Chip>
+          </span>
         </div>
         <div className="flex items-center justify-between gap-1">
-          <span className="truncate text-[10px] text-fog">
+          <span className="truncate text-2xs text-fog">
             {shot.title || charNames.slice(0, 2).join(", ") || "Untitled"}
           </span>
-          <span className="shrink-0 text-[9px] text-fog/70">
+          <span className="shrink-0 text-2xs text-fog">
             {takes} take{takes === 1 ? "" : "s"}
           </span>
         </div>
@@ -231,7 +242,7 @@ export function BoardPeek({
           {STATUS.map((s) => {
             const n = coded.filter(({ shot }) => shot.status === s).length;
             return (
-              <span key={s} title={s} className="flex items-center gap-1 text-[10px] tabular-nums">
+              <span key={s} title={s} className="flex items-center gap-1 text-2xs tabular-nums">
                 <span className={cx("h-1.5 w-1.5 rounded-full", STATUS_DOT[s])} />
                 {n}
               </span>
@@ -251,10 +262,10 @@ export function BoardPeek({
               <div key={status} className="flex w-[168px] shrink-0 flex-col gap-1">
                 <div className="flex items-center gap-1.5">
                   <span className={cx("h-1.5 w-1.5 rounded-full", STATUS_DOT[status])} />
-                  <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-fog">
+                  <span className="text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
                     {status}
                   </span>
-                  <span className="ml-auto text-[9px] tabular-nums text-fog/70">
+                  <span className="ml-auto text-2xs tabular-nums text-fog">
                     {bucket.length}
                   </span>
                 </div>
@@ -271,14 +282,14 @@ export function BoardPeek({
                           : "border-cream/10 hover:border-cream/25",
                       )}
                     >
-                      <span className="shrink-0 font-mono text-[9px] text-cream/90">{code}</span>
-                      <span className="truncate text-[9px] text-fog">
+                      <span className="shrink-0 font-mono text-2xs text-cream/90">{code}</span>
+                      <span className="truncate text-2xs text-fog">
                         {shot.title || "Untitled"}
                       </span>
                     </button>
                   ))}
                   {bucket.length === 0 && (
-                    <p className="px-1 text-[9px] text-fog/50">—</p>
+                    <p className="px-1 text-2xs text-fog/50">—</p>
                   )}
                 </div>
               </div>

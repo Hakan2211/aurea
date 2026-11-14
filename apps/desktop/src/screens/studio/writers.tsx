@@ -5,7 +5,7 @@
  * calls whose results stream back into both views live. */
 
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useDirector } from "@/components/DirectorPanel";
 import { Clapperboard, Square } from "lucide-react";
 import type { Episode } from "@aurea/shared";
 import { GhostButton } from "@/components/ui";
@@ -48,7 +48,7 @@ export function WritersPanel({
   production: { logline: string };
 }) {
   const chat = useChat();
-  const navigate = useNavigate();
+  const director = useDirector();
   const [premise, setPremise] = useState("");
   const effective = premise.trim() || episode?.logline || production.logline;
 
@@ -64,7 +64,7 @@ export function WritersPanel({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b hairline px-4 py-3">
         <span className={sectionLabel}>Writers room</span>
-        <p className="mt-1 text-[11px] leading-relaxed text-fog">
+        <p className="mt-1 text-xs leading-relaxed text-fog">
           Hand the Director a premise. The script fills in here as it writes.
         </p>
       </div>
@@ -78,26 +78,26 @@ export function WritersPanel({
               ? `Premise — defaults to the episode logline: “${episode.logline}”`
               : "Premise — what is this episode about?"
           }
-          className="min-h-[76px] w-full resize-y rounded-lg border border-cream/10 bg-ink/60 px-2.5 py-2 text-[12px] leading-relaxed text-cream outline-none placeholder:text-fog/60 focus:border-gold/40"
+          className="min-h-[76px] w-full resize-y rounded-lg border border-cream/10 bg-ink/60 px-2.5 py-2 text-sm leading-relaxed text-cream outline-none placeholder:text-fog focus:border-gold/40"
         />
         <div className="flex gap-2">
           <button
             onClick={() => dispatch(outlinePrompt)}
             disabled={!episode || chat.busy || !chat.live}
-            className="flex-1 rounded-lg border border-gold/40 px-3 py-1.5 text-[12px] font-semibold text-gold transition enabled:hover:bg-gold/10 disabled:opacity-40"
+            className="flex-1 rounded-lg border border-gold/40 px-3 py-1.5 text-sm font-semibold text-gold transition enabled:hover:bg-gold/10 disabled:opacity-40"
           >
             Draft outline
           </button>
           <button
             onClick={() => dispatch(scriptPrompt)}
             disabled={!episode || chat.busy || !chat.live}
-            className="flex-1 rounded-lg bg-gradient-to-b from-gold to-gold-deep px-3 py-1.5 text-[12px] font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-40"
+            className="flex-1 rounded-lg bg-gradient-to-b from-gold to-gold-deep px-3 py-1.5 text-sm font-semibold text-ink transition enabled:hover:brightness-110 disabled:opacity-40"
           >
             Write script
           </button>
         </div>
         {!chat.live && (
-          <p className="text-[10px] leading-relaxed text-fog/80">
+          <p className="text-2xs leading-relaxed text-fog">
             The Director needs a live studio core.
           </p>
         )}
@@ -107,7 +107,7 @@ export function WritersPanel({
         {chat.busy ? (
           <div className="flex items-center gap-2">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold" />
-            <span className="text-[11px] font-medium text-gold">The Director is in the room…</span>
+            <span className="text-xs font-medium text-gold">The Director is in the room…</span>
             <button
               title="Stop"
               onClick={chat.stop}
@@ -120,14 +120,14 @@ export function WritersPanel({
           <span className={sectionLabel}>Latest from the Director</span>
         )}
         {latest?.text && (
-          <p className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-cream/70">
+          <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-cream/70">
             {latest.text}
           </p>
         )}
       </div>
 
       <div className="border-t hairline px-4 py-2.5">
-        <GhostButton className="w-full justify-center" onClick={() => navigate("/")}>
+        <GhostButton className="w-full justify-center" onClick={() => director.setOpen(true)}>
           <Clapperboard size={12} /> Open Director chat
         </GhostButton>
       </div>

@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Clapperboard, Film, Plus } from "lucide-react";
 import { GhostButton, GoldButton } from "@/components/ui";
+import { CoreGate } from "@/components/CoreGate";
 import { useBible, useProduction } from "@/hooks";
 import { StudioHeader, type StudioView } from "./studio/header";
 import { StudioRail } from "./studio/rail";
@@ -98,9 +99,11 @@ export function StudioScreen() {
 
   if (!prod.production) {
     return (
-      <div className="flex h-full items-center justify-center text-[12px] text-fog">
-        Waiting for the studio core…
-      </div>
+      <CoreGate
+        screen="Script"
+        purpose="Script is where an episode gets written: the screenplay, scene by scene, with its shot list beside it."
+        icon={Clapperboard}
+      />
     );
   }
 
@@ -185,7 +188,7 @@ export function StudioScreen() {
               />
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3">
-                <p className="text-[12px] text-fog">No scenes yet — every episode starts with one.</p>
+                <p className="text-sm text-fog">No scenes yet — every episode starts with one.</p>
                 <GoldButton
                   onClick={() => prod.addScene({ episodeId: episode.id, slugline: "INT. THE LOFT — DAY" })}
                 >
@@ -194,10 +197,10 @@ export function StudioScreen() {
               </div>
             )}
             <footer className="flex items-center justify-between border-t hairline px-4 py-2">
-              <span className="text-[10px] uppercase tracking-[0.14em] text-fog">
+              <span className="text-2xs uppercase tracking-[0.14em] text-fog">
                 {scene ? `${scene.shots.length} shot${scene.shots.length === 1 ? "" : "s"} in scene` : ""}
               </span>
-              <GhostButton onClick={() => navigate("/timeline")}>
+              <GhostButton onClick={() => navigate("/edit/timeline")}>
                 <Film size={12} /> Open in Timeline
               </GhostButton>
             </footer>
@@ -232,7 +235,7 @@ function EmptyEpisodes({ hasCast, add }: { hasCast: boolean; add: () => void }) 
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
       <Clapperboard size={28} className="text-gold/70" />
       <span className="font-serif text-xl text-cream">No episodes yet</span>
-      <p className="max-w-[380px] text-[12px] leading-relaxed text-fog">
+      <p className="max-w-[380px] text-sm leading-relaxed text-fog">
         {hasCast
           ? "Start the pilot and write it here — or hand the Director a premise in the writers' room and watch the script fill in."
           : "Seed the bible first (Bible → Seed Animal Sitcom), then start the pilot here."}

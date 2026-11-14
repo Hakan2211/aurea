@@ -51,7 +51,7 @@ export function BoardHeader({
             episodes.length > 0 && "hover:bg-cream/5",
           )}
         >
-          <span className="truncate font-serif text-[14px] text-cream">
+          <span className="truncate font-serif text-base text-cream">
             {current
               ? `S${pad2(current.season.number)}E${pad2(current.episode.number)} — ${current.episode.title}`
               : "No episode"}
@@ -70,7 +70,7 @@ export function BoardHeader({
                     setOpen(false);
                   }}
                   className={cx(
-                    "flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-[12px] transition",
+                    "flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-sm transition",
                     episode.id === current?.episode.id
                       ? "bg-gold/10 text-gold"
                       : "text-cream hover:bg-cream/5",
@@ -89,7 +89,7 @@ export function BoardHeader({
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {total > 0 && (
           <>
-            <span className="text-[11px] text-fog">
+            <span className="text-xs text-fog">
               Boarded <span className="text-cream/85">{boarded}</span>/{total}
             </span>
             <div className="h-1 w-24 overflow-hidden rounded-full bg-cream/8">
@@ -133,10 +133,10 @@ export function SceneRow({
   return (
     <section>
       <div className="mb-2 flex items-baseline gap-3">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fog">
+        <span className="text-2xs font-semibold uppercase tracking-[0.16em] text-fog">
           Scene {pad2(sceneIdx + 1)}
         </span>
-        <span className="truncate font-mono text-[11px] uppercase tracking-wide text-cream/70">
+        <span className="truncate font-mono text-xs uppercase tracking-wide text-cream/70">
           {scene.slugline}
         </span>
       </div>
@@ -158,7 +158,7 @@ export function SceneRow({
           />
         ))}
         {scene.shots.length === 0 && (
-          <p className="py-4 text-[11px] text-fog/80">No shots in this scene yet.</p>
+          <p className="py-4 text-xs text-fog">No shots in this scene yet.</p>
         )}
       </div>
     </section>
@@ -209,7 +209,7 @@ function BoardCard({
           {number}
         </span>
         {!keyframeUrl && !job && (
-          <div className="flex h-full items-center justify-center text-[10px] text-fog/70">
+          <div className="flex h-full items-center justify-center text-2xs text-fog">
             not boarded
           </div>
         )}
@@ -217,7 +217,7 @@ function BoardCard({
             overlay — you can still read the frame while it renders */}
         {job && (
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/90 to-transparent px-2 pb-1.5 pt-6">
-            <div className="mb-1 flex items-center gap-1.5 text-[10px] text-cream/90">
+            <div className="mb-1 flex items-center gap-1.5 text-2xs text-cream/90">
               <Sparkles size={11} className="shrink-0 text-gold" />
               <span className="tabular-nums text-gold">{Math.round(job.progress)}%</span>
               <span className="truncate text-cream/70">
@@ -230,14 +230,14 @@ function BoardCard({
       </div>
       <div className="space-y-1 bg-surface px-2 py-1.5">
         <div className="flex items-center justify-between gap-1">
-          <span className="font-mono text-[10px] text-cream/90">{code}</span>
-          <Chip tone={STATUS_TONE[shot.status]} className="!px-1.5 !text-[9px]">
+          <span className="font-mono text-2xs text-cream/90">{code}</span>
+          <Chip tone={STATUS_TONE[shot.status]} className="!px-1.5 !text-2xs">
             {shot.status}
           </Chip>
         </div>
         <div className="flex items-center justify-between gap-1">
-          <span className="truncate text-[10px] text-fog">{shot.title || "Untitled"}</span>
-          <span className="shrink-0 text-[9px] text-fog/70">{shot.keyframes.length} kf</span>
+          <span className="truncate text-2xs text-fog">{shot.title || "Untitled"}</span>
+          <span className="shrink-0 text-2xs text-fog">{shot.keyframes.length} kf</span>
         </div>
       </div>
     </button>
@@ -251,11 +251,11 @@ export function BoardEmpty() {
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       <LayoutPanelTop size={26} className="text-gold/70" />
       <span className="font-serif text-lg text-cream">Nothing to board yet</span>
-      <p className="max-w-[360px] text-[12px] leading-relaxed text-fog">
+      <p className="max-w-[360px] text-sm leading-relaxed text-fog">
         The board works from the episode's shot list. Break the episode into scenes and shots
         first — on the Studio board, or by asking the Director beside you.
       </p>
-      <GoldButton onClick={() => navigate("/studio")}>Open Studio</GoldButton>
+      <GoldButton onClick={() => navigate("/story/script")}>Open Script</GoldButton>
     </div>
   );
 }

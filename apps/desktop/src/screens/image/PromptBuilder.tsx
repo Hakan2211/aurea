@@ -161,11 +161,11 @@ export function PromptBuilder({
           }}
           onBlur={commitDraft}
           placeholder={chips.length ? "add…" : "Type a phrase, Enter to chip it…"}
-          className="min-w-[72px] flex-1 bg-transparent py-0.5 text-[11px] text-cream placeholder:text-fog/50 focus:outline-none"
+          className="min-w-[72px] flex-1 bg-transparent py-0.5 text-xs text-cream placeholder:text-fog/50 focus:outline-none"
         />
       </div>
       {hasNegative && (
-        <p className="mt-1.5 border-t border-cream/8 pt-1.5 text-2xs leading-relaxed text-fog/80">
+        <p className="mt-1.5 border-t border-cream/8 pt-1.5 text-2xs leading-relaxed text-fog">
           Dashed chips are negatives — this model has no negative-prompt input, so they're kept
           out of the prompt. Negatives apply via style packs on video / bible flows.
         </p>

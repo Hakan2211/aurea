@@ -32,14 +32,23 @@ import {
 import { downloadAsset, useLikes, useVoiceLab } from "@/hooks";
 import type { Voice, VoiceTake } from "@/data/sample";
 import {
+  AdvancedButton,
   Chip,
+  ComposerBar,
+  DrawerField,
+  DrawerSection,
+  GenerateButton,
   GoldButton,
+  LabDrawer,
   ScrubBar,
   SectionLabel,
   Segmented,
   Slider,
   Waveform,
+  customsSummary,
   cx,
+  drawerInput,
+  useLabDrawer,
 } from "@/components/ui";
 import {
   PLAYBACK_RATES,
@@ -49,7 +58,11 @@ import {
 } from "@/components/useAudioPlayer";
 import { sampleFromBlob, useMicRecorder, type VoiceSample } from "@/components/voiceSample";
 
-/* Voice lab — built to design-refs/2026-08-06-ui-mockups/voice-lab-v1.jpg
+/* Voice lab — simple by default since the UI simplify plan, Stage 3: the cast
+ * list on the left, the voice's takes in the middle, one composer underneath
+ * (Speak or Convert, the line, the engine, Speak), and pace/emotion/DramaBox/
+ * conversion knobs in the Advanced drawer. Before that it was
+ * design-refs/2026-08-06-ui-mockups/voice-lab-v1.jpg
  * (verdicts in that folder's DECISIONS.md): voices rail with mini-waveforms
  * and a gold "Clone a voice" footer, a hero take player, the numbered
  * ① Script ② Engine ③ Delivery flow under a SPEAK|CONVERT segment, a takes
@@ -151,23 +164,23 @@ function AddVoiceModal({
       >
         <div className="flex items-center justify-between">
           <h3 className="font-serif text-[18px] font-semibold text-cream">Clone a voice</h3>
-          <button onClick={onClose} className="text-fog/60 transition hover:text-cream">
+          <button onClick={onClose} className="text-fog transition hover:text-cream">
             <X size={16} />
           </button>
         </div>
-        <p className="mt-1 text-[11px] text-fog">
+        <p className="mt-1 text-xs text-fog">
           10 seconds of clean speech is enough — Chatterbox speaks as this voice from then on.
         </p>
 
         <label className="mt-4 block">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-fog">
+          <span className="text-2xs font-semibold uppercase tracking-[0.14em] text-fog">
             Voice name
           </span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value.slice(0, 40))}
             placeholder="e.g. Studio narrator"
-            className="mt-1.5 w-full rounded-xl border border-cream/10 bg-surface px-3 py-2 text-[12px] text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
+            className="mt-1.5 w-full rounded-xl border border-cream/10 bg-surface px-3 py-2 text-sm text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
           />
         </label>
 
@@ -183,8 +196,8 @@ function AddVoiceModal({
             className="flex flex-col items-center gap-1 rounded-xl border border-dashed border-cream/15 px-3 py-4 transition hover:border-gold/50 hover:bg-gold/4"
           >
             <CloudUpload size={18} strokeWidth={1.5} className="text-gold/80" />
-            <span className="text-[11px] font-medium text-cream/90">Upload a file</span>
-            <span className="text-[9px] text-fog/60">WAV, MP3, M4A — drop it here</span>
+            <span className="text-xs font-medium text-cream/90">Upload a file</span>
+            <span className="text-2xs text-fog">WAV, MP3, M4A — drop it here</span>
           </button>
           <button
             onClick={() => void toggleRecord()}
@@ -202,10 +215,10 @@ function AddVoiceModal({
             ) : (
               <Mic size={18} strokeWidth={1.5} className="text-gold/80" />
             )}
-            <span className="text-[11px] font-medium text-cream/90">
+            <span className="text-xs font-medium text-cream/90">
               {mic.seconds !== null ? `Recording ${mic.seconds.toFixed(0)}s — stop` : "Record from mic"}
             </span>
-            <span className="text-[9px] text-fog/60">
+            <span className="text-2xs text-fog">
               {mic.seconds !== null ? "click to finish" : "speak naturally for ~15s"}
             </span>
           </button>
@@ -235,10 +248,10 @@ function AddVoiceModal({
               )}
             </button>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[12px] text-cream">
+              <div className="truncate text-sm text-cream">
                 {decoding ? "Decoding…" : sampleLabel}
               </div>
-              <div className="text-[10px] text-fog">
+              <div className="text-2xs text-fog">
                 {sample ? `${sample.seconds.toFixed(1)}s · mono WAV` : ""}
               </div>
             </div>
@@ -246,7 +259,7 @@ function AddVoiceModal({
           </div>
         )}
 
-        {error && <p className="mt-3 text-[11px] text-[#e07a6b]">{error}</p>}
+        {error && <p className="mt-3 text-xs text-[#e07a6b]">{error}</p>}
 
         <GoldButton
           onClick={() => void save()}
@@ -320,9 +333,9 @@ function VoiceRow({
               setEditing(false);
             }
           }}
-          className="min-w-0 flex-1 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-[12px] text-cream focus:border-gold/40 focus:outline-none"
+          className="min-w-0 flex-1 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-sm text-cream focus:border-gold/40 focus:outline-none"
         />
-        <span title="Save" className="shrink-0 text-fog/60">
+        <span title="Save" className="shrink-0 text-fog">
           <Check size={13} />
         </span>
       </div>
@@ -386,7 +399,7 @@ function VoiceRow({
         )}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
-            <span className="truncate text-[12.5px] font-medium text-cream">{voice.name}</span>
+            <span className="truncate text-sm font-medium text-cream">{voice.name}</span>
             {active && <i className="h-1.5 w-1.5 shrink-0 rounded-full bg-sage" />}
           </span>
           {/* the glyph is a per-voice signature, not this clip's waveform */}
@@ -400,12 +413,12 @@ function VoiceRow({
         <span className="flex shrink-0 flex-col items-end gap-1">
           <Chip
             tone={voice.kind === "cloned" ? "gold" : "muted"}
-            className="px-1.5 text-[8.5px] uppercase tracking-wider"
+            className="px-1.5 text-2xs uppercase tracking-wider"
           >
             {voice.kind}
           </Chip>
           {voice.rvcTrained && (
-            <Chip tone="gold" className="px-1.5 text-[8.5px] uppercase tracking-wider">
+            <Chip tone="gold" className="px-1.5 text-2xs uppercase tracking-wider">
               RVC
             </Chip>
           )}
@@ -432,7 +445,7 @@ function VoiceRow({
                 setDraft(voice.name);
                 setEditing(true);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
             >
               <Pencil size={12} /> Rename
             </button>
@@ -442,7 +455,7 @@ function VoiceRow({
                 onHide();
               }}
               title="Takes it off every voice picker. Nothing is deleted — restore it from “Hidden” at the bottom of this list."
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
             >
               <EyeOff size={12} /> Hide from list
             </button>
@@ -456,12 +469,12 @@ function VoiceRow({
                   setMenu(false);
                   onRemove();
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-[#e07a6b] transition hover:bg-cream/5"
               >
                 <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete permanently"}
               </button>
             ) : (
-              <p className="px-2.5 py-2 text-[10px] leading-relaxed text-fog/70">
+              <p className="px-2.5 py-2 text-2xs leading-relaxed text-fog">
                 {voice.kind === "preset"
                   ? "Built-in preset — it can be hidden, not deleted."
                   : "Lives in videofast’s char_refs, not the studio folder — hide it here, delete the .wav there."}
@@ -495,7 +508,7 @@ function VoicesPanel({
     void p.catch((err: unknown) => setError(String((err as Error).message ?? err)));
   };
   return (
-    <aside className="flex w-[292px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
+    <aside className="flex w-[264px] shrink-0 flex-col border-r hairline bg-[#0e0e10]">
       <div className="p-4 pb-3">
         <SectionLabel
           right={
@@ -514,7 +527,7 @@ function VoicesPanel({
 
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3">
         {error && (
-          <p className="rounded-lg border border-red-500/30 bg-red-500/6 px-2.5 py-2 text-[10px] leading-relaxed text-red-300">
+          <p className="rounded-lg border border-red-500/30 bg-red-500/6 px-2.5 py-2 text-2xs leading-relaxed text-red-300">
             {error}
           </p>
         )}
@@ -536,7 +549,7 @@ function VoicesPanel({
           <div className="pt-2">
             <button
               onClick={() => setShowHidden((s) => !s)}
-              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-fog transition hover:text-cream"
+              className="flex w-full items-center gap-1.5 px-2 py-1.5 text-2xs font-semibold uppercase tracking-[0.14em] text-fog transition hover:text-cream"
             >
               <ChevronRight
                 size={11}
@@ -550,10 +563,10 @@ function VoicesPanel({
                   key={v.id}
                   className="flex items-center gap-2 rounded-xl px-2 py-1.5 opacity-60 transition hover:opacity-100"
                 >
-                  <span className="min-w-0 flex-1 truncate text-[11px] text-cream/85">{v.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-cream/85">{v.name}</span>
                   <button
                     onClick={() => guard(lab.hideVoice(v.id, false))}
-                    className="flex shrink-0 items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-[10px] text-cream/80 transition hover:border-gold/40 hover:text-gold"
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-cream/10 px-2 py-1 text-2xs text-cream/80 transition hover:border-gold/40 hover:text-gold"
                   >
                     <Eye size={11} /> Restore
                   </button>
@@ -589,7 +602,7 @@ function VoicesPanel({
             <Sparkles size={13} /> {dropping ? "Drop to clone" : "Clone a voice"}
           </GoldButton>
         </div>
-        <button className="flex w-full items-center gap-2 rounded-xl border border-cream/10 px-3 py-2.5 text-[12px] text-cream/80 transition hover:border-gold/40 hover:text-gold">
+        <button className="flex w-full items-center gap-2 rounded-xl border border-cream/10 px-3 py-2.5 text-sm text-cream/80 transition hover:border-gold/40 hover:text-gold">
           <Store size={14} />
           <span className="flex-1 text-left">Voice marketplace</span>
           <ChevronRight size={13} className="text-fog" />
@@ -626,11 +639,11 @@ function SliderRow({
   return (
     <div className="min-w-0 flex-1" title={title}>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium text-cream/85">{label}</span>
-        <span className="text-[11px] tabular-nums text-gold/90">{display}</span>
+        <span className="text-xs font-medium text-cream/85">{label}</span>
+        <span className="text-xs tabular-nums text-gold/90">{display}</span>
       </div>
       <Slider className="mt-2" min={min} max={max} step={step} value={value} onChange={onChange} />
-      <div className="mt-1 flex justify-between text-[10px] text-fog/70">
+      <div className="mt-1 flex justify-between text-2xs text-fog">
         {ticks.map((t) => (
           <span key={t}>{t}</span>
         ))}
@@ -639,56 +652,13 @@ function SliderRow({
   );
 }
 
-/** One engine in the ② Engine chip row — the whole roster stays visible
- * (the v2 mockup's single dropdown hid it, which the review rejected). */
-function EngineChip({
-  label,
-  note,
-  active,
-  onClick,
-}: {
-  label: string;
-  note?: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const missing = note === "not installed";
-  return (
-    <button
-      onClick={onClick}
-      title={missing ? `${label} — not installed (Settings → Engines)` : note}
-      className={cx(
-        "flex min-w-0 flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left transition",
-        active
-          ? "border-gold/55 bg-gold/8"
-          : "border-cream/10 hover:border-gold/35 hover:bg-cream/4",
-        missing && !active && "opacity-45",
-      )}
-    >
-      <span className="flex w-full items-center gap-1.5">
-        <i
-          className={cx(
-            "h-1.5 w-1.5 shrink-0 rounded-full",
-            active ? "bg-gold" : missing ? "bg-cream/20" : "bg-cream/30",
-          )}
-        />
-        <span className={cx("truncate text-[12px] font-medium", active ? "text-gold" : "text-cream/85")}>
-          {label}
-        </span>
-      </span>
-      {note && <span className="w-full truncate pl-3 text-[10px] text-fog/80">{note}</span>}
-    </button>
-  );
-}
-
 function CenterStage({
   voice,
-  selectedTake,
-  player,
+  takes,
 }: {
   voice: Voice;
-  selectedTake: VoiceTake | undefined;
-  player: AudioPlayer;
+  /** the takes list — the middle of the screen, between header and composer */
+  takes: React.ReactNode;
 }) {
   const lab = useVoiceLab();
   const [script, setScript] = useState(lab.script);
@@ -738,10 +708,6 @@ function CenterStage({
   };
 
   const engine = lab.engines.find((e) => e.id === engineId) ?? lab.engines[0];
-  // player drives the clock/waveform only while the selected take is its clip
-  const loaded = !!selectedTake?.url && player.src === selectedTake.url;
-  // …until then the hero still names the take's length, probed off the file
-  const probed = useMediaDuration(selectedTake?.generating ? undefined : selectedTake?.url);
   const canGenerate = !lab.busy && !!script.trim();
   const rvcReady = lab.rvcAvailable && !!voice.rvcTrained;
   const vcEngine =
@@ -799,14 +765,55 @@ function CenterStage({
     });
   };
 
-  /* the numbered flow reads top-to-bottom in both modes: what to say, who
-   * says it, how it's delivered — then one primary action. */
-  const speakSteps = mode === "speak";
+  const [paceDefault] = useState(lab.pace);
+  const [emotionDefault] = useState(lab.emotion);
+  const { drawer, setDrawer, toggle: toggleDrawer } = useLabDrawer("voice", ["advanced"] as const);
+  const speak = mode === "speak";
+  const dbx = engineId === "dramabox";
+
+  /** what a plain run would not send — the composer's "N custom" chip */
+  const customs: string[] = [];
+  if (speak && !dbx) {
+    if (pace !== paceDefault) customs.push(`Pace ${pace.toFixed(2)}x`);
+    if (emotion !== emotionDefault) customs.push(`Emotion ${emotion.toFixed(2)}`);
+  }
+  if (speak && dbx) {
+    if (dbxSeed !== "42") customs.push(`Seed ${dbxSeed || "random"}`);
+    if (dbxCfg !== 2.5) customs.push(`CFG ${dbxCfg.toFixed(1)}`);
+    if (dbxStg !== 1.5) customs.push(`STG ${dbxStg.toFixed(1)}`);
+    if (dbxDurMult !== 0.9) customs.push(`Speed ${dbxDurMult.toFixed(2)}x`);
+    if (/^\d+(\.\d+)?$/.test(dbxGenDur)) customs.push(`Duration ${dbxGenDur}s`);
+    if (dbxWatermark) customs.push("Watermark");
+  }
+  if (!speak) {
+    if (vcEngine === "seedvc" && /^\d+$/.test(vcSteps)) customs.push(`Steps ${vcSteps}`);
+    if (vcSing && /^-?\d+$/.test(vcShift) && Number(vcShift) !== 0) customs.push(`Semitones ${vcShift}`);
+    if (vcSing && vcEngine === "rvc" && vcPitch !== "auto") customs.push(`Pitch: ${vcPitch}`);
+  }
+
+  const vcEngines = [
+    {
+      id: "seedvc" as const,
+      label: "Seed-VC · local",
+      note: lab.convertAvailable ? "runs on your machine" : "not installed",
+      enabled: lab.convertAvailable,
+    },
+    {
+      id: "rvc" as const,
+      label: "RVC · cloud",
+      note: rvcReady ? `highest quality · ${lab.rvcConvertEstimate}` : "needs a trained model",
+      enabled: rvcReady,
+    },
+  ];
+
+  const selectCls =
+    "rounded-xl border border-cream/10 bg-surface px-2.5 py-1.5 text-xs text-cream transition hover:border-gold/35 focus:border-gold/40 focus:outline-none";
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
-      {/* header */}
+    <div className="flex min-w-0 flex-1">
+    <section className="flex min-w-0 flex-1 flex-col">
       {/* wraps rather than crushing the name when the column gets narrow */}
+      <div className="shrink-0 px-5 pb-3 pt-4">
       <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-1 basis-[220px] items-center gap-2.5">
           {renaming ? (
@@ -819,13 +826,13 @@ function CenterStage({
                 if (e.key === "Enter") commitRename();
                 if (e.key === "Escape") setRenamingId(null);
               }}
-              className="w-64 rounded-lg border border-gold/40 bg-surface px-2 py-1 font-serif text-[26px] font-semibold text-cream focus:outline-none"
+              className="w-64 rounded-lg border border-gold/40 bg-surface px-2 py-1 font-serif text-[22px] font-semibold text-cream focus:outline-none"
             />
           ) : (
             <h2
               onDoubleClick={startRename}
               title="Double-click to rename"
-              className="truncate font-serif text-[28px] font-semibold leading-tight text-cream"
+              className="truncate font-serif text-[24px] font-semibold leading-tight text-cream"
             >
               {voice.name}
             </h2>
@@ -841,17 +848,17 @@ function CenterStage({
         <div className="flex shrink-0 flex-wrap items-center gap-2 pt-1.5">
           <Chip
             tone={voice.kind === "cloned" ? "gold" : "muted"}
-            className="text-[9px] uppercase tracking-wider"
+            className="text-2xs uppercase tracking-wider"
           >
             {voice.kind}
           </Chip>
           {voice.kind === "cloned" && voice.rvcTrained && (
-            <span className="inline-flex items-center gap-1.5 rounded-pill bg-sage/15 px-2.5 py-1 text-[10px] font-medium text-sage">
+            <span className="inline-flex items-center gap-1.5 rounded-pill bg-sage/15 px-2.5 py-1 text-2xs font-medium text-sage">
               <i className="h-1.5 w-1.5 rounded-full bg-sage" /> RVC ready
             </span>
           )}
           {voice.kind === "cloned" && !voice.rvcTrained && voice.rvcTraining && (
-            <span className="inline-flex items-center gap-1.5 rounded-pill bg-cream/8 px-2.5 py-1 text-[10px] font-medium text-fog">
+            <span className="inline-flex items-center gap-1.5 rounded-pill bg-cream/8 px-2.5 py-1 text-2xs font-medium text-fog">
               <i className="h-1.5 w-1.5 animate-pulse rounded-full bg-gold" /> Training RVC…
             </span>
           )}
@@ -859,7 +866,7 @@ function CenterStage({
             <button
               onClick={() => lab.trainRvc(voice.id)}
               title={`Trains a dedicated RVC v2 model from this voice's reference clip on Replicate (${lab.rvcTrainEstimate}, billed to your Replicate account). Unlocks the higher-quality cloud conversion.`}
-              className="rounded-pill border border-gold/35 px-2.5 py-1 text-[10px] font-medium text-gold transition hover:bg-gold/10"
+              className="rounded-pill border border-gold/35 px-2.5 py-1 text-2xs font-medium text-gold transition hover:bg-gold/10"
             >
               Train RVC voice · {lab.rvcTrainEstimate}
             </button>
@@ -867,351 +874,55 @@ function CenterStage({
         </div>
       </header>
 
-      {/* mode */}
-      <Segmented
-        className="self-center"
-        value={mode}
-        onChange={setMode}
-        options={[
-          {
-            value: "speak" as const,
-            label: (
-              <span className="flex items-center gap-1.5 px-2 uppercase tracking-wider">
-                <AudioLines size={12} /> Speak
-              </span>
-            ),
-            title: "Turn a script into speech in this voice",
-          },
-          {
-            value: "convert" as const,
-            label: (
-              <span className="flex items-center gap-1.5 px-2 uppercase tracking-wider">
-                <ArrowRightLeft size={12} /> Convert
-              </span>
-            ),
-            title: "Re-voice an existing recording as this voice",
-          },
-        ]}
-      />
+      </div>
 
+      {takes}
 
-      {speakSteps ? (
-        <>
-          {/* ① script */}
-          <section>
-            <SectionLabel step={1}>Script</SectionLabel>
-            <textarea
-              value={script}
-              onChange={(e) => setScript(e.target.value.slice(0, lab.scriptMax))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canGenerate) generate();
-              }}
-              rows={5}
-              className="mt-2.5 w-full resize-none rounded-xl border border-cream/10 bg-surface p-3.5 text-[13px] leading-relaxed text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
-              placeholder="Enter or paste your script here…"
-            />
-            <div className="mt-1.5 flex items-center justify-between text-[10px] text-fog/70">
-              <span className="tabular-nums">
-                {script.length} / {lab.scriptMax} characters
-              </span>
-              <span>⌘/Ctrl + ↵ to generate</span>
-            </div>
-            {/* DramaBox changes how you *write*, so its rule belongs next to the
-             * box, not down in ③ where it used to hide */}
-            {engineId === "dramabox" && (
-              <p className="mt-2 text-[10px] leading-relaxed text-fog/70">
-                <span className="text-gold/80">DramaBox:</span> write stage directions in
-                [brackets], (parens) or *stars* — [laughs], (nervously), *sighs*. They're
-                performed, not spoken; everything else is read aloud.
-              </p>
-            )}
-          </section>
-
-          {/* ② engine */}
-          <section>
-            <SectionLabel step={2} right={<span className="text-[10px] text-fog/70">{engine.note}</span>}>
-              Engine
-            </SectionLabel>
-            <div className="mt-2.5 grid grid-cols-2 gap-2">
-              {lab.engines.map((e) => (
-                <EngineChip
-                  key={e.id}
-                  label={e.label}
-                  note={e.note}
-                  active={e.id === engineId}
-                  onClick={() => setEngineId(e.id)}
-                />
-              ))}
-            </div>
-          </section>
-
-          {/* ③ delivery — pace/emotion, or DramaBox's prompt-driven knobs */}
-          <section>
-            <SectionLabel
-              step={3}
-              right={
-                engineId === "dramabox" ? (
-                  <span className="text-[10px] text-fog/70">prompt-driven</span>
-                ) : undefined
-              }
+      <ComposerBar>
+        <div className="mb-2.5 flex flex-wrap items-center gap-2">
+          <Segmented
+            value={mode}
+            onChange={setMode}
+            options={[
+              {
+                value: "speak" as const,
+                label: (
+                  <span className="flex items-center gap-1.5 px-1">
+                    <AudioLines size={12} /> Speak
+                  </span>
+                ),
+                title: "Turn a script into speech in this voice",
+              },
+              {
+                value: "convert" as const,
+                label: (
+                  <span className="flex items-center gap-1.5 px-1">
+                    <ArrowRightLeft size={12} /> Convert
+                  </span>
+                ),
+                title: "Re-voice an existing recording as this voice",
+              },
+            ]}
+          />
+          <span className="text-2xs text-fog">as <span className="text-cream/85">{voice.name}</span></span>
+          <span className="flex-1" />
+          {speak ? (
+            <select
+              value={engineId}
+              onChange={(e) => setEngineId(e.target.value)}
+              title={engine.note ?? "Engine"}
+              style={{ colorScheme: "dark" }}
+              className={cx(selectCls, "max-w-[260px]")}
             >
-              Delivery
-            </SectionLabel>
-            {engineId !== "dramabox" ? (
-              <div className="mt-3 flex gap-8">
-                <SliderRow
-                  label="Pace"
-                  title="Speaking rate — 1.00x is the engine's natural tempo"
-                  value={pace}
-                  display={`${pace.toFixed(2)}x`}
-                  min={0.5}
-                  max={1.5}
-                  step={0.05}
-                  ticks={["Slower", "Normal", "Faster"]}
-                  onChange={setPace}
-                />
-                <SliderRow
-                  label="Emotion"
-                  title="How much the delivery leans on the reference clip's expressiveness"
-                  value={emotion}
-                  display={emotion.toFixed(2)}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  ticks={["Calm", "Neutral", "Expressive"]}
-                  onChange={setEmotion}
-                />
-              </div>
-            ) : (
-              <div className="mt-3 space-y-3">
-                <div className="flex gap-8">
-                  <SliderRow
-                    label="CFG"
-                    title="How faithfully the model follows the script and stage directions"
-                    value={dbxCfg}
-                    display={dbxCfg.toFixed(1)}
-                    min={1}
-                    max={6}
-                    step={0.1}
-                    ticks={["Loose", "Default", "Faithful"]}
-                    onChange={setDbxCfg}
-                  />
-                  <SliderRow
-                    label="STG"
-                    title="Spatio-temporal guidance — higher is steadier, lower is livelier"
-                    value={dbxStg}
-                    display={dbxStg.toFixed(1)}
-                    min={0}
-                    max={4}
-                    step={0.1}
-                    ticks={["Off", "Default", "Strong"]}
-                    onChange={setDbxStg}
-                  />
-                  <SliderRow
-                    label="Speed"
-                    title="Duration multiplier applied to the generated line"
-                    value={dbxDurMult}
-                    display={`${dbxDurMult.toFixed(2)}x`}
-                    min={0.5}
-                    max={1.5}
-                    step={0.05}
-                    ticks={["Tighter", "Default", "Slower"]}
-                    onChange={setDbxDurMult}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-4">
-                  <label className="flex items-center gap-1.5 text-[11px] text-fog">
-                    Seed
-                    <input
-                      type="number"
-                      value={dbxSeed}
-                      min={0}
-                      placeholder="42"
-                      onChange={(e) => setDbxSeed(e.target.value)}
-                      className="w-20 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
-                    />
-                  </label>
-                  <label className="flex items-center gap-1.5 text-[11px] text-fog">
-                    Duration (s)
-                    <input
-                      type="number"
-                      value={dbxGenDur}
-                      min={0}
-                      max={300}
-                      placeholder="auto"
-                      onChange={(e) => setDbxGenDur(e.target.value)}
-                      className="w-20 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
-                    />
-                  </label>
-                  <label className="flex items-center gap-1.5 text-[11px] text-fog">
-                    <input
-                      type="checkbox"
-                      checked={dbxWatermark}
-                      onChange={(e) => setDbxWatermark(e.target.checked)}
-                      className="accent-gold"
-                    />
-                    Watermark
-                  </label>
-                </div>
-                <p className="text-[10px] leading-relaxed text-fog/70">
-                  Keep the seed fixed for a consistent timbre. The stage-direction syntax is
-                  noted under the script.
-                </p>
-              </div>
-            )}
-          </section>
-
-        </>
-      ) : (
-        <>
-          {/* ① source audio */}
-          <section>
-            <SectionLabel step={1}>Source audio</SectionLabel>
-            <div className="mt-2.5">
-              <input
-                ref={sourceInput}
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void uploadSource(f);
-                  e.target.value = "";
-                }}
-              />
-              {source ? (
-                <div className="flex items-center gap-2.5 rounded-xl border border-gold/30 bg-gold/6 px-3.5 py-3">
-                  <Music4 size={14} className="shrink-0 text-gold/80" />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-cream/90">
-                    {source.name}
-                  </span>
-                  <button
-                    title="Clear source"
-                    onClick={() => setSource(null)}
-                    className="text-fog/60 transition hover:text-[#e07a6b]"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => sourceInput.current?.click()}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const f = e.dataTransfer.files[0];
-                      if (f) void uploadSource(f);
-                    }}
-                    className="flex flex-col items-center gap-1 rounded-xl border border-dashed border-cream/15 px-3 py-5 transition hover:border-gold/50 hover:bg-gold/4"
-                  >
-                    <CloudUpload size={18} strokeWidth={1.5} className="text-gold/80" />
-                    <span className="text-[12px] font-medium text-cream/90">
-                      {lab.addingSource ? "Uploading…" : "Drop audio file here"}
-                    </span>
-                    <span className="text-[10px] text-fog/60">or click to browse · WAV, MP3, FLAC</span>
-                  </button>
-                  <div className="relative">
-                    <button
-                      onClick={() => setSourceOpen((o) => !o)}
-                      className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-cream/15 px-3 py-5 transition hover:border-gold/50 hover:bg-gold/4"
-                    >
-                      <ListMusic size={18} strokeWidth={1.5} className="text-gold/80" />
-                      <span className="flex items-center gap-1 text-[12px] font-medium text-cream/90">
-                        From library
-                        <ChevronDown
-                          size={11}
-                          className={cx("transition-transform", sourceOpen && "rotate-180")}
-                        />
-                      </span>
-                      <span className="text-[10px] text-fog/60">
-                        {lab.convertSources.length} recent clips
-                      </span>
-                    </button>
-                    {sourceOpen && (
-                      <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-52 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
-                        {lab.convertSources.length === 0 && (
-                          <p className="px-3 py-2 text-[11px] text-fog">No audio in the library yet</p>
-                        )}
-                        {lab.convertSources.map((a) => (
-                          <button
-                            key={a.relPath}
-                            onClick={() => {
-                              setSource({ rel: a.relPath, name: a.name });
-                              setSourceOpen(false);
-                              if (a.kind === "music") setVcSing(true);
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-cream/85 transition hover:bg-cream/5"
-                          >
-                            <span className="flex-1 truncate">{a.name}</span>
-                            <span className="text-[10px] text-fog">{a.kind}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* ② conversion engine */}
-          <section>
-            <SectionLabel step={2}>Engine</SectionLabel>
-            <div className="mt-2.5 grid grid-cols-2 gap-2">
-              {(
-                [
-                  {
-                    id: "seedvc" as const,
-                    label: "Seed-VC · local",
-                    note: lab.convertAvailable ? "runs on your machine" : "not installed",
-                    enabled: lab.convertAvailable,
-                    why: "Zero-shot conversion on your GPU",
-                  },
-                  {
-                    id: "rvc" as const,
-                    label: "RVC · cloud",
-                    note: rvcReady ? `highest quality · ${lab.rvcConvertEstimate}` : "needs a trained model",
-                    enabled: rvcReady,
-                    why: rvcReady
-                      ? `Converts through ${voice.name}'s trained RVC model on Replicate (${lab.rvcConvertEstimate})`
-                      : lab.rvcAvailable
-                        ? "Train this voice's RVC model first"
-                        : "Add a Replicate token in Settings → AI Providers",
-                  },
-                ] as const
-              ).map((e) => (
-                <button
-                  key={e.id}
-                  onClick={() => e.enabled && setVcEngineSel(e.id)}
-                  title={e.why}
-                  className={cx(
-                    "flex flex-col items-start gap-0.5 rounded-xl border px-3.5 py-3 text-left transition",
-                    vcEngine === e.id
-                      ? "border-gold/55 bg-gold/8"
-                      : e.enabled
-                        ? "border-cream/10 hover:border-gold/35 hover:bg-cream/4"
-                        : "cursor-not-allowed border-cream/10 opacity-45",
-                  )}
-                >
-                  <span
-                    className={cx(
-                      "text-[12.5px] font-medium",
-                      vcEngine === e.id ? "text-gold" : "text-cream/85",
-                    )}
-                  >
-                    {e.label}
-                  </span>
-                  <span className="text-[10px] text-fog/80">{e.note}</span>
-                </button>
+              {lab.engines.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.label}
+                  {e.note ? ` — ${e.note}` : ""}
+                </option>
               ))}
-            </div>
-          </section>
-
-          {/* ③ delivery */}
-          <section>
-            <SectionLabel step={3}>Delivery</SectionLabel>
-            <div className="mt-2.5 flex flex-wrap items-center gap-3">
+            </select>
+          ) : (
+            <>
               <Segmented
                 value={vcSing ? "sing" : "speak"}
                 onChange={(v) => setVcSing(v === "sing")}
@@ -1220,66 +931,126 @@ function CenterStage({
                   { value: "sing", label: "Singing", title: "Keeps melody and timing" },
                 ]}
               />
-              {vcEngine === "seedvc" && (
-                <label className="flex items-center gap-1.5 text-[11px] text-fog">
-                  Steps
-                  <input
-                    type="number"
-                    value={vcSteps}
-                    min={4}
-                    max={100}
-                    placeholder={String(vcStepsDefault)}
-                    onChange={(e) => setVcSteps(e.target.value)}
-                    className="w-14 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
-                  />
-                </label>
-              )}
-              {vcSing && (
-                <label className="flex items-center gap-1.5 text-[11px] text-fog">
-                  Semitones
-                  <input
-                    type="number"
-                    value={vcShift}
-                    min={-24}
-                    max={24}
-                    placeholder="0"
-                    onChange={(e) => setVcShift(e.target.value)}
-                    className="w-14 rounded-lg border border-cream/10 bg-raised px-2 py-1 text-right text-[11px] tabular-nums text-cream placeholder:text-fog/50 focus:border-gold/40 focus:outline-none"
-                  />
-                </label>
-              )}
-            </div>
-            {vcSing && vcEngine === "rvc" && (
-              <div className="mt-2.5 flex items-center gap-2">
-                <span className="text-[11px] text-fog">Pitch</span>
-                <Segmented
-                  value={vcPitch}
-                  onChange={setVcPitch}
-                  options={[
-                    {
-                      value: "auto" as const,
-                      label: "Auto match",
-                      title:
-                        "Measure the song and the voice, shift the vocals by whole octaves into its register",
-                    },
-                    { value: "none" as const, label: "Keep", title: "Convert at the song's original pitch" },
-                    {
-                      value: "octave-down" as const,
-                      label: "Oct −",
-                      title: "Force the vocals one octave down",
-                    },
-                    {
-                      value: "octave-up" as const,
-                      label: "Oct +",
-                      title: "Force the vocals one octave up",
-                    },
-                  ]}
-                />
+              <select
+                value={vcEngine}
+                onChange={(e) => setVcEngineSel(e.target.value as "seedvc" | "rvc")}
+                title="Conversion engine"
+                style={{ colorScheme: "dark" }}
+                className={cx(selectCls, "max-w-[260px]")}
+              >
+                {vcEngines.map((e) => (
+                  <option key={e.id} value={e.id} disabled={!e.enabled}>
+                    {e.label} — {e.note}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+
+        {speak ? (
+          <div className="relative">
+            <textarea
+              value={script}
+              onChange={(e) => setScript(e.target.value.slice(0, lab.scriptMax))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canGenerate) generate();
+              }}
+              rows={3}
+              className="w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 pb-6 text-sm leading-relaxed text-cream transition-[border-color,box-shadow] placeholder:text-fog focus:border-gold/45 focus:shadow-[0_0_0_3px_rgba(201,169,110,0.1)] focus:outline-none"
+              placeholder="Type or paste the line…"
+            />
+            <span className="pointer-events-none absolute bottom-2 right-3 text-2xs tabular-nums text-fog">
+              {script.length} / {lab.scriptMax} · Ctrl + ↵
+            </span>
+          </div>
+        ) : (
+          <div>
+            <input
+              ref={sourceInput}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadSource(f);
+                e.target.value = "";
+              }}
+            />
+            {source ? (
+              <div className="flex items-center gap-2.5 rounded-xl border border-gold/30 bg-gold/6 px-3.5 py-3">
+                <Music4 size={14} className="shrink-0 text-gold/80" />
+                <span className="min-w-0 flex-1 truncate text-sm text-cream/90">{source.name}</span>
+                <button
+                  title="Clear source"
+                  onClick={() => setSource(null)}
+                  className="text-fog transition hover:text-[#e07a6b]"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => sourceInput.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files[0];
+                    if (f) void uploadSource(f);
+                  }}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-dashed border-cream/15 px-3 py-3.5 transition hover:border-gold/50 hover:bg-gold/4"
+                >
+                  <CloudUpload size={16} strokeWidth={1.5} className="text-gold/80" />
+                  <span className="text-sm text-cream/90">
+                    {lab.addingSource ? "Uploading…" : "Drop a recording or click to browse"}
+                  </span>
+                  <span className="text-2xs text-fog">WAV, MP3, FLAC</span>
+                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setSourceOpen((o) => !o)}
+                    className="flex h-full items-center gap-2 rounded-xl border border-dashed border-cream/15 px-4 transition hover:border-gold/50 hover:bg-gold/4"
+                  >
+                    <ListMusic size={16} strokeWidth={1.5} className="text-gold/80" />
+                    <span className="text-sm text-cream/90">From library</span>
+                    <span className="text-2xs text-fog">{lab.convertSources.length}</span>
+                    <ChevronDown size={11} className={cx("transition-transform", sourceOpen && "rotate-180")} />
+                  </button>
+                  {sourceOpen && (
+                    <div className="absolute bottom-full right-0 z-30 mb-1 max-h-60 w-72 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
+                      {lab.convertSources.length === 0 && (
+                        <p className="px-3 py-2 text-xs text-fog">No audio in the library yet</p>
+                      )}
+                      {lab.convertSources.map((a) => (
+                        <button
+                          key={a.relPath}
+                          onClick={() => {
+                            setSource({ rel: a.relPath, name: a.name });
+                            setSourceOpen(false);
+                            if (a.kind === "music") setVcSing(true);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
+                        >
+                          <span className="flex-1 truncate">{a.name}</span>
+                          <span className="text-2xs text-fog">{a.kind}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-            {vcError && <p className="mt-2 text-[10px] text-[#e07a6b]">{vcError}</p>}
-            <p className="mt-2.5 text-[10px] leading-relaxed text-fog/70">
-              {voice.kind !== "cloned"
+          </div>
+        )}
+
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 basis-[240px] text-2xs leading-relaxed text-fog">
+            {speak
+              ? dbx
+                ? "DramaBox: write stage directions in [brackets], (parens) or *stars* — [laughs], (nervously), *sighs*. They're performed, not spoken."
+                : engine.note
+              : voice.kind !== "cloned"
                 ? "Pick a cloned voice on the left as the conversion target."
                 : vcEngine === "rvc"
                   ? rvcReady
@@ -1289,112 +1060,221 @@ function CenterStage({
                       : "Add a Replicate API token in Settings → AI Providers to unlock RVC."
                   : !lab.convertAvailable
                     ? "Seed-VC engine not installed — Settings → Engines → Install."
-                    : `Converts into ${voice.name}'s voice. Singing mode keeps melody and timing (full-mix conversion works best on sparse arrangements).`}
-            </p>
-          </section>
-
-        </>
-      )}
-
-      {/* Result + action. The take player sits here, not above the steps, so the
-       * column reads write → configure → generate → hear; it's also what keeps
-       * this screen's two players honest — this one is "the take you just made",
-       * the bar at the bottom of the window is "whatever is playing". */}
-      <div className="space-y-3 pt-1">
-        <div className="rounded-panel border border-gold/20 bg-raised p-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => player.toggle(selectedTake?.url)}
-              title={selectedTake?.url ? "Play the selected take" : "No take selected yet"}
-              className={cx(
-                "flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-gold to-gold-deep text-ink transition hover:brightness-110",
-                !selectedTake?.url && "opacity-40",
-              )}
-            >
-              {loaded && player.playing ? (
-                <Pause size={18} />
-              ) : (
-                <Play size={18} className="ml-0.5" />
-              )}
-            </button>
-            <div
-              className="min-w-0 flex-1 cursor-pointer"
-              title={loaded ? "Click to scrub" : undefined}
-              onClick={(e) => {
-                if (!loaded) return;
-                const r = e.currentTarget.getBoundingClientRect();
-                player.seekFraction(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
-              }}
-            >
-              <Waveform
-                seed={selectedTake?.waveSeed ?? 1}
-                bars={130}
-                played={loaded ? player.played : 0}
-                className="h-16!"
-              />
-            </div>
-            <button
-              title="Download this take"
-              onClick={() => {
-                if (selectedTake?.url)
-                  void downloadAsset(selectedTake.url, `${selectedTake.label || "take"}.wav`);
-              }}
-              className={cx(
-                "shrink-0 text-fog/50 transition hover:text-gold",
-                !selectedTake?.url && "pointer-events-none opacity-30",
-              )}
-            >
-              <Download size={15} />
-            </button>
-          </div>
-          <div className="mt-2.5 flex items-baseline justify-between text-[11px] tabular-nums text-fog">
-            <span>
-              {loaded ? player.position : "0:00"}
-              <span className="text-fog/50"> / {loaded ? player.total : probed || "—"}</span>
-            </span>
-            <span className="truncate pl-3 text-[11px] text-fog/80">
-              {selectedTake ? selectedTake.label : "No takes yet — the first one lands here"}
-            </span>
+                    : `Converts into ${voice.name}'s voice. Singing keeps melody and timing (full-mix conversion works best on sparse arrangements).`}
+          </p>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <AdvancedButton
+              open={drawer === "advanced"}
+              onClick={() => toggleDrawer("advanced")}
+              customs={customs}
+              hint={
+                speak
+                  ? dbx
+                    ? "DramaBox: CFG, STG, speed, seed, duration, watermark"
+                    : "Pace and emotion"
+                  : "Diffusion steps, semitones, pitch"
+              }
+            />
+            {speak ? (
+              <GenerateButton
+                onClick={() => canGenerate && generate()}
+                disabled={!canGenerate}
+                title={
+                  lab.busy
+                    ? "A take is already generating"
+                    : !script.trim()
+                      ? "Write a script first"
+                      : `Speak this script as ${voice.name} with ${engine.label}`
+                }
+              >
+                <AudioLines size={14} /> {lab.busy ? "Generating…" : script.trim() ? "Speak" : "Write a line"}
+              </GenerateButton>
+            ) : (
+              <GenerateButton
+                onClick={() => canConvert && convert()}
+                disabled={!canConvert}
+                title={
+                  voice.kind !== "cloned"
+                    ? "Only cloned voices can be conversion targets"
+                    : !source
+                      ? "Pick a source recording first"
+                      : `Re-voice ${source.name} as ${voice.name}`
+                }
+              >
+                <ArrowRightLeft size={14} /> {lab.busy ? "Working…" : source ? "Convert" : "Pick a recording"}
+              </GenerateButton>
+            )}
           </div>
         </div>
-
-        {speakSteps ? (
-          <GoldButton
-            onClick={() => canGenerate && generate()}
-            disabled={!canGenerate}
-            title={
-              lab.busy
-                ? "A take is already generating"
-                : !script.trim()
-                  ? "Write a script first"
-                  : `Speak this script as ${voice.name} with ${engine.label}`
-            }
-            className="w-full justify-center py-3 text-[13px]"
-          >
-            <AudioLines size={14} /> {lab.busy ? "Generating…" : "Generate speech"}
-          </GoldButton>
-        ) : (
-          <GoldButton
-            onClick={() => canConvert && convert()}
-            disabled={!canConvert}
-            title={
-              voice.kind !== "cloned"
-                ? "Only cloned voices can be conversion targets"
-                : !source
-                  ? "Pick a source recording first"
-                  : `Re-voice ${source.name} as ${voice.name}`
-            }
-            className="w-full justify-center py-3 text-[13px]"
-          >
-            <ArrowRightLeft size={14} /> {lab.busy ? "Working…" : `Convert to ${voice.name}`}
-          </GoldButton>
-        )}
-      </div>
+        {vcError && <p className="mt-1.5 text-2xs text-[#e07a6b]">{vcError}</p>}
+      </ComposerBar>
     </section>
+
+    {drawer === "advanced" && (
+      <LabDrawer title="Advanced" summary={customsSummary(customs)} onClose={() => setDrawer(null)} width={340}>
+        {speak && !dbx && (
+          <DrawerSection title="Delivery">
+            <div className="space-y-5">
+              <SliderRow
+                label="Pace"
+                title="Speaking rate — 1.00x is the engine's natural tempo"
+                value={pace}
+                display={`${pace.toFixed(2)}x`}
+                min={0.5}
+                max={1.5}
+                step={0.05}
+                ticks={["Slower", "Normal", "Faster"]}
+                onChange={setPace}
+              />
+              <SliderRow
+                label="Emotion"
+                title="How much the delivery leans on the reference clip's expressiveness"
+                value={emotion}
+                display={emotion.toFixed(2)}
+                min={0}
+                max={1}
+                step={0.05}
+                ticks={["Calm", "Neutral", "Expressive"]}
+                onChange={setEmotion}
+              />
+            </div>
+          </DrawerSection>
+        )}
+        {speak && dbx && (
+          <DrawerSection
+            title="DramaBox delivery"
+            note="Delivery is prompt-driven — write it into the script. Keep the seed fixed for a consistent timbre."
+          >
+            <div className="space-y-5">
+              <SliderRow
+                label="CFG"
+                title="How faithfully the model follows the script and stage directions"
+                value={dbxCfg}
+                display={dbxCfg.toFixed(1)}
+                min={1}
+                max={6}
+                step={0.1}
+                ticks={["Loose", "Default", "Faithful"]}
+                onChange={setDbxCfg}
+              />
+              <SliderRow
+                label="STG"
+                title="Spatio-temporal guidance — higher is steadier, lower is livelier"
+                value={dbxStg}
+                display={dbxStg.toFixed(1)}
+                min={0}
+                max={4}
+                step={0.1}
+                ticks={["Off", "Default", "Strong"]}
+                onChange={setDbxStg}
+              />
+              <SliderRow
+                label="Speed"
+                title="Duration multiplier applied to the generated line"
+                value={dbxDurMult}
+                display={`${dbxDurMult.toFixed(2)}x`}
+                min={0.5}
+                max={1.5}
+                step={0.05}
+                ticks={["Tighter", "Default", "Slower"]}
+                onChange={setDbxDurMult}
+              />
+            </div>
+            <div className="mt-4">
+              <DrawerField label="Seed">
+                <input
+                  type="number"
+                  value={dbxSeed}
+                  min={0}
+                  placeholder="42"
+                  onChange={(e) => setDbxSeed(e.target.value)}
+                  className={drawerInput}
+                />
+              </DrawerField>
+              <DrawerField label="Duration (s)">
+                <input
+                  type="number"
+                  value={dbxGenDur}
+                  min={0}
+                  max={300}
+                  placeholder="auto"
+                  onChange={(e) => setDbxGenDur(e.target.value)}
+                  className={drawerInput}
+                />
+              </DrawerField>
+              <label className="flex items-center justify-between gap-3 py-1 text-xs">
+                <span className="text-fog">Watermark</span>
+                <input
+                  type="checkbox"
+                  checked={dbxWatermark}
+                  onChange={(e) => setDbxWatermark(e.target.checked)}
+                  className="accent-gold"
+                />
+              </label>
+            </div>
+          </DrawerSection>
+        )}
+        {!speak && (
+          <DrawerSection title="Conversion">
+            {vcEngine === "seedvc" && (
+              <DrawerField label="Diffusion steps">
+                <input
+                  type="number"
+                  value={vcSteps}
+                  min={4}
+                  max={100}
+                  placeholder={String(vcStepsDefault)}
+                  onChange={(e) => setVcSteps(e.target.value)}
+                  className={drawerInput}
+                />
+              </DrawerField>
+            )}
+            {vcSing ? (
+              <DrawerField label="Semitones">
+                <input
+                  type="number"
+                  value={vcShift}
+                  min={-24}
+                  max={24}
+                  placeholder="0"
+                  onChange={(e) => setVcShift(e.target.value)}
+                  className={drawerInput}
+                />
+              </DrawerField>
+            ) : (
+              vcEngine !== "seedvc" && (
+                <p className="text-2xs text-fog">Nothing to tune for speech through RVC.</p>
+              )
+            )}
+            {vcSing && vcEngine === "rvc" && (
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-xs text-fog">Pitch</span>
+                <Segmented
+                  value={vcPitch}
+                  onChange={setVcPitch}
+                  options={[
+                    {
+                      value: "auto" as const,
+                      label: "Auto",
+                      title:
+                        "Measure the song and the voice, shift the vocals by whole octaves into its register",
+                    },
+                    { value: "none" as const, label: "Keep", title: "Convert at the song's original pitch" },
+                    { value: "octave-down" as const, label: "Oct −", title: "Force the vocals one octave down" },
+                    { value: "octave-up" as const, label: "Oct +", title: "Force the vocals one octave up" },
+                  ]}
+                />
+              </div>
+            )}
+          </DrawerSection>
+        )}
+      </LabDrawer>
+    )}
+    </div>
   );
 }
 
-/* ---------- right rail: takes history ---------- */
+/* ---------- takes list (centre) ---------- */
 
 type Likes = ReturnType<typeof useLikes>;
 
@@ -1452,8 +1332,8 @@ function TakeRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-[12px] font-medium text-cream">{take.label}</span>
-            {take.generating && <span className="shrink-0 text-[10px] text-fog">generating…</span>}
+            <span className="truncate text-sm font-medium text-cream">{take.label}</span>
+            {take.generating && <span className="shrink-0 text-2xs text-fog">generating…</span>}
           </div>
           <Waveform
             seed={take.waveSeed}
@@ -1465,7 +1345,7 @@ function TakeRow({
 
         <div className="flex shrink-0 flex-col items-end gap-1">
           <span
-            className="text-[11px] tabular-nums text-cream/80"
+            className="text-xs tabular-nums text-cream/80"
             title={take.sizeLabel ? `${take.sizeLabel} on disk` : undefined}
           >
             {/* while generating, duration carries the job's stage text */}
@@ -1515,7 +1395,7 @@ function TakeRow({
                 if (take.url) void downloadAsset(take.url, `${take.label || "take"}.wav`);
               }}
               className={cx(
-                "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-cream/85 transition hover:bg-cream/5",
+                "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5",
                 !take.url && "pointer-events-none opacity-40",
               )}
             >
@@ -1532,13 +1412,13 @@ function TakeRow({
                   setMenu(false);
                   onDelete();
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-[#e07a6b] transition hover:bg-cream/5"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-[#e07a6b] transition hover:bg-cream/5"
               >
                 <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
               </button>
             )}
             {take.sizeLabel && (
-              <p className="px-2.5 py-1.5 text-[10px] text-fog/60">{take.sizeLabel} on disk</p>
+              <p className="px-2.5 py-1.5 text-2xs text-fog">{take.sizeLabel} on disk</p>
             )}
           </div>
         </>
@@ -1547,7 +1427,7 @@ function TakeRow({
   );
 }
 
-/** How many takes the rail shows before "Load more" — the history can run to
+/** How many takes the list shows before "Load more" — the history can run to
  * hundreds of files, and nobody scrolls that far looking for yesterday's read. */
 const TAKE_PAGE = 12;
 
@@ -1575,15 +1455,15 @@ function TakesRail({
   const rest = filtered.length - shown.length;
 
   return (
-    <aside className="flex w-[316px] shrink-0 flex-col border-l hairline bg-[#0e0e10]">
-      <div className="p-4 pb-3">
+    <div className="flex min-h-0 flex-1 flex-col border-t hairline">
+      <div className="px-5 pb-2 pt-3">
         <SectionLabel
           right={
             <button
               title={starredOnly ? "Show every take" : "Show starred takes only"}
               onClick={() => setStarredOnly((s) => !s)}
               className={cx(
-                "flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] transition",
+                "flex items-center gap-1 rounded-lg border px-2 py-1 text-2xs transition",
                 starredOnly
                   ? "border-gold/45 text-gold"
                   : "border-cream/10 text-cream/70 hover:border-gold/40 hover:text-gold",
@@ -1598,39 +1478,39 @@ function TakesRail({
         </SectionLabel>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3">
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-4 pb-3">
         {lab.failures
           .filter((f) => !dismissed.includes(f.id))
           .map((f) => (
             <div key={f.id} className="rounded-xl border border-red-500/30 bg-red-500/6 p-3">
               <div className="flex items-center gap-2">
                 <CircleAlert size={14} className="shrink-0 text-red-400" />
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-cream">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-cream">
                   {f.title}
                 </span>
                 <button
                   onClick={() => lab.retry(f.id)}
-                  className="shrink-0 rounded-lg border border-cream/15 px-2 py-1 text-[10px] text-cream/85 transition hover:border-gold/45 hover:text-gold"
+                  className="shrink-0 rounded-lg border border-cream/15 px-2 py-1 text-2xs text-cream/85 transition hover:border-gold/45 hover:text-gold"
                 >
                   Retry
                 </button>
                 <button
                   onClick={() => setDismissed((prev) => [...prev, f.id])}
                   title="Dismiss"
-                  className="shrink-0 text-fog/60 transition hover:text-cream"
+                  className="shrink-0 text-fog transition hover:text-cream"
                 >
                   <X size={13} />
                 </button>
               </div>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-red-300">{f.error}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-red-300">{f.error}</p>
             </div>
           ))}
 
         {shown.length === 0 && (
-          <p className="px-1 py-6 text-center text-[11px] leading-relaxed text-fog/70">
+          <p className="px-1 py-6 text-center text-xs leading-relaxed text-fog">
             {starredOnly
               ? "No starred takes yet — star the ones worth keeping."
-              : "No takes yet. Write a script and hit Generate speech."}
+              : "No takes yet. Write a line below and hit Speak."}
           </p>
         )}
 
@@ -1659,13 +1539,13 @@ function TakesRail({
         <div className="p-3">
           <button
             onClick={() => setLimit((l) => l + TAKE_PAGE)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-cream/10 py-2 text-[12px] text-cream/80 transition hover:border-gold/40 hover:text-gold"
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-cream/10 py-2 text-sm text-cream/80 transition hover:border-gold/40 hover:text-gold"
           >
             <ChevronDown size={13} /> Load more takes · {rest}
           </button>
         </div>
       )}
-    </aside>
+    </div>
   );
 }
 
@@ -1698,8 +1578,8 @@ function PlayerBar({
           <AudioLines size={13} className="text-cream/80" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[12px] text-cream">{voice.name}</div>
-          <div className="truncate text-[10px] text-fog">{selectedTake?.label ?? "No take"}</div>
+          <div className="truncate text-sm text-cream">{voice.name}</div>
+          <div className="truncate text-2xs text-fog">{selectedTake?.label ?? "No take"}</div>
         </div>
         {selectedTake?.relPath && (
           <button
@@ -1739,7 +1619,7 @@ function PlayerBar({
         </button>
       </div>
 
-      <span className="text-[10px] tabular-nums text-fog">
+      <span className="text-2xs tabular-nums text-fog">
         {loaded ? player.position : "0:00"}
       </span>
       <ScrubBar
@@ -1748,7 +1628,7 @@ function PlayerBar({
         onSeek={player.seekFraction}
         title={loaded ? "Scrub" : "Play a take to scrub it"}
       />
-      <span className="text-[10px] tabular-nums text-fog">
+      <span className="text-2xs tabular-nums text-fog">
         {loaded ? player.total : probed || "0:00"}
       </span>
 
@@ -1775,7 +1655,7 @@ function PlayerBar({
           onClick={() => setRateOpen((o) => !o)}
           title="Playback speed"
           className={cx(
-            "flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] tabular-nums transition",
+            "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs tabular-nums transition",
             player.rate === 1
               ? "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold"
               : "border-gold/45 text-gold",
@@ -1796,7 +1676,7 @@ function PlayerBar({
                     setRateOpen(false);
                   }}
                   className={cx(
-                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11px] tabular-nums transition hover:bg-cream/5",
+                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs tabular-nums transition hover:bg-cream/5",
                     r === player.rate ? "text-gold" : "text-cream/85",
                   )}
                 >
@@ -1849,12 +1729,16 @@ export function VoiceLab() {
           onSelect={setVoiceId}
           onAdd={(file) => setClone({ open: true, file: file ?? null })}
         />
-        <CenterStage voice={voice} selectedTake={selectedTake} player={player} />
-        <TakesRail
-          selectedId={selectedTake?.id}
-          player={player}
-          likes={likes}
-          onSelect={setTakeId}
+        <CenterStage
+          voice={voice}
+          takes={
+            <TakesRail
+              selectedId={selectedTake?.id}
+              player={player}
+              likes={likes}
+              onSelect={setTakeId}
+            />
+          }
         />
       </div>
       <PlayerBar
