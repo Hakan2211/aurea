@@ -64,6 +64,16 @@ export async function resolveTuning<T extends { chunkFeedForward: boolean; nag: 
 const INGREDIENTS_LORA = /ic-lora.*ingredient/i;
 /** the IC-LoRAs that carry motion onto a keyframe */
 const IC_LORA = /ic-lora.*(union-control|motion-track)/i;
+/** the 2.5 Pixel Spatial Upscaler IC-LoRA — the ×2 finishing pass */
+export const UPSCALER_LORA = /ic-lora.*pixel-spatial-upscaler/i;
+
+/** The exact combo name of the ×2 upscaler IC-LoRA on this install, or null.
+ * Read off LoraLoaderModelOnly's own list for the same reason resolveIcLora
+ * reads LTXDirectorGuide's: the names arrive with the OS separator, and
+ * ComfyUI validates the value verbatim against that list. */
+export function resolveUpscalerLora(loraOptions: string[]): string | null {
+  return loraOptions.find((o) => UPSCALER_LORA.test(o)) ?? null;
+}
 
 /* --- adapter LoRAs (regular model LoRAs, not IC) --------------------------
  * Everything in the LoraLoaderModelOnly combo that is NOT plumbing: the
@@ -171,6 +181,9 @@ export interface VideoCapabilities {
   availableLoras: string[];
   /** camera-control weights present, by move — see resolveCameraLoras */
   cameraLoras: Partial<Record<CameraMove, string>>;
+  /** the ×2 Pixel Spatial Upscaler IC-LoRA is in the lora folder — the
+   * take's Finish → Upscale action can run (2.5 only) */
+  finishUpscale: boolean;
   /** one line for the UI when something is missing */
   note?: string;
 }
@@ -184,6 +197,7 @@ const NONE = {
   endFrame: false,
   availableLoras: [] as string[],
   cameraLoras: {} as Partial<Record<CameraMove, string>>,
+  finishUpscale: false,
 } as const;
 
 /** What a cold managed engine WILL have once it boots, from the installed
@@ -273,6 +287,7 @@ export async function probeVideoCapabilities(
     endFrame,
     availableLoras: loras.filter((l) => !INFRA_LORA.test(l)),
     cameraLoras: resolveCameraLoras(loras),
+    finishUpscale: !!resolveUpscalerLora(loras),
   };
 
   const missing: string[] = [];

@@ -36,6 +36,7 @@ const JOB_KIND_DIR: Record<Job["kind"], LibraryKind> = {
   image: "image",
   tts: "audio",
   music: "music",
+  model3d: "model3d",
 };
 
 const slugify = (name: string) =>
@@ -72,10 +73,12 @@ function assetMetaFor(job: Job): AssetMeta | null {
     case "imageUpscale":
       return { origin: p.type, source: p.source };
     case "image":
-      // a cover is a byproduct of a music run, not a still you set out to
-      // make — the Image lab's roll filters on this origin so album tiles
-      // don't turn up among your work. It stays a normal file in Assets.
-      return p.cover ? { origin: "musicCover", source: p.cover } : null;
+      // A cover is a byproduct of a music run, and a 3D concept plate is
+      // scaffolding for a mesh — neither is a still you set out to make, so
+      // the Image lab's roll filters on this origin and they don't turn up
+      // among your work. Both stay normal files in Assets.
+      if (p.cover) return { origin: "musicCover", source: p.cover };
+      return p.model3d ? { origin: "model3dConcept" } : null;
     case "music":
       return {
         origin: p.type,
@@ -98,6 +101,10 @@ function assetMetaFor(job: Job): AssetMeta | null {
     case "tts":
       // the spoken line, kept with the file — the timeline prints it on the clip
       return { origin: p.type, text: p.text, voice: p.voice };
+    case "video":
+      // a looping take says so in its sidecar: its last frame is its first,
+      // so an export can drop the seam frame (the adapter adds the engine)
+      return p.loop ? { loop: true } : null;
     default:
       return null;
   }
@@ -169,6 +176,23 @@ export class ProjectStore {
     if (this.list().length === 0) this.create("Playground");
   }
 
+  /** The project the app's screens act on (P6). Persisted in settings so the
+   * Desk, the labs and a shell asking projects.active agree; a stale id (the
+   * project was deleted) falls back to the oldest, which is what every screen
+   * did before there was a switcher. */
+  activeId(): string {
+    const list = this.list();
+    const wanted = this.settings.get().general.activeProject;
+    return (wanted && list.some((p) => p.id === wanted) ? wanted : list[0]?.id) ?? "";
+  }
+
+  setActive(id: string): Project {
+    const project = this.list().find((p) => p.id === id);
+    if (!project) throw new Error(`unknown project "${id}"`);
+    this.settings.update({ general: { activeProject: id } });
+    return project;
+  }
+
   /** Copy a finished job's artifact into its project's assets tree. Adapters
    * may deliver a single file or a folder (videofast ships final.mp4 + cover
    * art + metadata); for a folder every top-level media file comes along and
@@ -192,7 +216,7 @@ export class ProjectStore {
       // the job kind decides the shelf (a music wav is music, not voice);
       // the extension only speaks for files the kind can't explain
       const dest = this.importFile(id, JOB_KIND_DIR[job.kind], job.output, base);
-      this.writeMeta(dest, job, adapterMeta);
+      this.writeMeta(dest, job, this.importDraftLatents(dest, adapterMeta));
       return { primary: dest, files: [dest] };
     }
 
@@ -206,6 +230,30 @@ export class ProjectStore {
         if (!entry.isFile() || !entry.name.endsWith(".png")) continue;
         files.push(
           this.importFile(id, "image", path.join(job.output, entry.name), path.basename(entry.name, ".png"), sub),
+        );
+      }
+      return { primary: files[0], files };
+    }
+
+    /* A coverage pass keeps its eight angles and its contact sheet together
+     * under one folder, and keeps their filenames: the names carry the orbit
+     * order and the angle id, which is what the Angles tab and the run record
+     * both read them back by. Same shape as a deck, for the same reason. */
+    if (job.payload?.type === "coverage") {
+      const sub = `coverage/${slugify(job.title || "coverage")}`;
+      const files: string[] = [];
+      for (const entry of fs
+        .readdirSync(job.output, { withFileTypes: true })
+        .sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isFile() || !entry.name.endsWith(".png")) continue;
+        files.push(
+          this.importFile(
+            id,
+            "image",
+            path.join(job.output, entry.name),
+            path.basename(entry.name, ".png"),
+            sub,
+          ),
         );
       }
       return { primary: files[0], files };
@@ -239,6 +287,22 @@ export class ProjectStore {
     return this.writeInto(path.join(this.dir(projectId), "assets", kind), projectId, name, ext, data);
   }
 
+  /** A picture brought in from outside to START a shot from — the Video
+   * lab's drop / paste / "From your computer". Unlike a ref this IS a library
+   * asset (assets/<kind>/imports/), so it shows in every still roll, gets a
+   * media url, and can be the newest still the lab defaults to. The scanner
+   * walks subfolders and reads the kind off assets/<kind>/, so `imports/`
+   * only keeps them findable on disk. */
+  importAsset(projectId: string, kind: LibraryKind, name: string, ext: string, data: Buffer): string {
+    return this.writeInto(
+      path.join(this.dir(projectId), "assets", kind, "imports"),
+      projectId,
+      name,
+      ext,
+      data,
+    );
+  }
+
   /** Stage a renderer upload that is an *input*, not a take — an Image-lab
    * reference, a voice-conversion source. These land in <project>/refs/, which
    * the library scanner deliberately does not walk: an uploaded reference is
@@ -267,6 +331,38 @@ export class ProjectStore {
 
   /** dotfile sidecar next to the imported output; the scanner reads it back
    * into LibraryAsset.meta and skips it as an asset (dotfiles are ignored) */
+  /** An LTX 2.5 draft arrives with its base-pass latents beside it in the run
+   * dir (AssetMeta.draftLatents, absolute paths). They move in next to the take —
+   * assets/video/.latents/<take>-{video,audio}.latent, a dot-folder the
+   * scanner has no kind for — and the sidecar points at them dataRoot-
+   * relative, the way every other path in a sidecar is written. A run dir is
+   * scratch; the library is where a finish will look months later. */
+  private importDraftLatents(dest: string, adapterMeta?: AssetMeta): AssetMeta | undefined {
+    const draft = adapterMeta?.draftLatents;
+    if (!draft) return adapterMeta;
+    const dataRoot = this.settings.get().storage.dataRoot;
+    const dir = path.join(path.dirname(dest), ".latents");
+    const stem = path.basename(dest, path.extname(dest));
+    const move = (from: string, tag: string): string => {
+      if (!path.isAbsolute(from) || !fs.existsSync(from)) return from;
+      fs.mkdirSync(dir, { recursive: true });
+      const to = path.join(dir, `${stem}-${tag}.latent`);
+      fs.copyFileSync(from, to);
+      return path.relative(dataRoot, to).split(path.sep).join("/");
+    };
+    try {
+      return {
+        ...adapterMeta,
+        draftLatents: { ...draft, video: move(draft.video, "video"), audio: move(draft.audio, "audio") },
+      };
+    } catch {
+      // the take still lands; it just cannot be finished from its latents
+      const { draftLatents: _dropped, ...rest } = adapterMeta!;
+      void _dropped;
+      return rest;
+    }
+  }
+
   private writeMeta(dest: string, job: Job, adapterMeta?: AssetMeta): void {
     const fromJob = assetMetaFor(job);
     // the adapter speaks last: it knows what the engine chose where the

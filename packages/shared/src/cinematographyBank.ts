@@ -644,3 +644,22 @@ export const CINEMATOGRAPHY_BANK: BibleCinematography = {
   negativePrompt:
     "blurry, deformed, extra limbs, morphing body parts, warping face, inconsistent character, off-model, jittery flicker, frame jumping, text, watermark, low detail, mutated hands, duplicated face",
 };
+
+/** Which shot sizes a composition id can coexist with. A composition that
+ * says "small figure in the corner of the frame" directly after "medium
+ * close-up" is a contradiction the model resolves at random (pilot defect #5,
+ * 2026-09-02). Absent = valid at every size. Ids are the bank's own. */
+export const COMPOSITION_SHOT_SIZES: Record<string, string[]> = {
+  "negative-space": ["ews", "ws", "mws"],
+  "leading-lines": ["ews", "ws", "mws"],
+  "frame-in-frame": ["ws", "mws", "ms"],
+  "depth-layers": ["ws", "mws", "ms", "mcu"],
+  triangle: ["ews", "ws", "mws", "ms"],
+  "v-formation": ["ews", "ws", "mws"],
+  "depth-line": ["ews", "ws", "mws", "ms"],
+};
+
+export function compositionFitsShotSize(compositionId: string, shotSizeId: string): boolean {
+  const allowed = COMPOSITION_SHOT_SIZES[compositionId];
+  return !allowed || !shotSizeId || allowed.includes(shotSizeId);
+}

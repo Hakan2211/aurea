@@ -21,9 +21,16 @@
  * are measured by the caller (studiod probes them) and passed in, because a
  * voice take's length is the one fact the production documents don't hold. */
 
-import { composeKeyframePrompt, shotCharacters, characterRef, cineClause } from "./storyboard.js";
+import {
+  composeKeyframePrompt,
+  shotCharacters,
+  characterRef,
+  cineClause,
+  projectLook,
+  withLook,
+} from "./storyboard.js";
 import { castRef, MAX_SHEET_REFS } from "./refSheet.js";
-import type { Bible, BibleCharacter, DirectorSpec, Scene, Shot } from "./index.js";
+import type { Bible, BibleCharacter, CameraSpec, DirectorSpec, Scene, Shot } from "./index.js";
 
 /** One voice take, placed. `durationSec` is measured by the caller. */
 export interface ShotTakeInput {
@@ -31,6 +38,10 @@ export interface ShotTakeInput {
   take: string;
   /** bible character id whose line this is; null/absent = unattributed */
   character?: string | null;
+  /** the script line this take was recorded FOR (a table-read take knows).
+   * Binds exactly: without it a take falls on the next open line, which is
+   * how a one-liner ended up timed and directed as the shot's long speech. */
+  lineId?: string | null;
   durationSec: number;
   /** explicit placement in the shot; omitted = laid out in script order */
   atSec?: number;
@@ -53,6 +64,14 @@ export interface ShotSpecOptions {
   prompt?: string;
   /** boundary softness between beats: 0.001 a cut, 0.5 a dissolve */
   epsilon?: number;
+  /** The look line to end the prompt with. Omitted = the project's own
+   * (`projectLook`); null or "" = none, for a caller that has already written
+   * the tail itself. A lane preset passes its own. */
+  look?: string | null;
+  /** Cinematography-bank ids from a lane preset, laid over the shot's own
+   * camera spec. Only non-empty fields win — a preset says "interviews are
+   * MCU at eye level", not "interviews have no lens". */
+  camera?: Partial<CameraSpec>;
 }
 
 export interface ComposedShot {
@@ -117,13 +136,98 @@ function dialogueBeat(speaker: BibleCharacter, others: BibleCharacter[], deliver
   return `${parts.join("; ")}.`;
 }
 
-interface PlannedLine {
+/** One dialogue line, placed on the shot's clock. Exported because three
+ * composers now need the same placement — the Director timeline, the H3 block
+ * prompt and the multi-shot prose — and a second implementation of "when does
+ * this line land" is a second set of beat boundaries to get wrong. */
+export interface PlannedLine {
   /** index into the resolved takes, or -1 when the line has no take yet */
   takeIndex: number;
+  /** the picture instruction: who speaks, and that the others don't */
   prompt: string;
   atSec: number;
   /** measured take length, or an estimate from the line's word count */
   lengthSec: number;
+  /** who says it */
+  speaker: BibleCharacter;
+  /** what they say, verbatim — H3 and the multi-shot prose quote it */
+  text: string;
+}
+
+export interface PlannedDialogue {
+  planned: PlannedLine[];
+  /** how many lines were timed from a word count rather than a take */
+  estimated: number;
+}
+
+/** Place a shot's dialogue on its clock. Pure; the caller supplies measured
+ * take lengths and collects the notes. */
+export function planDialogue(
+  shot: Shot,
+  cast: BibleCharacter[],
+  options: { takes?: ShotTakeInput[]; gapSec: number; leadInSec: number },
+  notes: string[],
+): PlannedDialogue {
+  const dialogue = shot.scriptLines.filter((l) => l.character !== null && l.text.trim());
+  const supplied = options.takes ?? [];
+  const used = new Set<number>();
+  /* A take that names its line belongs to that line and to no other — claim
+   * those first, so an earlier open line can't take it by being first. */
+  const lineIds = new Set(dialogue.map((l) => l.id));
+  const byLine = new Map<string, number>();
+  supplied.forEach((t, i) => {
+    if (t.lineId && lineIds.has(t.lineId) && !byLine.has(t.lineId)) {
+      byLine.set(t.lineId, i);
+      used.add(i);
+    }
+  });
+  const takeForLine = (lineId: string, characterId: string | null): number => {
+    const bound = byLine.get(lineId);
+    if (bound !== undefined) return bound;
+    // a take bound to some OTHER line is never borrowed
+    const free = (t: ShotTakeInput, i: number) => !used.has(i) && !(t.lineId && lineIds.has(t.lineId));
+    const byCharacter = supplied.findIndex(
+      (t, i) => free(t, i) && t.character && characterId && t.character === characterId,
+    );
+    const index =
+      byCharacter !== -1 ? byCharacter : supplied.findIndex((t, i) => free(t, i) && !t.character);
+    if (index !== -1) used.add(index);
+    return index;
+  };
+
+  const planned: PlannedLine[] = [];
+  let cursor = options.leadInSec;
+  let estimated = 0;
+  for (const line of dialogue) {
+    const speaker = cast.find((c) => c.id === line.character);
+    if (!speaker) {
+      notes.push(
+        `Line "${line.text.slice(0, 32)}…" is attributed to "${line.character}", who is not in this shot's characters — skipped.`,
+      );
+      continue;
+    }
+    const takeIndex = takeForLine(line.id, line.character);
+    const take = takeIndex === -1 ? undefined : supplied[takeIndex];
+    if (!take) estimated += 1;
+    const lengthSec =
+      take?.durationSec ?? Math.max(1, line.text.trim().split(/\s+/).length / WORDS_PER_SEC);
+    const atSec = take?.atSec ?? cursor;
+    planned.push({
+      takeIndex,
+      atSec: round1(atSec),
+      lengthSec: round1(lengthSec),
+      speaker,
+      text: line.text.trim(),
+      prompt: dialogueBeat(
+        speaker,
+        cast.filter((c) => c.id !== speaker.id),
+        line.deliveryNotes,
+      ),
+    });
+    cursor = atSec + lengthSec + options.gapSec;
+  }
+  planned.sort((a, b) => a.atSec - b.atSec);
+  return { planned, estimated };
 }
 
 export function composeShotSpec(
@@ -136,7 +240,37 @@ export function composeShotSpec(
   const gapSec = Math.max(0, options.gapSec ?? DEFAULT_GAP_SEC);
   const leadInSec = Math.max(0, options.leadInSec ?? DEFAULT_LEAD_IN_SEC);
   const cast = shotCharacters(shot, bible);
-  const anchor = (options.prompt?.trim() || composeKeyframePrompt(shot, scene, bible)).trim();
+  /* Accumulated retake direction rides every render: a note given on the desk
+   * is part of the shot from then on, whoever composes the next take. */
+  const direction = shot.takeNotes.map((n) => n.trim()).filter(Boolean);
+  /* A lane preset's camera ids sit UNDER the shot's own: the board is more
+   * specific than the lane it was shot in. Empty override fields are dropped
+   * rather than assigned, so "the interview lane is MCU/eye-level" doesn't
+   * also mean "interviews have no lens". */
+  const staged: Shot = options.camera
+    ? {
+        ...shot,
+        camera: {
+          ...shot.camera,
+          ...Object.fromEntries(
+            Object.entries(options.camera).filter(
+              ([key, value]) =>
+                typeof value === "string" && value.trim() && !shot.camera[key as keyof CameraSpec],
+            ),
+          ),
+        },
+      }
+    : shot;
+  const bare = (options.prompt?.trim() || composeKeyframePrompt(staged, scene, bible)).trim();
+  const directed = direction.length
+    ? `${bare.replace(/\.$/, "")}. Direction: ${direction.join("; ")}.`
+    : bare;
+  /* The look goes on ONCE, here, at the very end — never in an adapter, where
+   * two of them would stack. `withLook` also refuses to repeat a look the
+   * prompt already contains, which is the ordinary case: a keyframe-composed
+   * prompt already ends with the art direction the look is derived from. */
+  const look = options.look === undefined ? projectLook(bible) : (options.look ?? "");
+  const anchor = withLook(directed, look);
 
   /* --- the first frame -------------------------------------------------
    * The selected keyframe is the shot as the board approved it; without one
@@ -149,59 +283,18 @@ export function composeShotSpec(
   const startFrame = selected?.asset ?? null;
   if (!startFrame) notes.push("This shot has no keyframe — board it first, or pass a start frame.");
 
-  /* --- the takes, in script order --------------------------------------
-   * A take names its character when the caller knows it (the Director passes
-   * what it generated); otherwise takes fall onto dialogue lines in order,
-   * which is how a scene is recorded and how voTakes accumulate on a shot. */
-  const dialogue = shot.scriptLines.filter((l) => l.character !== null && l.text.trim());
-  const supplied = options.takes ?? [];
-  const used = new Set<number>();
-  const takeForLine = (characterId: string | null): number => {
-    const byCharacter = supplied.findIndex(
-      (t, i) => !used.has(i) && t.character && characterId && t.character === characterId,
-    );
-    const index =
-      byCharacter !== -1 ? byCharacter : supplied.findIndex((t, i) => !used.has(i) && !t.character);
-    if (index !== -1) used.add(index);
-    return index;
-  };
-
-  /* --- beats -----------------------------------------------------------
+  /* --- the takes and the beats -----------------------------------------
    * One beat per line, each starting where its take does, so the picture and
    * the sound change at the same instant. A line with no take still gets a
    * beat (the shot keeps its shape while the VO is still being recorded); its
    * length is estimated from the word count and the estimate is declared. */
-  const planned: PlannedLine[] = [];
-  let cursor = leadInSec;
-  let estimated = 0;
-  for (const line of dialogue) {
-    const speaker = cast.find((c) => c.id === line.character);
-    if (!speaker) {
-      notes.push(
-        `Line "${line.text.slice(0, 32)}…" is attributed to "${line.character}", who is not in this shot's characters — skipped.`,
-      );
-      continue;
-    }
-    const takeIndex = takeForLine(line.character);
-    const take = takeIndex === -1 ? undefined : supplied[takeIndex];
-    if (!take) estimated += 1;
-    const lengthSec =
-      take?.durationSec ??
-      Math.max(1, line.text.trim().split(/\s+/).length / WORDS_PER_SEC);
-    const atSec = take?.atSec ?? cursor;
-    planned.push({
-      takeIndex,
-      atSec: round1(atSec),
-      lengthSec: round1(lengthSec),
-      prompt: dialogueBeat(
-        speaker,
-        cast.filter((c) => c.id !== speaker.id),
-        line.deliveryNotes,
-      ),
-    });
-    cursor = atSec + lengthSec + gapSec;
-  }
-  planned.sort((a, b) => a.atSec - b.atSec);
+  const supplied = options.takes ?? [];
+  const { planned, estimated } = planDialogue(
+    staged,
+    cast,
+    { takes: supplied, gapSec, leadInSec },
+    notes,
+  );
   if (estimated > 0) {
     notes.push(
       `${estimated} line${estimated === 1 ? " has" : "s have"} no voice take — ${
@@ -237,7 +330,7 @@ export function composeShotSpec(
    * The camera MOVE rides the first beat: composeKeyframePrompt (the anchor)
    * carries framing, angle, lens and light — the still's business — but never
    * the move, which is the video's. */
-  const moveClause = cineClause(bible.cinematography.moves, shot.camera.move);
+  const moveClause = cineClause(bible.cinematography.moves, staged.camera.move);
   const zones: DirectorSpec["promptZones"] = [];
   const action = shot.scriptLines
     .filter((l) => l.character === null && l.text.trim())

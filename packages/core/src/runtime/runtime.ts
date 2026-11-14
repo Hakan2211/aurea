@@ -107,11 +107,18 @@ export const PYTHON_PIN = {
 /** Bumped v0.28.0 → v0.30.2 on 2026-08-07 so ONE managed ComfyUI serves both
  * video engines: MiniMax-H3's nodes became core in 0.30, so the managed runtime
  * no longer needs an external ComfyUI for H3 (0.28 has core LTX but no H3).
- * That is what lets engines.videoMode run "managed" — see comfy/service.ts. */
+ * That is what lets engines.videoMode run "managed" — see comfy/service.ts.
+ *
+ * Bumped v0.30.2 → v0.32.0 on 2026-08-12 for LTX 2.5, whose nodes
+ * (LTXVDualCFGGuider, the Gemma 4 encoders, the 2.5 model detection) landed
+ * in core 0.32.0 — LTX 2.3, H3 and the custom packs all ride along.
+ *
+ * Bumped v0.32.0 → v0.45.0 on 2026-11-11 for MiniMax-H3-Image (t2i + edit,
+ * PR #17655: MiniMaxH3ImageConditioning, image VAE, PDD head-grid sampling). */
 export const COMFY_PIN = {
-  tag: "v0.30.2",
+  tag: "v0.45.0",
   /** GitHub tag archive (no published sha — verified structurally instead) */
-  url: "https://github.com/Comfy-Org/ComfyUI/archive/refs/tags/v0.30.2.zip",
+  url: "https://github.com/Comfy-Org/ComfyUI/archive/refs/tags/v0.45.0.zip",
 };
 
 /**
@@ -130,7 +137,7 @@ function torchArgs(packages: string[], cudaIndex: string): string[] {
   return IS_WINDOWS ? [...packages, "--index-url", cudaIndex] : [...packages];
 }
 
-/** "Installing PyTorch (CUDA 12.8)" reads as a lie on a Mac. */
+/** "Installing PyTorch (CUDA 13)" reads as a lie on a Mac. */
 function torchStage(cudaLabel: string): string {
   return IS_WINDOWS
     ? `Installing PyTorch (${cudaLabel}) — several GB, takes a while`
@@ -378,9 +385,122 @@ export const WHATDREAMSCOST_PIN: CustomNodeSpec = {
   },
 };
 
-export const CUSTOM_NODES: CustomNodeSpec[] = [GGUF_NODE_PIN, KJNODES_PIN, WHATDREAMSCOST_PIN];
+/* CUDA 13, not 12.8.
+ *
+ * Same torch, a different CUDA runtime under it — and the reason is one line in
+ * comfy/quant_ops.py: comfy-kitchen DISABLES its optimized CUDA backend when
+ * `torch.version.cuda < 13`, printing "You need pytorch with cu130 or higher to
+ * use optimized CUDA operations" and falling back to eager. Every quantized
+ * format the studio touches (fp8, nvfp4, int8-convrot, w4a8) runs through that
+ * backend, so on cu128 the 4-bit weights are read by the slowest path that can
+ * read them.
+ *
+ * CUDA 13 drops Maxwell through Volta (sm_50–70); Ampere, Ada and Blackwell are
+ * all still supported, and this project's floor is a 24 GB Ampere card. */
+const TORCH_INDEX = "https://download.pytorch.org/whl/cu130";
 
-const TORCH_INDEX = "https://download.pytorch.org/whl/cu128";
+/** Which llama.cpp wheel the Endless Sampler's Gemma runs on.
+ *
+ * The pack's own requirements.txt asks for `whl/cu125`. Two things are wrong
+ * with taking that at face value:
+ *
+ *  1. llama.cpp's ggml-cuda.dll resolves cudart/cublas by plain name, so it
+ *     loads whatever CUDA runtime is already on the search path — which in this
+ *     venv is the one torch shipped. The moment TORCH_INDEX moved to cu130 and
+ *     torch/lib became `cudart64_13.dll`, the cu125 build stopped importing at
+ *     all: "Could not find module llama.dll (or one of its dependencies)".
+ *  2. The matching cu130 build imports fine and then dies INSIDE
+ *     `llama_init_from_model` with `0xc000001d` — STATUS_ILLEGAL_INSTRUCTION.
+ *     Its ggml-cpu.dll is compiled for an instruction set this class of CPU
+ *     does not have (measured on a 12th-gen Core i7, where AVX-512 is fused
+ *     off — which is every consumer Alder Lake and Raptor Lake part). The same
+ *     version from `whl/cpu` loads the same model and generates.
+ *
+ * So: the CPU build, deliberately. Gemma runs between chunks with H3 unloaded,
+ * which is the one place in this pipeline where the GPU is idle anyway, and a
+ * planner that runs beats a planner that crashes. On a machine whose CPU can
+ * take it, `whl/cu130` is a one-word change here and worth making. */
+const LLAMA_CPP_INDEX = "https://abetlen.github.io/llama-cpp-python/whl/cpu";
+
+/** Long-form MiniMax-H3: a drop-in replacement for SamplerCustomAdvanced that
+ * samples one long latent as a chain of chunks, carrying the finished tail of
+ * each into the next as H3's own synchronized <Video N>/<Audio N> reference.
+ *
+ * It is a length feature, not a speed one. H3's trained window is ~15 seconds
+ * and a 24 GB card runs out well before that at full canvas; this makes the
+ * ceiling the wall clock instead of the VRAM. The cost is real: between chunks
+ * it runs Gemma 4 12B to re-plan the next chunk's prompt from the frames just
+ * rendered, which is what keeps a five-shot minute coherent instead of ten
+ * unrelated clips — and which is why the pack pulls in llama-cpp-python and
+ * downloads ~8 GB of Gemma on first use. Aurea gates the whole thing on the
+ * shot actually being longer than one chunk (see the adapter).
+ *
+ * llama-cpp-python is pinned to the version the pack pins, from the publisher's
+ * own wheel index: PyPI ships only an sdist, and building llama.cpp from source
+ * on a Windows box with no MSVC is not a thing to do inside an app's first-run
+ * install. WHICH index is a decision with a history — see LLAMA_CPP_INDEX. */
+export const ENDLESS_NODE_PIN: CustomNodeSpec = {
+  id: "endless-sampler",
+  name: "HR Endless Sampler (long-form H3)",
+  version: "d2939f0",
+  url: "https://github.com/hradec/ComfyUI-HR-Endless-Sampler/archive/d2939f08f9c6459d7d25ecc71605c8319deb513e.zip",
+  dir: "ComfyUI-HR-Endless-Sampler",
+  marker: "nodes.py",
+  pipArgs: [
+    "llama-cpp-python==0.3.35",
+    "huggingface-hub>=0.34.0",
+    "av>=16.0.0",
+    "--extra-index-url",
+    LLAMA_CPP_INDEX,
+  ],
+  check: {
+    /* torch FIRST, and not for show. llama.cpp's ggml-cuda.dll resolves
+     * cublas/cudart by plain name, and the only copy of those in this venv is
+     * the one torch ships in torch/lib — which is on the DLL search path only
+     * because `import torch` puts it there. Check it the way ComfyUI loads it
+     * (torch is long since imported by the time a node registers) or the check
+     * fails on a venv that works perfectly. */
+    code:
+      "import torch; import llama_cpp, huggingface_hub, av; " +
+      "print('endless deps ok '+llama_cpp.__version__)",
+    expect: /endless deps ok/,
+  },
+};
+
+export const CUSTOM_NODES: CustomNodeSpec[] = [
+  GGUF_NODE_PIN,
+  KJNODES_PIN,
+  WHATDREAMSCOST_PIN,
+  ENDLESS_NODE_PIN,
+];
+
+
+
+/** SageAttention, and the Triton it is written in.
+ *
+ * Not a nicety: at video sequence lengths attention IS the render. Benchmarked
+ * on this box's 3090 Ti (sm_86, fp16, 16 heads, head_dim 128) against torch's
+ * own SDPA:
+ *
+ *   16k tokens   45 ms → 14 ms   3.1×
+ *   49k tokens  377 ms → 131 ms  2.9×
+ *
+ * and a 1344×768 × 107-frame MiniMax-H3 latent is ~100k tokens, so this is the
+ * largest single lever on H3's wall-clock that costs no VRAM and no download of
+ * weights. KJNodes' PathchSageAttentionKJ (already pinned in CUSTOM_NODES) is
+ * what applies it per-model; it imports `sageattention` lazily, so without
+ * these two packages the node exists, the toggle looks available, and the
+ * render dies at the first attention call.
+ *
+ * PyPI's `sageattention` is the Triton implementation, which is the one that
+ * runs on Ampere — the CUDA-kernel builds in the 2.x line target sm_89+. On
+ * Windows Triton ships as `triton-windows`; on Linux it comes in with torch.
+ * macOS has neither and doesn't want them (no CUDA at all). */
+const ACCEL_PACKAGES: string[] | null = IS_WINDOWS
+  ? ["triton-windows", "sageattention"]
+  : process.platform === "linux"
+    ? ["sageattention"]
+    : null;
 /** rough site-packages + wheel cache footprint of the torch + requirements
  * installs, for progress estimation only */
 const PIP_EXPECTED_BYTES = 9 * 1024 ** 3;
@@ -611,7 +731,21 @@ export class EngineRuntime extends EventEmitter {
     void (async () => {
       const record = this.record();
       if (!this.pythonReady(record)) await this.installPython(ctrl.signal);
-      if (!this.comfyReady(this.record())) await this.installComfy(ctrl.signal);
+      if (this.comfyReady(this.record())) {
+        /* Already at the pin — but it may predate ACCEL_PACKAGES or the CUDA 13
+         * move, and neither of those bumps COMFY_PIN. Both are no-ops when the
+         * venv is already right. */
+        const live = this.begin("comfy");
+        try {
+          await this.upgradeTorchCuda(ctrl.signal, live);
+          await this.installAccel(ctrl.signal, live, path.join(this.root(), "pip-cache"));
+        } finally {
+          this.live.delete("comfy");
+          this.publish();
+        }
+      } else {
+        await this.installComfy(ctrl.signal);
+      }
       for (const spec of CUSTOM_NODES) {
         // after ComfyUI: pip deps land in the ComfyUI venv
         if (!this.nodeReady(spec, this.record())) {
@@ -783,7 +917,7 @@ export class EngineRuntime extends EventEmitter {
     // pip runs are resumable as a whole: already-satisfied packages are no-ops
     const poller = this.startSizePoller([venvDir, cacheDir], live, 15, 70);
     try {
-      live.stage = torchStage("CUDA 12.8");
+      live.stage = torchStage("CUDA 13");
       live.progress = 15;
       this.publish();
       // --index-url (not extra): PyPI must not win with a newer CPU-only build.
@@ -795,7 +929,7 @@ export class EngineRuntime extends EventEmitter {
         live,
       );
 
-      poller.band(70, 95);
+      poller.band(70, 90);
       live.stage = "Installing ComfyUI requirements";
       live.progress = 70;
       this.publish();
@@ -805,6 +939,9 @@ export class EngineRuntime extends EventEmitter {
         signal,
         live,
       );
+
+      poller.band(90, 95);
+      await this.installAccel(signal, live, cacheDir);
     } finally {
       poller.stop();
     }
@@ -825,6 +962,116 @@ export class EngineRuntime extends EventEmitter {
     this.saveRecord({ comfy: COMFY_PIN.tag });
     this.live.delete("comfy");
     this.publish();
+  }
+
+  /** Move an existing venv onto the CUDA build TORCH_INDEX now points at.
+   *
+   * Only ever runs on a venv that is already at COMFY_PIN, because a fresh one
+   * gets the right wheels from the index in the first place. It exists because
+   * the CUDA runtime is not part of any pin: cu128 → cu130 (2026-08-30, to stop
+   * comfy-kitchen disabling its optimized quant kernels) changes nothing that
+   * comfyReady() looks at, so the machines that have been rendering longest
+   * would be the only ones left on the slow path.
+   *
+   * Two details make this work rather than silently no-op:
+   *   - the version is asked of torch itself, not of pip metadata;
+   *   - the reinstall names the FULL local version ("2.11.0+cu130"), because
+   *     pip treats a bare "torch==2.11.0" as satisfied by the cu128 build.
+   * Same torch, same torchvision, same torchaudio — only the accelerator under
+   * them moves, so nothing else in the venv has to be reasoned about.
+   *
+   * Non-fatal, like the accel step: a runtime that renders is worth more than
+   * one that refuses to start because an index was briefly unreachable. */
+  private async upgradeTorchCuda(signal: AbortSignal, live: LiveComponent): Promise<void> {
+    if (!IS_WINDOWS) return; // macOS has no CUDA build to be on the wrong one of
+    const want = TORCH_INDEX.split("/").pop() ?? ""; // "cu130"
+    if (!/^cu\d+$/.test(want)) return;
+    let installed = "";
+    try {
+      installed = await this.capture(
+        this.venvPython(),
+        ["-c", "import torch;print(torch.__version__)"],
+        signal,
+      );
+    } catch {
+      return; // no importable torch yet — installComfy's own step owns that
+    }
+    const m = installed.trim().match(/^([\d.]+)\+(cu\d+)$/);
+    if (!m || m[2] === want) return;
+    live.stage = torchStage(`CUDA ${want.slice(2, -1)}`);
+    live.detail = `${installed.trim()} → ${m[1]}+${want}`;
+    this.publish();
+    const versions = [`torch==${m[1]}+${want}`];
+    for (const [pkg, expr] of [
+      ["torchvision", "import torchvision;print(torchvision.__version__)"],
+      ["torchaudio", "import torchaudio;print(torchaudio.__version__)"],
+    ] as const) {
+      try {
+        const v = (await this.capture(this.venvPython(), ["-c", expr], signal)).trim();
+        const vm = v.match(/^([\d.]+)\+cu\d+$/);
+        if (vm) versions.push(`${pkg}==${vm[1]}+${want}`);
+      } catch {
+        // not installed here; nothing to move
+      }
+    }
+    try {
+      await this.run(
+        this.venvPython(),
+        [
+          "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
+          "--cache-dir", path.join(this.root(), "pip-cache"),
+          ...versions, "--index-url", TORCH_INDEX,
+        ],
+        signal,
+        live,
+      );
+    } catch (err) {
+      if (signal.aborted) throw err;
+      live.detail = `CUDA upgrade skipped (${(err as Error).message.slice(0, 120)})`;
+      this.publish();
+    }
+    live.detail = null;
+  }
+
+  /** SageAttention and its Triton, into the ComfyUI venv.
+   *
+   * Allowed to fail. It is a speed-up, not a dependency: every engine here
+   * renders without it, so a wheel that does not exist yet for a new torch must
+   * leave the runtime installed and working rather than failing the whole setup
+   * at 90%. The adapters gate on the KJ node being present, and Settings shows
+   * the toggle either way.
+   *
+   * Called from installComfy for a fresh venv AND from install() for a runtime
+   * that was already at the pin — otherwise an install that predates
+   * ACCEL_PACKAGES would never get them, which is exactly the machine that has
+   * been rendering H3 the longest. pip is a no-op when they are already there. */
+  private async installAccel(
+    signal: AbortSignal,
+    live: LiveComponent,
+    cacheDir: string,
+  ): Promise<void> {
+    if (!ACCEL_PACKAGES) return;
+    const stage = live.stage;
+    const progress = live.progress;
+    live.stage = "Installing SageAttention";
+    live.progress = Math.max(progress, 90);
+    this.publish();
+    try {
+      await this.run(
+        this.venvPython(),
+        [
+          "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
+          "--cache-dir", cacheDir, ...ACCEL_PACKAGES,
+        ],
+        signal,
+        live,
+      );
+    } catch (err) {
+      if (signal.aborted) throw err;
+      live.detail = `SageAttention unavailable (${(err as Error).message.slice(0, 120)})`;
+      this.publish();
+    }
+    live.stage = stage;
   }
 
   /* ---------- custom nodes ---------- */

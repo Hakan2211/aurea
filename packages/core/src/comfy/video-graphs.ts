@@ -39,6 +39,8 @@ const N = {
   baseVideoLatent: "340:325",
   baseConcat: "340:326",
   baseGuider: "340:315",
+  /** the negative CLIPTextEncode (what TUNING_ANCHORS.negative points at) */
+  negative: "340:314",
   baseSeparate: "340:309",
   cropGuides: "340:292",
   /* the refine stage — everything draft mode deletes */
@@ -94,6 +96,8 @@ export const LTX23_MANAGED: LtxModelNames = {
 
 export interface VideoGraphSpec {
   prompt: string;
+  /** negative prompt text; omitted = the template's own default */
+  negative?: string;
   /** Staged ComfyUI input name of the start frame — ALWAYS a real staged file
    * (`uploadInput`'s return value, which carries its subfolder). For a
    * text-to-video render this is the placeholder; see textToVideo. */
@@ -158,6 +162,7 @@ export function ltx23Graph(spec: VideoGraphSpec): ComfyGraph {
   input(N.seed1).noise_seed = spec.seed;
   input(N.seed2).noise_seed = spec.seed;
   input(N.prompt).value = spec.prompt;
+  if (spec.negative?.trim()) input(N.negative).text = spec.negative.trim();
   input(N.save).filename_prefix = "aurea/take";
 
   // mask 0 = the staged take is fixed and drives the lips; mask 1 frees the

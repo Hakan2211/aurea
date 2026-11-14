@@ -98,6 +98,22 @@ test("three characters listen in the plural", () => {
   );
 });
 
+test("desk retake notes ride the anchor prompt, oldest first", () => {
+  const out = composeShotSpec(
+    shot({ takeNotes: ["tighter framing", "let the pause land"] }),
+    scene,
+    bible,
+    { takes },
+  );
+  assert.match(out.prompt, /\. Direction: tighter framing; let the pause land\.$/);
+  assert.equal(out.director.globalPrompt, out.prompt);
+});
+
+test("a shot with no retake notes composes the bare anchor", () => {
+  const out = composeShotSpec(shot(), scene, bible, { takes });
+  assert.doesNotMatch(out.prompt, /Direction:/);
+});
+
 test("beats tile the shot from 0s and the takes land where their beats start", () => {
   const out = composeShotSpec(shot(), scene, bible, { takes, leadInSec: 1, gapSec: 0.6 });
   // lead-in 0→1, Sterling 1→3.6 (2s + 0.6 gap), Bruno 3.6→end

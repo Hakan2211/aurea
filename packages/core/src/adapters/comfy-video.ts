@@ -43,7 +43,10 @@ import {
   resolveIngredientsLora,
   resolveTuning,
 } from "../comfy/capabilities.js";
-import { composeSheetPrompt } from "@aurea/shared";
+import { explainTuningFailure } from "../comfy/tuning.js";
+import { composeSheetPrompt,
+  resolveLoraByFile,
+} from "@aurea/shared";
 import { composeRefSheet } from "./ref-sheet.js";
 import { probeMedia } from "./ffmpeg-export.js";
 import { jobRunDir } from "./proc.js";
@@ -55,21 +58,6 @@ const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
 /** the stock template's negative prompt — a Director shot with no explicit
  * one still wants LTX kept off game-render and caption territory */
 const DEFAULT_NEGATIVE = "pc game, console game, video game, cartoon, childish, ugly";
-
-/** The render tuning knobs fail inside ComfyUI, far from the toggle that
- * turned them on — SageAttention in particular needs a pip package the node
- * pack does not install. Translate those into something the user can act on. */
-function explainTuningFailure(err: unknown): Error {
-  const message = err instanceof Error ? err.message : String(err);
-  if (/sageattention/i.test(message)) {
-    return new Error(
-      "SageAttention is on (Settings → Engines → Render tuning) but the `sageattention` " +
-        "package is not installed in the python that runs your ComfyUI. Install it there, " +
-        "or turn the toggle off.",
-    );
-  }
-  return err instanceof Error ? err : new Error(message);
-}
 
 const LOADERS = new Set([
   "CheckpointLoaderSimple",
@@ -128,13 +116,16 @@ export class ComfyVideoAdapter implements EngineAdapter {
       loras.push({ name: weight, strength: payload.cameraLora.strength });
     }
     for (const lora of payload.loras) {
-      if (!options.includes(lora.name)) {
+      // a look names its style LoRA by FILE; the install's own name for it
+      // (store folder, platform separators) is resolved here
+      const name = resolveLoraByFile(options, lora.name);
+      if (!name) {
         throw new Error(
           `LoRA "${lora.name}" is not in this ComfyUI's lora folder — ` +
             "pick from the list the lab offers (it is read live from the install)",
         );
       }
-      loras.push(lora);
+      loras.push({ ...lora, name });
     }
     return loras;
   }
@@ -235,6 +226,7 @@ export class ComfyVideoAdapter implements EngineAdapter {
 
         const graph = ltx23Graph({
           prompt: payload.prompt,
+          negative: payload.negativePrompt,
           imageName,
           textToVideo: !image,
           audioName: audioName ?? undefined,
@@ -255,6 +247,13 @@ export class ComfyVideoAdapter implements EngineAdapter {
           // repatch the placeholder LoadAudio to the staged silence
           (graph["276"].inputs as Record<string, unknown>).audio = `aurea/${job.id}-silence.wav`;
         }
+
+        // videoMode "managed" means LTX and H3 share one ComfyUI, so the warm
+        // weights this render arrives to are usually another engine's — same
+        // reasoning (and measured failure) as the H3 adapter's unconditional
+        // clear, just in the other direction.
+        report({ progress: 3.5, stage: "Clearing VRAM" });
+        await client.freeMemory();
 
         report({ progress: 4, stage: "Queuing on ComfyUI" });
         // progress: base sampler pass 6→55, refine 55→85, decode 85→94
@@ -558,6 +557,11 @@ export class ComfyVideoAdapter implements EngineAdapter {
         tuning: await resolveTuning(client, engines.videoTuning),
         filenamePrefix: "aurea/shot",
       });
+
+      // shared managed instance — clear another engine's warm weights first
+      // (see the plain-render path above and the H3 adapter for the rationale)
+      report({ progress: 3.5, stage: "Clearing VRAM" });
+      await client.freeMemory();
 
       report({ progress: 4, stage: "Queuing on ComfyUI" });
       let pass = 0;

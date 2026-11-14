@@ -27,6 +27,15 @@ export function runProcess(opts: {
   env?: Record<string, string>;
   /** appended to <runDir>/run.log */
   logFile?: string;
+  /** Also treat a bare carriage return as a line ending. Off by default
+   * because it is only right for one kind of output: a tqdm bar redraws
+   * itself with a carriage return and NO newline, so its updates sit
+   * unterminated in the buffer and `onLine` sees nothing at all until the
+   * bar finishes - which is how a progress bar wired to a sub-bar can look
+   * wired and still never move. Adapters whose engine narrates only in
+   * whole lines should leave this alone rather than take the callbacks.
+   */
+  splitCarriageReturns?: boolean;
   onLine?: (line: string) => void;
 }): ProcHandle {
   let child: ChildProcess;
@@ -47,7 +56,9 @@ export function runProcess(opts: {
       log?.write(chunk);
       if (!opts.onLine) return;
       buffer += chunk.toString();
-      const lines = buffer.split(/\r?\n/);
+      const lines = buffer.split(
+        opts.splitCarriageReturns ? /\r\n|[\r\n]/ : /\r?\n/,
+      );
       buffer = lines.pop() ?? "";
       for (const line of lines) opts.onLine(line);
     };

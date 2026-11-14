@@ -41,6 +41,19 @@ line, drag each take to the timeline). The Assembly Line makes that one decision
 progress screen.
 
 ### N1.1 `scene.assemble` orchestrator (core)
+
+> **Built 2026-11-10** (core + tools + Desk dialog; GPU end-to-end run still pending). Deltas from
+> the text below: procedures are `studio.assembly.{plan,start,get,list,cancel}`; tools
+> `scene_assemble_plan`, `scene_assemble`, `scene_assemble_status` (also crew verbs). The planner is
+> pure (`packages/shared/src/assembly.ts`), the runner is `packages/core/src/assembly.ts` and drives
+> the existing table-read / board / renderShot procedures, so there is still one path to every job.
+> `through: "board" | "render" | "cut"` (default `board`) keeps the playbook's two human gates;
+> the cut pass lays **approved** takes only and never approves. Lanes are picked by who speaks
+> (nobody → `zoo-broll-insert`, one voice → `zoo-interview-single`, several → `zoo-room-coverage`),
+> overridable per run or per shot. Dialogue renders stay on the LTX ia2v path with cast TTS, not
+> H3 ref2va, because H3 replaces the cast voice with its own (pilot #12). Jobs carry `job.batch`.
+> Batches are in memory; re-running is the resume (done = done, queued = inflight, waited on).
+> Read-only check against real data: `npx tsx scripts/plan-assembly.mts zoo-logic render [sceneId]`.
 A new tRPC procedure + job type that, for a target scene:
 1. **Board pass** — for every shot without a keyframe: `studio.board.generate` (qwen-edit
    + bible refs). Shots that already have keyframes are skipped.

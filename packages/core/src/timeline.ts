@@ -15,7 +15,7 @@ import {
   type TimelineTrackKind,
 } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
-import { defaultClipDuration } from "./adapters/ffmpeg-export.js";
+import { defaultClipDuration, isImageFile, probeMedia } from "./adapters/ffmpeg-export.js";
 
 const DEFAULT_TRACKS: Array<{ kind: "video" | "voice" | "music"; name: string }> = [
   { kind: "video", name: "Video" },
@@ -94,6 +94,45 @@ export class TimelineStore {
     return timeline;
   }
 
+  /** Set the sequence canvas outright (normalize_project, P4). The automatic
+   * rule — adopt the first clip's geometry on an empty sequence — stays as
+   * it is; this is the explicit override for a project that got its first
+   * clip before the rule existed. */
+  setCanvas(project: string, width: number, height: number): Timeline {
+    const tl = this.get(project);
+    if (tl.width === width && tl.height === height) return tl;
+    tl.width = width;
+    tl.height = height;
+    return this.update(project, tl);
+  }
+
+  /** Lay the base video track in a given order and re-butt the clips.
+   * `assets` is the running order as some other document defines it — for the
+   * desk that is production.json's own scene/shot order. Clips whose asset
+   * isn't named keep their relative position at the end, so a hand-placed
+   * cutaway is never thrown away by an approval.
+   *
+   * Approving out of script order used to build the cut in APPROVE order,
+   * silently (pilot defect #10, 2026-09-02): addClip appends at the track end,
+   * and the desk has every reason to approve a hard shot last. */
+  orderVideoTrack(project: string, assets: string[]): Timeline {
+    const tl = this.get(project);
+    const track = tl.tracks.find((t) => t.kind === "video");
+    if (!track || track.clips.length < 2) return tl;
+    const rank = new Map(assets.map((a, i) => [a, i]));
+    const ordered = track.clips
+      .map((clip, i) => ({ clip, i, rank: rank.get(clip.asset) ?? Number.MAX_SAFE_INTEGER }))
+      .sort((a, b) => a.rank - b.rank || a.i - b.i)
+      .map(({ clip }) => clip);
+    let cursor = 0;
+    track.clips = ordered.map((clip) => {
+      const placed = { ...clip, start: Math.round(cursor * 1000) / 1000 };
+      cursor += clip.duration; // butted, exactly as addClip lays them
+      return placed;
+    });
+    return this.update(project, tl);
+  }
+
   /* ---- granular clip ops (the Director's edit surface) ----
    * The desktop editor saves whole documents; these read-modify-write the same
    * file so both surfaces stay interchangeable. */
@@ -144,6 +183,23 @@ export class TimelineStore {
       transitionSec: input.transitionSec ?? 0,
     };
     track.clips.push(clip);
+    /* The canvas follows the FIRST clip laid on an empty sequence. A vertical
+     * Field Note dropped on the 1280×720 default came out pillarboxed with
+     * black rails down both sides (pilot defect #11) — and nobody was ever
+     * going to remember to set the canvas by hand before approving shot one.
+     * Once a sequence has clips the canvas is a deliberate choice and stays. */
+    if (kind === "video" && !isImageFile(file)) {
+      const laid = tl.tracks
+        .filter((t) => t.kind === "video")
+        .reduce((n, t) => n + t.clips.length, 0);
+      if (laid === 1) {
+        const probe = await probeMedia(file).catch(() => null);
+        if (probe?.width && probe.height) {
+          tl.width = probe.width;
+          tl.height = probe.height;
+        }
+      }
+    }
     return { clip, timeline: this.update(project, tl) };
   }
 

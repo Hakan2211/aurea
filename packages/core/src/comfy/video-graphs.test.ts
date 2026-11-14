@@ -137,3 +137,12 @@ test("text-to-video flips the template's own bypass switch", () => {
 test("an i2v render leaves the text-to-video switch alone", () => {
   assert.equal(ltx23Graph(spec())["340:305"].inputs.value, false);
 });
+
+test("a negative prompt replaces the template's default text; none keeps it", () => {
+  const stock = ltx23Graph(spec());
+  assert.match(String(stock["340:314"].inputs.text), /video game/);
+  const g = ltx23Graph(spec({ negative: "text, watermark, cartoon" }));
+  assert.equal(g["340:314"].inputs.text, "text, watermark, cartoon");
+  // whitespace-only means "not set", not an empty negative
+  assert.match(String(ltx23Graph(spec({ negative: "  " }))["340:314"].inputs.text), /video game/);
+});

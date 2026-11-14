@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  COVERAGE_ANGLES,
   FAL_SIZE_RULES,
   falImageEstimate,
   hasMinimaxRefs,
@@ -29,6 +30,8 @@ import { PromptLibrary } from "./promptlib.js";
 import { seedanceEstimate } from "./adapters/seedance.js";
 import { GPT_IMAGE_2_MAX_REFS } from "./adapters/fal-image.js";
 import { RVC_CONVERT_ESTIMATE, RVC_TRAIN_ESTIMATE, rvcModelPath } from "./adapters/replicate-rvc.js";
+import { MUSIC3_MAX_DURATION, music3Paths } from "./adapters/minimax-music.js";
+import { HUNYUAN3D_DEFAULTS, hunyuan3dPaths } from "./adapters/hunyuan3d.js";
 
 export interface LabEngine {
   id: string;
@@ -86,6 +89,20 @@ export const VIDEO_RESOLUTIONS = [
  * LTX past short durations. The flat list above stays for old callers. */
 export const VIDEO_RESOLUTIONS_BY_ENGINE: Record<string, string[]> = {
   ltx2: [
+    "704 × 896 (portrait)",
+    "576 × 1024 (9:16 vertical)",
+    "896 × 704 (landscape)",
+    "1280 × 704 (16:9)",
+    "1344 × 768 (16:9)",
+    "768 × 1344 (9:16)",
+    "1920 × 1088 (16:9 · HD)",
+    "1088 × 1920 (9:16 · HD vertical)",
+  ],
+  // 2.5's docs ask for multiples of 32, but the ×2 spatial upscaler halves
+  // the base pass exactly like 2.3's does — so the proven 64-grid presets
+  // carry over unchanged rather than trusting a silent snap (see the long
+  // comment on `durations` below for how that class of bug was found)
+  ltx25: [
     "704 × 896 (portrait)",
     "576 × 1024 (9:16 vertical)",
     "896 × 704 (landscape)",
@@ -542,13 +559,24 @@ export class Labs {
       ? this.runtime.componentReady("acestep") &&
         this.models.ready("acestep-v15")
       : !!engines.acestepDir;
+    const music3 = music3Paths(this.settings);
     return {
-      engine: {
-        id: "acestep",
-        label: "ACE-Step · local",
-        note: managed ? "songs + stems · managed engine" : "songs + stems · $0.00",
-        available: acestepReady,
-      } satisfies LabEngine,
+      engines: [
+        {
+          id: "acestep",
+          label: "ACE-Step · local",
+          note: managed ? "songs + stems · managed engine" : "songs + stems · $0.00",
+          available: acestepReady,
+        },
+        {
+          id: "minimax-music3",
+          label: "MiniMax-Music3 · local",
+          note: "full songs · expressive vocals · up to 2 min",
+          available: !!(music3.python && music3.modelDir),
+        },
+      ] satisfies LabEngine[],
+      /** Music3's ceiling — the shared slider max stays ACE-Step's 420 */
+      music3DurationMax: MUSIC3_MAX_DURATION,
       styleLibrary: [
         "Retro funk", "Sitcom brass", "Upbeat", "Lo-fi", "Orchestral",
         "Synthwave", "Jazz combo", "Cinematic", "Disco",
@@ -576,6 +604,58 @@ export class Labs {
     };
   }
 
+  model3dCatalog() {
+    const hy3d = hunyuan3dPaths(this.settings);
+    const available = !!(hy3d.python && hy3d.dir);
+    return {
+      engines: [
+        {
+          id: "hunyuan3d-2.1",
+          label: "Hunyuan3D-2.1 · local",
+          // This engine is operator-owned, so "not installed" is not
+          // actionable on its own — there is no managed install to press.
+          // Say which half is missing and where it is looked for.
+          note: available
+            ? "image → textured mesh · ~3 min"
+            : hy3d.dir
+              ? `no venv at ${hy3d.dir}/.venv — set engines.hunyuan3dPython`
+              : "no checkout with generate.py at D:/hunyuan3d — set engines.hunyuan3dDir",
+          available,
+        },
+      ] satisfies LabEngine[],
+      defaults: HUNYUAN3D_DEFAULTS,
+      /* Octree resolution is the one knob worth putting in front of someone:
+       * it sets both the detail the marching cubes can resolve and most of
+       * the shape stage's cost. The labels say what each tier is FOR, because
+       * "384" tells you nothing about whether to pick it. */
+      octreeChoices: [
+        { value: 256, label: "Draft", note: "fastest · silhouette only" },
+        { value: 384, label: "Standard", note: "the shipping default" },
+        { value: 512, label: "Hero", note: "slowest · fine surface detail" },
+      ],
+      textureSizes: [512, 1024, 2048],
+      /* The prompt path draws a concept still first. This is the framing the
+       * shape model was trained on — one subject, plain background, even
+       * light, no ground shadow — and getting it wrong costs the whole run,
+       * so the lab owns the wrapper rather than leaving it to the operator. */
+      conceptPrompt:
+        "studio product photograph of {subject}, centered, three-quarter view, " +
+        "floating on a pure white seamless background, soft even studio lighting, " +
+        "subtle reflections, ultra sharp, high detail",
+      /* Which engine draws the concept plate, for the prompt path. This is
+       * the biggest quality lever on the finished mesh — the shape model can
+       * only resolve what the plate actually shows — so it is a choice rather
+       * than a hardcoded default. Only "generate" models qualify: an edit
+       * model has nothing to edit here. */
+      conceptModels: this.imageCatalog()
+        .models.filter((m) => m.role === "generate" && m.available)
+        .map((m) => ({ id: m.id, label: m.label.replace(/ · local$/, ""), note: m.note })),
+      /** carried into every asset sidecar — the model's licence binds the output */
+      license:
+        "Tencent Hunyuan 3D 2.1 Community License — attribution required; not licensed in the EU, UK or South Korea.",
+    };
+  }
+
   videoCatalog() {
     const { engines, providers } = this.settings.get();
     const managed = engines.videoMode === "managed";
@@ -593,6 +673,17 @@ export class Labs {
           sub: managed ? "local · managed" : "local · free",
           note: "Best for local runs",
           available,
+        },
+        {
+          id: "ltx25",
+          label: "LTX-2.5",
+          sub: managed ? "local · managed" : "local · free",
+          note: "The 2.5 world model",
+          // same ComfyUI as ltx2 (0.32.0+ carries the 2.5 nodes in core), its
+          // own weight set; the adapter re-probes the version at render time
+          available: managed
+            ? this.runtime.componentReady("comfy") && this.models.ready("ltx-25-22b-int8")
+            : true,
         },
         {
           id: "minimax-h3",
@@ -615,6 +706,18 @@ export class Labs {
       ],
       engineNotes: {
         ltx2: "Renders on your GPU — $0.00",
+        ltx25: !this.models.ready("ltx-25-22b-int8")
+          ? "Weights not installed — Settings → Models → LTX 2.5 22B (int8), or link a " +
+            "folder that already has them"
+          : "Lightricks' 2.5 distilled 22B on your GPU — $0.00. Better fidelity and a much " +
+            "stronger distilled pass than 2.3. Takes a voice take for ia2v lip-sync; with " +
+            "none it scores the shot itself. No camera LoRAs or Director timeline yet — " +
+            "those stay on LTX-2.3 for now." +
+            (this.models.ready("ltx-25-prompt-enhancer")
+              ? " Prompt enhancement is on by default (Gemma 4 E2B rewrites short prompts, reading " +
+                "the start frame) — switch it off per render under Quality for a prompt written to " +
+                "a structure, like multi-shot prose."
+              : " Add LTX 2.5 Prompt Enhancer in Settings → Models to auto-expand short prompts."),
         "minimax-h3": !this.comfy.minimaxUrl()
           ? "Needs a ComfyUI on 0.30.0+ — the same one LTX uses will do (its core carries the " +
             "MiniMaxH3 nodes). Start it, or give H3 its own URL in Settings → Engines"
@@ -695,6 +798,10 @@ export class Labs {
           "jib-down",
           "static",
         ],
+        /** the 2.5 Gemma enhancer's weights are installed — payload.enhance
+         * chooses per render (false = the prompt reaches the encoder
+         * verbatim, which multi-shot prose requires) */
+        enhancer25: this.models.ready("ltx-25-prompt-enhancer"),
       },
       promptMax: 1000,
       tip: "The start frame anchors identity — generate it in the Image lab first, then describe the motion here.",
@@ -730,7 +837,10 @@ export class Labs {
       minimax: {
         limits: {
           durationSecMin: 4,
-          durationSecMax: 15,
+          /* H3's own trained window. Past it a shot is legal but has to be
+           * chunked, which is a different sampler and a different cost — see
+           * longForm below, and ask it, not this, for the real ceiling. */
+          durationSecMax: this.runtime.componentReady("endless-sampler") ? 120 : 15,
           fps: 24,
           /** the canvas H3 was trained on; sides must be multiples of 32 */
           shortEdge: 768,
@@ -746,12 +856,57 @@ export class Labs {
           "Both a first and a last frame are optional: none = text-to-video, first only = animate forward, both = the take must land on the last one.",
           "Roughly 10x LTX-2.3's render time for the same length on the same card — budget it as a hero shot, not a draft.",
           "The 2K presets render ~2.4× the pixels of the native 768-edge canvas — sharper stills-like frames, but the model was trained at 768, so treat 2K as a finishing choice and expect the wait to scale with the pixels.",
-          "SageAttention (Settings → Engines → MiniMax-H3 tuning) roughly halves the render time when the `sageattention` package is installed in that ComfyUI's python; the toggle is dropped silently when the node is missing.",
-          "Draft quality renders with the Turbo distill LoRA — 8 sampler steps instead of 25, ~3× faster, with plastic-looking skin on some shots. Block in Draft, deliver in Final.",
+          "SageAttention (Settings → Engines → MiniMax-H3 tuning) is on by default and the managed runtime installs it. Measured on a 3090 Ti at 1344x768 x 107 frames: 40 s/step to 30 s/step, 454s to 383s end to end — the fixed ~2 min of weight loading is why the whole render moves less than the steps do. The toggle is dropped silently when the install has no KJ node.",
+          "Quality has three rungs: Draft (LightX2V 4-step distill), Standard (their 8-step), and Final (the model's own 25-step schedule, no LoRA). Block in Draft, deliver in Standard or Final.",
+          "Past ~15s the shot is sampled in chunks by the HR Endless Sampler, which carries the finished tail of each chunk into the next and runs Gemma 4 between them to rewrite the prompt for what comes next.",
+          "A chunked prompt MUST carry shot markers, and the node validates them: [Shot 1] opens at frame 0 and takes NO timestamp; every later marker takes one — '[Shot 2] At 00:10.000,' — numbered sequentially from 1 with strictly increasing times. A long prompt with no [Shot 1] is rejected.",
         ],
-        /** Draft on H3 = the Turbo distill LoRA, gated on its own download the
-         * way the reference head is */
+        /** Draft and Standard on H3 = LightX2V's distilled LoRAs, gated on
+         * their own download the way the reference head is */
         turbo: { available: this.models.ready("minimax-h3-turbo-lora") },
+        /* H3's only camera control. Gated on its own small download, and
+         * reported the same way turbo is — the panel hides a control nobody
+         * can use rather than locking one nobody can unlock. */
+        camera: {
+          available: this.models.ready("minimax-h3-camera-lora"),
+          /* the payload's move ids the H3 weight has words for. `dolly-left/
+           * right` are handheld tracking on this LoRA, which is why the panel
+           * shows the LTX names and the adapter does the translating. */
+          moves: [
+            "dolly-in",
+            "dolly-out",
+            "dolly-left",
+            "dolly-right",
+            "jib-up",
+            "jib-down",
+            "static",
+          ],
+        },
+        /* Which checkpoint each head will actually load. w4a8 wins whenever it
+         * is installed — it is the same model, smaller and faster — but that
+         * makes it an invisible substitution, and "which model am I running"
+         * has to be answerable without reading a job's detail line after the
+         * fact. The panel shows this next to Quality. */
+        weights: {
+          fl2va: this.models.ready("minimax-h3-w4a8")
+            ? ("w4a8" as const)
+            : ("gguf" as const),
+          ref2va: this.models.ready("minimax-h3-ref-w4a8")
+            ? ("w4a8" as const)
+            : ("gguf" as const),
+        },
+        /** Shots past H3's own window, sampled as a chain of chunks by the HR
+         * Endless Sampler. A pinned custom-node pack rather than a download, so
+         * this asks the runtime, not the model manager. The ladder is H3-only
+         * on purpose: the shared one tops out at 20s because that is where LTX
+         * stops fitting, and these lengths would OOM it. */
+        longForm: {
+          available: this.runtime.componentReady("endless-sampler"),
+          /* every entry says "seconds" on purpose — the panel reads a length
+           * with parseInt, so "2 minutes" would render as a 2-second shot */
+          durations: ["30 seconds", "45 seconds", "60 seconds", "90 seconds", "120 seconds"],
+          durationSecMax: 120,
+        },
         /** H3's OTHER head. Same model, different checkpoint and node: instead
          * of a first frame it takes things to carry forward — stills, clips,
          * sound — and that is also the only way to edit an existing clip on
@@ -821,6 +976,11 @@ export class Labs {
     const why =
       mode === "external" && (!url || !ltx.director) ? this.comfy.lastDiscoveryNote() : null;
     if (why) ltx.note = why;
+    // the ×2 finish is a weight, not a node: a cold managed engine can't list
+    // its lora folder yet, but the model store knows whether it was installed
+    if (!ltx.reachable && mode === "managed" && this.models.ready("ltx-25-spatial-upscaler-ic")) {
+      ltx.finishUpscale = true;
+    }
     return { ...ltx, minimax };
   }
 }
@@ -945,7 +1105,7 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
         ...base,
         title: title(payload.description),
         kind: "music",
-        engine: "ACE-Step",
+        engine: payload.engine === "minimax-music3" ? "MiniMax-Music3" : "ACE-Step",
         detail: [
           `${payload.durationSec}s`,
           payload.duet ? "duet" : payload.arrangement,
@@ -956,6 +1116,41 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
           .filter(Boolean)
           .join(" · "),
       };
+    case "coverage": {
+      const stem = payload.source.split("/").pop() ?? payload.source;
+      return {
+        ...base,
+        title: `Coverage — ${stem.replace(/\.[^.]+$/, "")}`,
+        kind: "image",
+        engine: "MiniMax-H3 (ref2va)",
+        detail: [
+          `${COVERAGE_ANGLES.length} angles`,
+          payload.tier === "draft" ? "Draft" : "Standard",
+          payload.resolution,
+          payload.location || "",
+          payload.seed !== undefined ? `seed ${payload.seed}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }
+    case "model3d": {
+      const stem = payload.source.split("/").pop() ?? payload.source;
+      return {
+        ...base,
+        title: payload.name ?? stem.replace(/\.[^.]+$/, ""),
+        kind: "model3d",
+        engine: "Hunyuan3D-2.1",
+        detail: [
+          payload.textured ? "shape + PBR texture" : "shape only",
+          `octree ${payload.octree ?? HUNYUAN3D_DEFAULTS.octree}`,
+          payload.textured ? `${payload.textureSize ?? HUNYUAN3D_DEFAULTS.textureSize}px maps` : "",
+          payload.seed !== undefined ? `seed ${payload.seed}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }
     case "video": {
       const seedance = payload.engine === "seedance";
       const minimax = payload.engine === "minimax-h3";
@@ -963,11 +1158,39 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
       // a Director shot is a timeline, so the rail says what's on it rather
       // than the single "lip-sync" flag the one-take path could get away with
       const voices = d ? d.audio.length : payload.audio ? 1 : 0;
+      if (payload.finish) {
+        // a finish is named for the take it finishes, not for its prompt
+        const stem = (payload.finish.source.split("/").pop() ?? payload.finish.source).replace(/\.[^.]+$/, "");
+        return {
+          ...base,
+          title: payload.finish.mode === "refine" ? `Full render · ${stem}` : `Finish ×2 · ${stem}`,
+          kind: "video",
+          engine: "LTX-2.5",
+          detail: [
+            payload.finish.mode === "refine"
+              ? "refine pass over the draft's latents · same blocking"
+              : "Pixel Spatial Upscaler IC-LoRA",
+            payload.resolution,
+            `${payload.durationSec}s`,
+            payload.finish.mode === "upscale" && payload.finish.strength < 1
+              ? `strength ${payload.finish.strength}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        };
+      }
       return {
         ...base,
         title: title(payload.prompt),
         kind: "video",
-        engine: seedance ? "Seedance" : minimax ? "MiniMax-H3" : "LTX-2.3",
+        engine: seedance
+          ? "Seedance"
+          : minimax
+            ? "MiniMax-H3"
+            : payload.engine === "ltx25"
+              ? "LTX-2.5"
+              : "LTX-2.3",
         detail: [
           payload.resolution,
           `${payload.durationSec}s`,

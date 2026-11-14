@@ -17,6 +17,14 @@ const APACHE = {
   url: "https://www.apache.org/licenses/LICENSE-2.0",
   gated: false,
 };
+/** vrgamedevgirl84's style set states no licence on its cards — the author's
+ * own terms apply, which is exactly why it is gated: the user reads the card
+ * and accepts before anything downloads. */
+const styleLoraLicense = (repo: string) => ({
+  name: "No licence stated — the author's terms (see the model card)",
+  url: `https://huggingface.co/vrgamedevgirl84/${repo}`,
+  gated: true,
+});
 
 const withSize = (m: Omit<ModelInfo, "sizeBytes">): ModelInfo => ({
   ...m,
@@ -84,6 +92,111 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     license: {
       name: "LTX-2.3 Community License",
       url: "https://huggingface.co/Lightricks/LTX-2.3/blob/main/LICENSE",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
+    id: "ltx-25-22b-int8",
+    name: "LTX 2.5 22B (int8)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx25)",
+    description:
+      "Lightricks' 2.5 world model — native multishot, diffusion-fidelity rendering, and a " +
+      "distilled transformer good enough to be the only one you run locally. Distilled int8 " +
+      "transformer + Gemma 4 12B int8 encoder + video/audio VAEs + spatial upscaler; ~40 GB, " +
+      "fits a 24 GB GPU with offloading. Needs ComfyUI 0.32.0+.",
+    files: [
+      {
+        name: "diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+        sizeBytes: 21504034224,
+        sha256: "c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334",
+      },
+      {
+        name: "text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+        sizeBytes: 15372971786,
+        sha256: "09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de",
+      },
+      {
+        name: "vae/ltx-2.5-video-vae-bf16.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors",
+        sizeBytes: 1472223346,
+        sha256: "847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3",
+      },
+      {
+        name: "vae/ltx-2.5-audio-vae-bf16.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors",
+        sizeBytes: 364866540,
+        sha256: "c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5",
+      },
+      {
+        name: "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+        sizeBytes: 995778752,
+        sha256: "eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8",
+      },
+    ],
+    license: {
+      name: "LTX-2.5 Community License",
+      url: "https://huggingface.co/Lightricks/LTX-2.5/blob/main/LICENSE.md",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
+    // the 2.5 prompt enhancer — its own entry because 10 GB of Gemma 4 E2B is
+    // a choice, not a requirement: the engine renders fine on the raw prompt
+    id: "ltx-25-prompt-enhancer",
+    name: "LTX 2.5 Prompt Enhancer (Gemma 4 E2B)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx25)",
+    description:
+      "The small Gemma 4 encoder the official LTX 2.5 workflows use to expand a short prompt " +
+      "into the detailed shot description the model was trained on — reading the start frame " +
+      "too, so the rewrite matches the picture. Optional; without it the raw prompt is used.",
+    files: [
+      {
+        name: "text_encoders/gemma4_e2b_it_bf16.safetensors",
+        url: "https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e2b_it_bf16.safetensors",
+        sizeBytes: 10278774160,
+        sha256: "dcc3c8d27be2db2ef38b78d564ebfa1e92eb24665ed2751f2983275f03a067c8",
+      },
+    ],
+    license: {
+      name: "Gemma Terms of Use",
+      url: "https://ai.google.dev/gemma/terms",
+      gated: false,
+    },
+    essential: false,
+  }),
+  withSize({
+    // the ×2 finishing pass (Video Lab quality plan Q1): an IC-LoRA that reads
+    // the finished take as an in-context reference and re-renders it at twice
+    // the size with invented detail. Its own entry because it is a finish, not
+    // a render — nothing needs it until a take is worth keeping. The filename
+    // matches INFRA_LORA (ic-lora), so it stays out of the user LoRA slots.
+    id: "ltx-25-spatial-upscaler-ic",
+    name: "LTX 2.5 Pixel Spatial Upscaler (IC-LoRA ×2)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx25) · finish",
+    description:
+      "Lightricks' ×2 generative upscaler for LTX 2.5: a second pass that reads a finished " +
+      "take as its reference and re-renders it at twice the resolution with synthesized " +
+      "fur, edge and texture detail — the answer to 2.5's softness at full quality. Used by " +
+      "the take's Finish → Upscale action; not needed for rendering.",
+    files: [
+      {
+        name: "loras/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+        url: "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler/resolve/main/ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors",
+        sizeBytes: 327322640,
+        sha256: "984851b769ea2bcb4c9e0a239a7676239e42c6a6001ddc69943b41ff0b283c1d",
+      },
+    ],
+    license: {
+      name: "LTX-2 Community License",
+      url: "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler/blob/main/LICENSE.md",
       gated: true,
     },
     essential: false,
@@ -166,22 +279,397 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   }),
   withSize({
     id: "minimax-h3-turbo-lora",
-    name: "MiniMax-H3 Turbo LoRA",
+    name: "MiniMax-H3 Turbo LoRAs",
     use: "video",
     engine: "ComfyUI · Video Lab (minimax-h3 · draft)",
     description:
-      "Distilled few-step LoRA for MiniMax-H3 — the same joint audio-video pass in 8 sampler " +
-      "steps instead of 25, roughly 3× faster wall-clock. A preview-quality distill: expect " +
-      "plastic-looking skin and over-sharp grain on some shots, which is why it renders the " +
-      "Draft tier and the 25-step sampler stays the Final one. ComfyUI-compatible conversion " +
-      "of larryvrh's turbo LoRA (drbaph repack, ema ckpt850); loads on both the fl2va and " +
-      "ref2va heads.",
+      "LightX2V's distilled few-step LoRAs for MiniMax-H3 — the same joint audio-video pass in " +
+      "4 or 8 sampler steps instead of 25. Three weights, one per tier and head: 4-step v1.1 " +
+      "(Draft), 8-step v1.0 (Standard — the tier LightX2V runs in its own hosted studio, and " +
+      "the one to reach for when a 4-step take looks plastic), and the 4-step ref2v distill for " +
+      "H3's reference head, which the fl2v LoRAs do not fit. Final stays the model's own " +
+      "25-step schedule with no LoRA at all.",
     files: [
       {
-        name: "loras/minimax_h3_turbo_4step_ema_ckpt850_pruned_comfyui.safetensors",
-        url: "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/minimax_h3_turbo_4step_ema_ckpt850_pruned_comfyui.safetensors",
+        // Draft. v1.1 over v1.0: same size and shape, later checkpoint.
+        name: "loras/minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors",
+        sizeBytes: 1956192992,
+        sha256: "449d80f301ac571622c72e28b8fd72a4b3681b7a8df8a92f17c8f6ec43f56558",
+      },
+      {
+        // Standard
+        name: "loras/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+        sizeBytes: 1956193000,
+        sha256: "08cfe946033af7d27719b964b6e0a0e50c32138daabbd6ce4137e23df6bf9980",
+      },
+      {
+        /* The reference head's own distill. Aurea used to put ONE turbo LoRA
+         * on both heads on the reasoning that the distill was trained on the
+         * shared transformer — LightX2V ships fl2v and ref2v separately, so
+         * that reasoning was a guess and this is the publisher's answer. */
+        name: "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        sizeBytes: 1956193000,
+        sha256: "5b9ab5ade15d0775676d01a907268a69a1468dc6033b3b0d3ded5502f3ebb84c",
+      },
+    ],
+    license: APACHE,
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-tutu-8step-lora",
+    name: "MiniMax-H3 Tutu 20→8 NFE LoRA",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · standard)",
+    description:
+      "A second candidate for the Standard tier: a 20→8 NFE distill of the fl2va head that " +
+      "claims to keep H3's stereo audio and lip-sync, where a generic few-step distill tends to " +
+      "trade them away. It is NOT a drop-in swap for the LightX2V 8-step weight — the author " +
+      "publishes a sampling contract and is explicit that it must be honoured: euler (not " +
+      "res_multistep), 8 steps, shift 12/3, strength 0.8, and NINE fixed sigmas that must be " +
+      "supplied verbatim (\"do not replace these with a generic uniform 8-step schedule\"). " +
+      "Aurea supplies them; the manual schedule needs KJNodes' Custom Sigmas node. Three " +
+      "checkpoints ship — step100 is the author's recommended start and the one the adapter " +
+      "loads, with 200 and 300 there to A/B against it. Known issue: visible ghosting in fast " +
+      "motion. fl2va only — the reference head keeps its own distill.",
+    files: [
+      {
+        // the author's recommended start
+        name: "loras/tutu-t8-minimax-h3-av-20to8-nfe-lora-step000100-bf16-comfyui.safetensors",
+        url: "https://huggingface.co/tutututututu/Tutu-MiniMax-H3-AudioVideo-20to8-NFE-LoRA/resolve/main/comfyui/tutu-t8-minimax-h3-av-20to8-nfe-lora-step000100-bf16-comfyui.safetensors",
+        sizeBytes: 773709596,
+        sha256: "d88b5fd7c61e706566cbb42744e33e82f4b6e9ea585f687bfdbd989ab7c6045e",
+      },
+      {
+        name: "loras/tutu-t8-minimax-h3-av-20to8-nfe-lora-step000200-bf16-comfyui.safetensors",
+        url: "https://huggingface.co/tutututututu/Tutu-MiniMax-H3-AudioVideo-20to8-NFE-LoRA/resolve/main/comfyui/tutu-t8-minimax-h3-av-20to8-nfe-lora-step000200-bf16-comfyui.safetensors",
+        sizeBytes: 773709596,
+        sha256: "0709bd8345a5cdc2851fdbd1b66187f69d7e324b7e8883dde5cce40ec613e8c6",
+      },
+      {
+        name: "loras/tutu-t8-minimax-h3-av-20to8-nfe-lora-step000300-bf16-comfyui.safetensors",
+        url: "https://huggingface.co/tutututututu/Tutu-MiniMax-H3-AudioVideo-20to8-NFE-LoRA/resolve/main/comfyui/tutu-t8-minimax-h3-av-20to8-nfe-lora-step000300-bf16-comfyui.safetensors",
+        sizeBytes: 773709596,
+        sha256: "8789aeedd9feedc93babf3643042a86c4256f8b95dbf5d6918a6c89a896a03d3",
+      },
+    ],
+    license: {
+      name: "Tutu MiniMax-H3 LoRA licence",
+      url: "https://huggingface.co/tutututututu/Tutu-MiniMax-H3-AudioVideo-20to8-NFE-LoRA/blob/main/LICENSE",
+      gated: false,
+    },
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-turbo-lora-v2",
+    name: "MiniMax-H3 Turbo LoRAs (Sep–Oct releases)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · draft / standard candidates)",
+    description:
+      "LightX2V's later distills, as bake-off candidates against the shipped Turbo set — " +
+      "nothing renders on them until a payload names them. The first TRUE 8-step ref2v (the " +
+      "shipped Standard runs the 4-step ref2v at 8 steps), the 768p 4-step ref2v v1.0, fl2v " +
+      "8-step v1.1 and fl2v 4-step v1.2 (\"cleaner, more stable audio\"). Publisher recipe: " +
+      "fl2v at video/audio shift 6/3, ref2v at 12/3, Euler. fl2v 4-step v1.3 is left out on " +
+      "purpose: its release thread reports it breaking with sparse attention and other LoRAs.",
+    files: [
+      {
+        name: "loras/minimax_h3_fl2v_turbo_8step_v1.1_768p_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.1_768p_comfyui_bf16.safetensors",
+        sizeBytes: 1956193000,
+        sha256: "fb4c00361c94bad47f878d5e096c6cab2f45063b0968bd5756dcb7da6936f53e",
+      },
+      {
+        name: "loras/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+        sizeBytes: 1956193000,
+        sha256: "6a56f41ab4229c9dd845b9501bbd475ee57e112d846cf2e819d534a1ae928c5a",
+      },
+      {
+        name: "loras/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+        sizeBytes: 1956193000,
+        sha256: "c8168ebc17bbacc4296103dda2fec1ba85b24392fa08cf2bfbcef0cff0dc3cc8",
+      },
+      {
+        name: "loras/minimax_h3_ref2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+        sizeBytes: 1956193000,
+        sha256: "b4da466e43588004097dfbcde245ccc439c34a26bc997cb76a0b53a1d549ea0d",
+      },
+    ],
+    license: APACHE,
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-hyperflow-lora",
+    name: "MiniMax-H3 HyperFlow 8-step LoRA",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · standard candidate)",
+    description:
+      "Video Rebirth's 8-step HyperFlow distill in drbaph's ComfyUI conversion: pruned (for " +
+      "the pruned w4a8 base Aurea's fast path runs) and SVD-resized to rank 20, 316 MB against " +
+      "the 3.9 GB original. One weight for both heads. It brings a fixed 9-point sigma ladder " +
+      "(read from HyperFlow's own file header, shifted 12 for the sampler) and needs KJNodes' " +
+      "Custom Sigmas node. The ComfyUI conversion drops HyperFlow's second time embedder, so " +
+      "this is an approximation of the upstream method, not the method.",
+    files: [
+      {
+        name: "loras/minimax_h3_hyperflow_8step_v1.0_comfyui_pruned_bf16_resized_avg_rank_20_bf16.safetensors",
+        url: "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/minimax_h3_hyperflow_8step_v1.0_comfyui_pruned_bf16_resized_avg_rank_20_bf16.safetensors",
+        sizeBytes: 315905192,
+        sha256: "f8c307078def510312bb374509e70e8a9384e9ac963cf3da3fbf3dab0e630089",
+      },
+    ],
+    license: {
+      // the weights' own header: derivative of H3, under H3's licence
+      name: "MiniMax H3 Community License Agreement (HyperFlow derivative weights)",
+      url: "https://huggingface.co/VideoRebirthAI/hyperflow/blob/main/LICENSE",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-turbo-v4-lora",
+    name: "MiniMax-H3 Turbo v4 step-600 (6-step)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · standard candidate)",
+    description:
+      "drbaph's recommended workflow weight: the v4 step-600 EMA turbo, converted for pruned " +
+      "H3 bases. Card recipe: 6–8 steps, Euler + Beta, strength 1.0, video shift 12, audio " +
+      "shift 4–6. Aurea runs it at 6 steps — a rung between Draft (4) and Standard (8). " +
+      "fl2va head only.",
+    files: [
+      {
+        name: "loras/minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
+        url: "https://huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI/resolve/main/minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
         sizeBytes: 620285592,
-        sha256: "ca29f15222f42d8a8edf91dc29fce8438044e5f65b52fa1eb7396567c2b3a3b4",
+        sha256: "7098acf3ee75028fd9fcd948f50fcc8d995057fabb76f86bd3ca2c0ffc58e409",
+      },
+    ],
+    license: APACHE,
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-camera-lora",
+    name: "MiniMax-H3 Camera Motion LoRA",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · camera)",
+    description:
+      "Camera control for H3, which otherwise has none: the prompt is its whole surface, so a " +
+      "move was only ever a description and the model took it or left it. Jojocodex's LoRA " +
+      "gives push-in, pull-back, orbit, handheld tracking, crane, pan, tilt, macro and aerial " +
+      "as steerable moves. The trigger phrase `camera motion` must OPEN the prompt — the " +
+      "adapter prepends it. Strength 0.8 is gentle, 1.0 pronounced, past 1.2 unstable; " +
+      "push-in, pull-back and handheld are the author's most stable moves and pan the weakest. " +
+      "Two checkpoints ship: the 3000-step weight is the default and the 1000-step one is " +
+      "there to A/B against it.",
+    files: [
+      {
+        name: "loras/camera_motion_h3_lora_v1_3000_pruned.safetensors",
+        url: "https://huggingface.co/Jojocodex/minimax-h3-Camera-Motion-lora/resolve/main/camera_motion_h3_lora_v1_3000_pruned.safetensors",
+        sizeBytes: 155109680,
+        sha256: "9d7d98d7377f56efed3aa7d507f767936112d208906f49908ec9a8ae912be88b",
+      },
+      {
+        // the gentler checkpoint — A/B experiment #3 in the upgrade plan
+        name: "loras/camera_motion_h3_lora_v1_1000_pruned.safetensors",
+        url: "https://huggingface.co/Jojocodex/minimax-h3-Camera-Motion-lora/resolve/main/camera_motion_h3_lora_v1_1000_pruned.safetensors",
+        sizeBytes: 155109488,
+        sha256: "c126738c887804ace3a4be4a3156fcca70517613c7a7ece4e5938d372419186b",
+      },
+    ],
+    license: APACHE,
+    essential: false,
+  }),
+  withSize({
+    id: "ltx-style-anime",
+    name: "LTX style · Fantasy anime",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx2 / ltx25 · style)",
+    description:
+      "Cinematic fantasy-anime cel-shaded illustration: hand-drawn linework, painted shading, expressive faces. " +
+      "One of vrgamedevgirl84's LTX 2.3 22b style adapters (F3 of the freeform plan): a LOOK names it " +
+      "by file in payload.loras and the adapters resolve the install's own name. Trained on 2.3; the " +
+      "2.5 adapter loads the same keys. Strength 1.0 is the author's; the trigger word `f4nt4sy4n1m6` " +
+      "helps but is not required. MEASURED 2026-09-02 (one seed, enhancer off): a clear win over prose alone — the prose arm renders a 3D CG fox, this one a true 2D cel-shaded frame. Ships on the Anime cel look.",
+    files: [
+      {
+        name: "loras/Fantasy_Anime.safetensors",
+        url: "https://huggingface.co/vrgamedevgirl84/LTX_2.3_Fantasy_Anime_Style_LoRa/resolve/main/Fantasy_Anime.safetensors",
+        sizeBytes: 352679880,
+        sha256: "8e0d80a8ee65a2d76057f6cdbc2ba125f56385624040bca67cadddd16d10187a",
+      },
+    ],
+    license: styleLoraLicense("LTX_2.3_Fantasy_Anime_Style_LoRa"),
+    essential: false,
+  }),
+  withSize({
+    id: "ltx-style-claymation",
+    name: "LTX style · Claymation",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx2 / ltx25 · style)",
+    description:
+      "Stop-motion clay diorama: sculpted figures with fingerprints, miniature sets, warm cinematic light. " +
+      "One of vrgamedevgirl84's LTX 2.3 22b style adapters (F3 of the freeform plan): a LOOK names it " +
+      "by file in payload.loras and the adapters resolve the install's own name. Trained on 2.3; the " +
+      "2.5 adapter loads the same keys. Strength 1.0 is the author's; the trigger word `claymation style` " +
+      "helps but is not required. MEASURED 2026-09-02 (one seed, enhancer off): NOT shipped on a look — the prose arm was, if anything, more felted than the adapter's. The Claymation look renders on H3, which has no LoRA arm at all.",
+    files: [
+      {
+        name: "loras/Claymation.safetensors",
+        url: "https://huggingface.co/vrgamedevgirl84/LTX_2.3_Clay_Mation_Style_LoRa/resolve/main/Claymation.safetensors",
+        sizeBytes: 352679880,
+        sha256: "e1098c8b7e6f8bc6a183ce21f5aa9b7f528e3de1c9294eecc4d82d0c3dc3f923",
+      },
+    ],
+    license: styleLoraLicense("LTX_2.3_Clay_Mation_Style_LoRa"),
+    essential: false,
+  }),
+  withSize({
+    id: "ltx-style-painterly",
+    name: "LTX style · Fantasy painterly",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx2 / ltx25 · style)",
+    description:
+      "Oil-painted cinematic fantasy: visible brushwork, layered paint texture, luminous highlights. " +
+      "One of vrgamedevgirl84's LTX 2.3 22b style adapters (F3 of the freeform plan): a LOOK names it " +
+      "by file in payload.loras and the adapters resolve the install's own name. Trained on 2.3; the " +
+      "2.5 adapter loads the same keys. Strength 1.0 is the author's; the trigger word `D4rkP41nt3r` " +
+      "helps but is not required. MEASURED 2026-09-02 (one seed, enhancer off): a clear win over prose alone — visible impasto brushwork and canvas where the prose arm was photographic. Ships on the Oil-paint look.",
+    files: [
+      {
+        name: "loras/Fantasy_Painterly.safetensors",
+        url: "https://huggingface.co/vrgamedevgirl84/LTX_2.3_Fantasy_Painterly_Style_LoRa/resolve/main/Fantasy_Painterly.safetensors",
+        sizeBytes: 352679888,
+        sha256: "4a12d30f8277e9d7be8431b4d35214af7c62bc188807a5c53dc47e9a8ff562c4",
+      },
+    ],
+    license: styleLoraLicense("LTX_2.3_Fantasy_Painterly_Style_LoRa"),
+    essential: false,
+  }),
+  withSize({
+    id: "ltx-style-pixar-toon",
+    name: "LTX style · CGI toon",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx2 / ltx25 · style)",
+    description:
+      "Feature-animation CGI toon: smooth stylised surfaces, big expressive eyes, soft global illumination (no studio IP in the set). " +
+      "One of vrgamedevgirl84's LTX 2.3 22b style adapters (F3 of the freeform plan): a LOOK names it " +
+      "by file in payload.loras and the adapters resolve the install's own name. Trained on 2.3; the " +
+      "2.5 adapter loads the same keys. Strength 1.0 is the author's; the trigger word `P1x4r` " +
+      "helps but is not required. MEASURED 2026-09-02 (one seed, enhancer off): NOT shipped on a look — the prose already renders a clean CGI toon and the adapter's difference was marginal. Installable if you want to try it.",
+    files: [
+      {
+        name: "loras/Pixar_Toon.safetensors",
+        url: "https://huggingface.co/vrgamedevgirl84/LTX_2.3_Pixar_Toon_Style_LoRa/resolve/main/Pixar_Toon.safetensors",
+        sizeBytes: 352679872,
+        sha256: "7606e01d7e9bccbd983b720062e3ce6118f3efaa4c233f5448dc78eebf5e140b",
+      },
+    ],
+    license: styleLoraLicense("LTX_2.3_Pixar_Toon_Style_LoRa"),
+    essential: false,
+  }),
+  withSize({
+    id: "ltx-style-papercut",
+    name: "LTX style · Paper cut-out",
+    use: "video",
+    engine: "ComfyUI · Video Lab (ltx2 / ltx25 · style)",
+    description:
+      "Layered paper diorama: cut edges, stacked sheets, slight curl, cosy storybook light. " +
+      "One of vrgamedevgirl84's LTX 2.3 22b style adapters (F3 of the freeform plan): a LOOK names it " +
+      "by file in payload.loras and the adapters resolve the install's own name. Trained on 2.3; the " +
+      "2.5 adapter loads the same keys. Strength 1.0 is the author's; the trigger word `Pap3rCut0u7` " +
+      "helps but is not required. MEASURED 2026-09-02 (one seed, enhancer off): NOT shipped on a look — it moved the props towards card but left a plush 3D subject, so neither arm was true paper cut-out. Installable if you want to try it.",
+    files: [
+      {
+        name: "loras/PaperCutOutStyle.safetensors",
+        url: "https://huggingface.co/vrgamedevgirl84/LTX_2.3_Paper_Cut_Out_Style_LoRa/resolve/main/PaperCutOutStyle.safetensors",
+        sizeBytes: 352679880,
+        sha256: "7e3baf133a9ebd05c9ea0102be3744a7308d89a6dc405d8809e0f0519a24543b",
+      },
+    ],
+    license: styleLoraLicense("LTX_2.3_Paper_Cut_Out_Style_LoRa"),
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-w4a8",
+    name: "MiniMax-H3 (w4a8 · fast)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3)",
+    description:
+      "The fl2va head as 4-bit weights with int8 activations, plus the int8 video VAE. Same " +
+      "model as the GGUF entry, a different bargain: GGUF dequantizes every weight back to " +
+      "bf16 on every forward, where w4a8 unpacks once and multiplies on the card's INT8 tensor " +
+      "cores. 12.5 GB instead of 15.6 (and 3.2 instead of 5.2 for the VAE), so the DiT stops " +
+      "sharing 24 GB with its own text encoder. Needs ComfyUI 0.31+; still uses the GGUF " +
+      "entry's Qwen3-VL text encoder and audio VAE, so install that one too.",
+    files: [
+      {
+        name: "diffusion_models/minimax_h3_fl2va_pruned_w4a8_mixed.safetensors",
+        url: "https://huggingface.co/Kijai/MiniMax-H3-experimental/resolve/main/minimax_h3_fl2va_pruned_w4a8_mixed.safetensors",
+        sizeBytes: 12540858008,
+        sha256: "01aa7b92c007c599890461c325f9b7e3c96fb06c36f242f95b62f7f20e538dec",
+      },
+      {
+        // ~1.5× on the decode, and 2 GB of headroom back at the exact moment
+        // the graph is holding a full-length latent
+        name: "vae/minimax_h3_video_vae_int8_convrot.safetensors",
+        url: "https://huggingface.co/Kijai/MiniMax-H3-experimental/resolve/main/minimax_h3_video_vae_int8_convrot.safetensors",
+        sizeBytes: 3171670912,
+        sha256: "9bb2d96f218c76babd85e0611b85ca8fb330a90546c01a0005e8a58a59593410",
+      },
+    ],
+    license: {
+      name: "MiniMax H3 Community License Agreement",
+      url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-ref-w4a8",
+    name: "MiniMax-H3 Reference (w4a8 · fast)",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · references)",
+    description:
+      "The ref2va head in the same 4-bit/int8 format — 11.8 GB against the GGUF's 15.6. Pairs " +
+      "with MiniMax-H3 (w4a8): the two heads are separate checkpoints, and a reference shot " +
+      "renders on this one.",
+    files: [
+      {
+        name: "diffusion_models/minimax_h3_ref2va_pruned_w4a8_mixed.safetensors",
+        url: "https://huggingface.co/Kijai/MiniMax-H3-experimental/resolve/main/minimax_h3_ref2va_pruned_w4a8_mixed.safetensors",
+        sizeBytes: 11770657048,
+        sha256: "de2c6c29c4ee702b45e48e40daae3834aeee58ab681c732d9152589a87c89910",
+      },
+    ],
+    license: {
+      name: "MiniMax H3 Community License Agreement",
+      url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
+    id: "minimax-h3-sla-lora",
+    name: "MiniMax-H3 Turbo SLA LoRA",
+    use: "video",
+    engine: "ComfyUI · Video Lab (minimax-h3 · draft)",
+    description:
+      "The 4-step distill again, trained to render with 85% of its attention thrown away " +
+      "(sparse linear attention). LightX2V measured ~2.5× on a 5090 against their own 4-step " +
+      "baseline. Optional and separate from the Turbo entry on purpose: the speed-up is in the " +
+      "sparse-attention kernels, so on a card or a ComfyUI without them this weight is simply " +
+      "the v0.1 4-step LoRA with none of the win.",
+    files: [
+      {
+        name: "loras/minimax_h3_fl2v_turbo_4step_v0.1_768p_sla_comfyui_bf16.safetensors",
+        url: "https://huggingface.co/lightx2v/Minimax-h3-Turbo-SLA/resolve/main/minimax_h3_fl2v_turbo_4step_v0.1_768p_sla_comfyui_bf16.safetensors",
+        sizeBytes: 1956192992,
+        sha256: "5cae6df40a06ea825f85fc8876c9ea1c9692c833a9af07bb8b3bac9ce2a71bac",
       },
     ],
     license: APACHE,

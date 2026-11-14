@@ -44,6 +44,7 @@ export class SystemMonitor extends EventEmitter {
     ...systemFallback,
     ram: `${Math.round(os.totalmem() / 1024 ** 3)} GB`,
     queuePaused: false,
+    staleBuild: false,
   };
 
   constructor(private settings?: SettingsStore) {

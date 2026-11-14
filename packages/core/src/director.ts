@@ -5,10 +5,16 @@
  * "everything the app can do" and "everything the Director can do" are the
  * same list by construction.
  *
- * One chat thread per project, persisted at
- * <dataRoot>/projects/<id>/director.json; conversation continuity rides on
- * Claude Code's own session store via resume. State updates stream to the
- * renderer through the director.onUpdate subscription. */
+ * A project holds MANY threads, indexed at
+ * <dataRoot>/projects/<id>/director/index.json with one <threadId>.json per
+ * thread. Conversation continuity rides on Claude Code's own session store via
+ * resume — so a thread with a null sessionId opens a genuinely fresh context
+ * window, which is the entire reason threads exist. Projects written before
+ * threads keep their single director.json and are migrated on first load.
+ *
+ * The run lock stays per PROJECT, not per thread: the studio tools (shot_update,
+ * timeline_*, production_*) are single-writer, so only one thread may be working
+ * at a time. State updates stream to the renderer through director.onUpdate. */
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
@@ -24,11 +30,16 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   directorChatFileSchema,
+  directorThreadIndexSchema,
   jobStatusSchema,
   type DirectorAttachment,
   type DirectorChatFile,
   type DirectorMessage,
   type DirectorState,
+  type DirectorThread,
+  type DirectorThreadBind,
+  type DirectorThreadIndex,
+  type DirectorThreads,
 } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 import { buildTools, createStudiodApi, type AureaTool } from "./tools.js";
@@ -203,13 +214,214 @@ interface ActiveRun {
   abort: AbortController;
   /** set by stop() so the abort reads as "user pressed stop", not an engine failure */
   stopped: boolean;
+  /** which thread owns the lock — the run keeps writing here even if the user
+   * switches the switcher to another thread mid-stream */
+  threadId: string;
+}
+
+const DEFAULT_TITLE = "Studio";
+
+/* ---------- threads ---------- */
+
+/** The per-project thread index and its files. Owns migration from the
+ * pre-threads single director.json, and is the only thing that knows where a
+ * thread's chat file lives. */
+class ThreadStore {
+  private cache = new Map<string, DirectorThreadIndex>();
+
+  constructor(private projectDir: (project: string) => string) {}
+
+  private dir(project: string): string {
+    return path.join(this.projectDir(project), "director");
+  }
+
+  private indexFile(project: string): string {
+    return path.join(this.dir(project), "index.json");
+  }
+
+  /** the pre-threads location — read once by migrate(), then left alone */
+  private legacyFile(project: string): string {
+    return path.join(this.projectDir(project), "director.json");
+  }
+
+  chatFile(project: string, threadId: string): string {
+    return path.join(this.dir(project), `${threadId}.json`);
+  }
+
+  index(project: string): DirectorThreadIndex {
+    let idx = this.cache.get(project);
+    if (!idx) {
+      try {
+        idx = directorThreadIndexSchema.parse(
+          JSON.parse(fs.readFileSync(this.indexFile(project), "utf8")),
+        );
+      } catch {
+        idx = this.migrate(project);
+      }
+      this.cache.set(project, idx);
+      this.persist(project);
+    }
+    return this.repair(project, idx);
+  }
+
+  /** Invariants every read re-establishes, not just the first one: there is
+   * always somewhere to type, and activeId always names a thread that exists.
+   * (activeId MAY name a closed thread — browsing an archive is deliberate.) */
+  private repair(project: string, idx: DirectorThreadIndex): DirectorThreadIndex {
+    let dirty = false;
+    if (!idx.threads.some((t) => !t.closed)) {
+      this.append(idx, this.make(idx.threads.length ? "New thread" : DEFAULT_TITLE, null));
+      dirty = true;
+    }
+    if (!idx.threads.some((t) => t.id === idx.activeId)) {
+      idx.activeId = this.newestOpen(idx)?.id ?? idx.threads[idx.threads.length - 1].id;
+      dirty = true;
+    }
+    if (dirty) this.persist(project);
+    return idx;
+  }
+
+  /** Pre-threads projects have one director.json. Lift it into thread #1 with
+   * its sessionId INTACT — the operator's live conversation must resume, not
+   * restart — and leave the legacy file on disk as rollback insurance. */
+  private migrate(project: string): DirectorThreadIndex {
+    const idx: DirectorThreadIndex = { version: 1, threads: [], activeId: null };
+    let legacy: DirectorChatFile;
+    try {
+      legacy = directorChatFileSchema.parse(
+        JSON.parse(fs.readFileSync(this.legacyFile(project), "utf8")),
+      );
+    } catch {
+      return idx; // nothing to migrate — index() creates the default thread
+    }
+    const thread = this.make(DEFAULT_TITLE, null);
+    fs.mkdirSync(this.dir(project), { recursive: true });
+    writeJson(this.chatFile(project, thread.id), legacy);
+    this.append(idx, thread);
+    return idx;
+  }
+
+  private make(title: string, bind: DirectorThreadBind | null): DirectorThread {
+    const now = new Date().toISOString();
+    return { id: randomUUID(), title, bind, createdAt: now, updatedAt: now, closed: false, summary: "" };
+  }
+
+  private append(idx: DirectorThreadIndex, thread: DirectorThread): DirectorThread {
+    idx.threads.push(thread);
+    idx.activeId = thread.id;
+    return thread;
+  }
+
+  private newestOpen(idx: DirectorThreadIndex): DirectorThread | undefined {
+    const open = idx.threads.filter((t) => !t.closed);
+    return open[open.length - 1];
+  }
+
+  list(project: string): DirectorThread[] {
+    return this.index(project).threads;
+  }
+
+  activeId(project: string): string {
+    const idx = this.index(project);
+    // index() guarantees an active thread exists
+    return idx.activeId as string;
+  }
+
+  get(project: string, threadId: string): DirectorThread | undefined {
+    return this.index(project).threads.find((t) => t.id === threadId);
+  }
+
+  create(project: string, title?: string, bind: DirectorThreadBind | null = null): DirectorThread {
+    const idx = this.index(project);
+    const thread = this.append(idx, this.make(title?.trim() || "New thread", bind));
+    this.persist(project);
+    return thread;
+  }
+
+  rename(project: string, threadId: string, title: string): void {
+    const thread = this.require(project, threadId);
+    thread.title = title.trim() || thread.title;
+    this.touch(project, threadId);
+  }
+
+  /** closed = read-only, collapsed in the switcher. The chat file survives. */
+  close(project: string, threadId: string, summary?: string): void {
+    const idx = this.index(project);
+    const thread = this.require(project, threadId);
+    thread.closed = true;
+    if (summary !== undefined) thread.summary = summary;
+    // closing the thread you are in should not strand you on a dead composer —
+    // step to an open one. (Picking a closed thread from the switcher still
+    // works; that is deliberate navigation, this is not.)
+    if (idx.activeId === threadId) idx.activeId = null;
+    this.touch(project, threadId);
+    this.index(project); // repair(): mints a thread if that was the last open one
+  }
+
+  reopen(project: string, threadId: string): void {
+    const thread = this.require(project, threadId);
+    thread.closed = false;
+    this.touch(project, threadId);
+  }
+
+  remove(project: string, threadId: string): void {
+    const idx = this.index(project);
+    this.require(project, threadId);
+    idx.threads = idx.threads.filter((t) => t.id !== threadId);
+    if (idx.activeId === threadId) idx.activeId = null;
+    try {
+      fs.rmSync(this.chatFile(project, threadId));
+    } catch {
+      /* never written to (no messages sent) — nothing to remove */
+    }
+    this.persist(project);
+    this.index(project); // restores an active thread, creating one if needed
+  }
+
+  setActive(project: string, threadId: string): void {
+    const idx = this.index(project);
+    this.require(project, threadId);
+    idx.activeId = threadId;
+    this.persist(project);
+  }
+
+  /** bump updatedAt — the switcher orders by it */
+  touch(project: string, threadId: string): void {
+    const thread = this.get(project, threadId);
+    if (!thread) return;
+    thread.updatedAt = new Date().toISOString();
+    this.persist(project);
+  }
+
+  private require(project: string, threadId: string): DirectorThread {
+    const thread = this.get(project, threadId);
+    if (!thread) throw new Error(`unknown thread "${threadId}"`);
+    return thread;
+  }
+
+  private persist(project: string): void {
+    const idx = this.cache.get(project);
+    if (!idx) return;
+    fs.mkdirSync(this.dir(project), { recursive: true });
+    writeJson(this.indexFile(project), idx);
+  }
+}
+
+/** write-then-rename so a crash mid-write can't truncate the real file */
+function writeJson(file: string, value: unknown): void {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
+  fs.renameSync(tmp, file);
 }
 
 export class DirectorService extends EventEmitter {
+  /** keyed `${project}/${threadId}` */
   private chats = new Map<string, DirectorChatFile>();
+  /** keyed by PROJECT — the studio tools are single-writer, see the file header */
   private runs = new Map<string, ActiveRun>();
   private lastEmit = new Map<string, number>();
   private emitTimers = new Map<string, NodeJS.Timeout>();
+  private threads: ThreadStore;
 
   constructor(
     private settings: SettingsStore,
@@ -217,16 +429,99 @@ export class DirectorService extends EventEmitter {
     private coords: () => { port: number; token: string },
   ) {
     super();
+    this.threads = new ThreadStore((project) => this.projectDir(project));
   }
 
-  get(project: string): DirectorState {
-    return this.state(project);
+  /* ---------- threads ---------- */
+
+  threadList(project: string): DirectorThreads {
+    return {
+      project,
+      threads: this.threads.list(project),
+      activeId: this.threads.activeId(project),
+      runningId: this.runs.get(project)?.threadId ?? null,
+    };
+  }
+
+  createThread(project: string, title?: string, bind: DirectorThreadBind | null = null): DirectorThreads {
+    this.threads.create(project, title, bind);
+    return this.emitThreads(project);
+  }
+
+  renameThread(project: string, threadId: string, title: string): DirectorThreads {
+    this.threads.rename(project, threadId, title);
+    return this.emitThreads(project);
+  }
+
+  closeThread(project: string, threadId: string): DirectorThreads {
+    this.guardIdle(project, threadId, "close");
+    this.threads.close(project, threadId);
+    return this.emitThreads(project);
+  }
+
+  reopenThread(project: string, threadId: string): DirectorThreads {
+    this.threads.reopen(project, threadId);
+    return this.emitThreads(project);
+  }
+
+  deleteThread(project: string, threadId: string): DirectorThreads {
+    this.guardIdle(project, threadId, "delete");
+    this.threads.remove(project, threadId);
+    this.chats.delete(this.key(project, threadId));
+    return this.emitThreads(project);
+  }
+
+  setActiveThread(project: string, threadId: string): DirectorThreads {
+    this.threads.setActive(project, threadId);
+    return this.emitThreads(project);
+  }
+
+  /** The switcher watches this. It matters most for the run lock: onUpdate is
+   * filtered to one thread, so a background run ending would otherwise leave
+   * the other threads showing a "working" badge forever. */
+  private emitThreads(project: string): DirectorThreads {
+    const list = this.threadList(project);
+    this.emit("threads", list);
+    return list;
+  }
+
+  /** the thread a caller means when it doesn't name one */
+  activeThreadId(project: string): string {
+    return this.threads.activeId(project);
+  }
+
+  private guardIdle(project: string, threadId: string, verb: string): void {
+    const run = this.runs.get(project);
+    if (run?.threadId === threadId) {
+      throw new Error(`the Director is still working in this thread — stop the run before you ${verb} it`);
+    }
+  }
+
+  /* ---------- chat ---------- */
+
+  get(project: string, threadId?: string): DirectorState {
+    return this.state(project, threadId ?? this.threads.activeId(project));
   }
 
   /** append the user message and kick off a Claude run (async, streams updates) */
-  send(project: string, text: string, attachments: DirectorAttachment[] = []): DirectorState {
-    if (this.runs.has(project)) throw new Error("the Director is still working on the last message");
-    const chat = this.chat(project);
+  send(
+    project: string,
+    threadId: string,
+    text: string,
+    attachments: DirectorAttachment[] = [],
+  ): DirectorState {
+    const busy = this.runs.get(project);
+    if (busy) {
+      const where =
+        busy.threadId === threadId
+          ? "on the last message"
+          : `in "${this.threads.get(project, busy.threadId)?.title ?? "another thread"}"`;
+      throw new Error(`the Director is still working ${where}`);
+    }
+    const thread = this.threads.get(project, threadId);
+    if (!thread) throw new Error(`unknown thread "${threadId}"`);
+    if (thread.closed) throw new Error(`"${thread.title}" is closed — reopen it to keep talking`);
+    const chat = this.chat(project, threadId);
     chat.messages.push({
       id: randomUUID(),
       role: "user",
@@ -234,16 +529,20 @@ export class DirectorService extends EventEmitter {
       text,
       ...(attachments.length ? { attachments } : {}),
     });
-    this.persist(project);
-    const run: ActiveRun = { abort: new AbortController(), stopped: false };
+    this.persist(project, threadId);
+    this.threads.touch(project, threadId);
+    const run: ActiveRun = { abort: new AbortController(), stopped: false, threadId };
     this.runs.set(project, run);
-    this.emitState(project);
-    void this.run(project, this.buildPrompt(text, attachments), run).finally(() => {
+    this.emitState(project, threadId);
+    this.emitThreads(project); // the lock moved — every switcher needs to know
+    void this.run(project, threadId, this.buildPrompt(text, attachments), run).finally(() => {
       this.runs.delete(project);
-      this.persist(project);
-      this.emitState(project);
+      this.persist(project, threadId);
+      this.threads.touch(project, threadId);
+      this.emitState(project, threadId);
+      this.emitThreads(project);
     });
-    return this.state(project);
+    return this.state(project, threadId);
   }
 
   /** One question, one answer, no tools, no chat thread — the plumbing behind
@@ -281,14 +580,15 @@ export class DirectorService extends EventEmitter {
     }
   }
 
-  /** abort the in-flight run, if any — the thread gets a "Stopped." note, not an error */
-  stop(project: string): DirectorState {
+  /** abort the in-flight run, if any — the thread gets a "Stopped." note, not
+   * an error. The lock is per project, so this stops whichever thread holds it. */
+  stop(project: string, threadId?: string): DirectorState {
     const run = this.runs.get(project);
     if (run && !run.stopped) {
       run.stopped = true;
       run.abort.abort();
     }
-    return this.state(project);
+    return this.state(project, threadId ?? run?.threadId ?? this.threads.activeId(project));
   }
 
   /* ---------- the run ---------- */
@@ -335,10 +635,11 @@ export class DirectorService extends EventEmitter {
 
   private async run(
     project: string,
+    threadId: string,
     prompt: string | AsyncIterable<SDKUserMessage>,
     run: ActiveRun,
   ): Promise<void> {
-    const chat = this.chat(project);
+    const chat = this.chat(project, threadId);
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -353,7 +654,7 @@ export class DirectorService extends EventEmitter {
     try {
       const q = query({ prompt, options: this.options(project, chat.sessionId, run.abort) });
       for await (const message of q) {
-        this.absorb(project, chat, message, toolMessages, streams);
+        this.absorb(project, threadId, chat, message, toolMessages, streams);
       }
     } catch (err) {
       if (run.stopped) {
@@ -368,8 +669,8 @@ export class DirectorService extends EventEmitter {
             `logged in (run \`claude\` in a terminal once). — ${detail}`,
         });
       }
-      this.persist(project);
-      this.emitState(project);
+      this.persist(project, threadId);
+      this.emitState(project, threadId);
     } finally {
       clearTimeout(timer);
       // an aborted run leaves loose ends — settle them so nothing spins forever
@@ -413,6 +714,7 @@ export class DirectorService extends EventEmitter {
   /** fold one SDK stream message into the chat (and stream it to the renderer) */
   private absorb(
     project: string,
+    threadId: string,
     chat: DirectorChatFile,
     message: SDKMessage,
     toolMessages: Map<string, DirectorMessage>,
@@ -431,7 +733,7 @@ export class DirectorService extends EventEmitter {
         const entry = streams.get(ev.index);
         if (entry) {
           entry.text = (entry.text ?? "") + ev.delta.text;
-          this.emitStreaming(project);
+          this.emitStreaming(project, threadId);
         }
       }
       return; // deltas never persist — the final assistant message does
@@ -500,8 +802,8 @@ export class DirectorService extends EventEmitter {
     }
 
     if (dirty) {
-      this.persist(project);
-      this.emitState(project);
+      this.persist(project, threadId);
+      this.emitState(project, threadId);
     }
   }
 
@@ -521,32 +823,37 @@ export class DirectorService extends EventEmitter {
     return entry;
   }
 
-  private state(project: string): DirectorState {
+  /** "thinking" is per THREAD even though the lock is per project: a run in a
+   * sibling thread must not disable this thread's composer — it gets refused
+   * with a message naming the busy thread instead. */
+  private state(project: string, threadId: string): DirectorState {
     return {
       project,
-      status: this.runs.has(project) ? "thinking" : "idle",
-      messages: this.chat(project).messages,
+      threadId,
+      status: this.runs.get(project)?.threadId === threadId ? "thinking" : "idle",
+      messages: this.chat(project, threadId).messages,
     };
   }
 
-  private emitState(project: string): void {
+  private emitState(project: string, threadId: string): void {
     this.lastEmit.set(project, Date.now());
-    this.emit("update", this.state(project));
+    this.emit("update", this.state(project, threadId));
   }
 
-  /** deltas arrive token by token; coalesce full-thread snapshots to ~12/s */
-  private emitStreaming(project: string): void {
+  /** deltas arrive token by token; coalesce full-thread snapshots to ~12/s.
+   * Keyed by project, which is safe because only one thread ever streams. */
+  private emitStreaming(project: string, threadId: string): void {
     if (this.emitTimers.has(project)) return;
     const since = Date.now() - (this.lastEmit.get(project) ?? 0);
     if (since >= STREAM_EMIT_MS) {
-      this.emitState(project);
+      this.emitState(project, threadId);
       return;
     }
     this.emitTimers.set(
       project,
       setTimeout(() => {
         this.emitTimers.delete(project);
-        this.emitState(project);
+        this.emitState(project, threadId);
       }, STREAM_EMIT_MS - since),
     );
   }
@@ -555,30 +862,31 @@ export class DirectorService extends EventEmitter {
     return path.join(this.settings.get().storage.dataRoot, "projects", project);
   }
 
-  private chatFile(project: string): string {
-    return path.join(this.projectDir(project), "director.json");
+  private key(project: string, threadId: string): string {
+    return `${project}/${threadId}`;
   }
 
-  private chat(project: string): DirectorChatFile {
-    let chat = this.chats.get(project);
+  private chat(project: string, threadId: string): DirectorChatFile {
+    const key = this.key(project, threadId);
+    let chat = this.chats.get(key);
     if (!chat) {
       try {
         chat = directorChatFileSchema.parse(
-          JSON.parse(fs.readFileSync(this.chatFile(project), "utf8")),
+          JSON.parse(fs.readFileSync(this.threads.chatFile(project, threadId), "utf8")),
         );
       } catch {
+        // a thread with no file yet is a NEW thread: null sessionId, so the SDK
+        // opens a fresh session instead of resuming — this is the context reset
         chat = { sessionId: null, messages: [] };
       }
-      this.chats.set(project, chat);
+      this.chats.set(key, chat);
     }
     return chat;
   }
 
-  private persist(project: string): void {
-    const file = this.chatFile(project);
+  private persist(project: string, threadId: string): void {
+    const file = this.threads.chatFile(project, threadId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.chat(project), null, 2));
-    fs.renameSync(tmp, file);
+    writeJson(file, this.chat(project, threadId));
   }
 }

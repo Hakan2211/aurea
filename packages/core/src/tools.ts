@@ -21,10 +21,20 @@ import {
   productionAddEpisodeSchema,
   productionAddSceneSchema,
   productionAddShotSchema,
+  productionApproveShotSchema,
+  productionVerifyTakeSchema,
+  productionNormalizeSchema,
+  bibleSeedRoomToneSchema,
+  productionRetakeShotSchema,
+  qcSceneVoicesSchema,
+  qcShotSchema,
   scenePatchSchema,
   settingsUpdateSchema,
   shotPatchSchema,
   shotRenderSchema,
+  videoFinishSchema,
+  tableReadSchema,
+  sceneAssembleSchema,
   storyboardGenerateSchema,
   timelineAddClipSchema,
   timelineClipPatchSchema,
@@ -32,6 +42,8 @@ import {
   videoGenerateSchema,
   type Job,
   type Timeline,
+  applyCraftRules,
+  COVERAGE_ANGLES,
 } from "@aurea/shared";
 import type { AppRouter } from "./router.js";
 
@@ -218,9 +230,25 @@ export function buildTools(api: StudiodApi): AureaTool[] {
     defineTool({
       name: "list_projects",
       title: "List projects",
-      description: "All projects (folders under the Aurea data root). Project ids are slugs.",
+      description:
+        "All projects (folders under the Aurea data root). Project ids are slugs. `active` marks " +
+        "the one the app's screens (Desk, Studio, labs) are showing.",
       schema: {},
-      handler: async () => json(await api.projects.list.query()),
+      handler: async () => {
+        const [list, active] = await Promise.all([api.projects.list.query(), api.projects.active.query()]);
+        return json(list.map((p) => ({ ...p, active: p.id === active.id })));
+      },
+    }),
+
+    defineTool({
+      name: "set_active_project",
+      title: "Switch the app to a project",
+      description:
+        "Make a project the one the app's screens act on — the Production Desk, the Studio and " +
+        "the labs all follow it (P6). The crew tools take `project` explicitly and are unaffected; " +
+        "call this so the human sees the same project on the Desk that the crew is working in.",
+      schema: { id: z.string().min(1).describe("project id (list_projects)") },
+      handler: async ({ id }) => json(await api.projects.setActive.mutate({ id })),
     }),
 
     defineTool({
@@ -267,12 +295,16 @@ export function buildTools(api: StudiodApi): AureaTool[] {
           // the video lab has a second, live question — which LTX features the
           // ComfyUI it points at can actually reach. Report it beside the
           // catalog so an agent never has to guess whether generate_shot works.
-          const [catalog, capabilities] = await Promise.all([
+          const [catalog, capabilities, lanes] = await Promise.all([
             api.labs.video.catalog.query(),
             api.labs.video.capabilities.query(),
+            // render lanes: the whole shape of a shot behind one id, and the
+            // thing shot_from_storyboard's `preset` takes
+            api.prompts.videoPresets.query({}),
           ]);
           return json({
             ...catalog,
+            lanes,
             director: { ...catalog.director, capabilities },
           });
         }
@@ -347,6 +379,86 @@ export function buildTools(api: StudiodApi): AureaTool[] {
     }),
 
     defineTool({
+      name: "table_read",
+      title: "Table-read a scene",
+      description:
+        "Voice a whole scene in one call: every dialogue line, in script order, in its " +
+        "character's cast voice from the bible. One TTS job per line; each finished wav " +
+        "attaches to the owning shot's voTakes tagged with its lineId, which is exactly what " +
+        "shot_from_storyboard lays on the audio lane. Lines whose character has no cast voice " +
+        "come back in `skipped` rather than being voiced with a guess. Retake a single line by " +
+        "passing its id in lineIds (a retake appends — the newest take per line wins). Returns " +
+        "{queued, skipped} — wait_for_job the queued jobs, or just let them attach.",
+      schema: {
+        ...tableReadSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.voice.tableRead.mutate({ ...input, project }));
+      },
+    }),
+
+    defineTool({
+      name: "scene_assemble_plan",
+      title: "Plan a scene assembly",
+      description:
+        "Read-only: what assembling one scene would do — per shot, the lines to voice, the board to " +
+        "generate, the render and its lane (picked by who speaks: nobody → zoo-broll-insert, one voice → " +
+        "zoo-interview-single, a conversation → zoo-room-coverage; `lane` forces one lane, `lanes` per shot), " +
+        "and with through:'cut' which APPROVED takes still need laying. Each step is todo / inflight (already " +
+        "queued) / done / blocked (with the reason) / later (past `through`), plus a rough GPU estimate in " +
+        "seconds. Show this to the user before scene_assemble.",
+      schema: {
+        ...sceneAssembleSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.assembly.plan.query({ ...input, project }));
+      },
+    }),
+
+    defineTool({
+      name: "scene_assemble",
+      title: "Assemble a scene",
+      description:
+        "Run the plan from scene_assemble_plan as one background batch: table read + boards, then renders " +
+        "of the shots whose board and voices actually landed, then (through:'cut') lay APPROVED takes in " +
+        "script order. It never approves anything. `through` is the gate: 'board' (default) stops for the " +
+        "user to review boards, 'render' stops for take review/approval, 'cut' lays approved takes. A " +
+        "failed step skips only its own shot; re-running is the resume. Returns the batch — poll " +
+        "scene_assemble_status with its id (renders take minutes each).",
+      schema: {
+        ...sceneAssembleSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.assembly.start.mutate({ ...input, project }));
+      },
+    }),
+
+    defineTool({
+      name: "scene_assemble_status",
+      title: "Scene assembly status",
+      description:
+        "One assembly batch by id (steps with their jobs and reasons, phase, summary = the next human " +
+        "decision), or with no id the recent batches, newest first. cancel:true stops a running batch and " +
+        "cancels its queued jobs; finished takes stay.",
+      schema: {
+        id: z.string().optional(),
+        project: z.string().optional(),
+        cancel: z.boolean().default(false),
+      },
+      handler: async ({ id, project, cancel }) => {
+        if (!id) return json(await api.studio.assembly.list.query({ project }));
+        if (cancel) return json(await api.studio.assembly.cancel.mutate({ id }));
+        return json(await api.studio.assembly.get.query({ id }));
+      },
+    }),
+
+    defineTool({
       name: "generate_music",
       title: "Generate music",
       description:
@@ -372,11 +484,18 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         "with drafts, deliver without), loras ([{name, strength}] ≤3, names verbatim from " +
         "lab_catalog capabilities.availableLoras), and cameraLora ({move, strength} — gated on " +
         "capabilities.cameraLoras; no 22b camera weights ship yet, so normally keep the move in " +
-        "the prompt). engine 'minimax-h3' is the opposite trade — it writes and performs the " +
+        "the prompt). Engine 'ltx25' auto-enhances prompts through Gemma when those weights are " +
+        "installed — pass enhance:false whenever the prompt is authored to a structure " +
+        "(multi-shot prose with named cuts, exact quoted dialogue); the enhancer rewrites away " +
+        "cut structure and drops lines. engine 'minimax-h3' is the opposite trade — it writes and performs the " +
         "dialogue, sound effects and music ITSELF in the same pass as the picture, so pass no " +
-        "audio and put the lines in the prompt under an 'Audio:' heading; 4-15s only, 24fps only, " +
-        "no Director timeline, and roughly 10x LTX's render time, so reserve it for a hero beat; " +
-        "its 2K presets cost ~2.4× the native canvas. On H3, " +
+        "audio and put the lines in the prompt under an 'Audio:' heading; 24fps only, no Director " +
+        "timeline, and several times LTX's render time, so reserve it for a hero beat; its 2K " +
+        "presets cost ~2.4× the native canvas. H3's quality ladder is minimaxTier — 'draft' " +
+        "(4-step distill), 'standard' (8-step) or 'final' (the model's own 25 steps); `fast:true` still reads as 'draft'. Past ~15s a shot is sampled in chunks with a planner between them, so write a " +
+        "long prompt with shot markers the node validates: '[Shot 1]' with NO timestamp, then " +
+        "'[Shot 2] At 00:10.000,' and so on, sequential and strictly increasing — and references " +
+        "can't ride along with a chunked shot. On H3, " +
         "minimaxRefs carries stills/clips/sound the shot must keep — see reference_video, which " +
         "is the same thing with the tag rules stated. Returns the " +
         "job — wait_for_job for the mp4. Check lab_catalog('video') for which engines this machine " +
@@ -482,6 +601,69 @@ export function buildTools(api: StudiodApi): AureaTool[] {
     }),
 
     defineTool({
+      name: "coverage_pass",
+      title: "Eight angles of one plate, in one render",
+      description:
+        "Turn ONE approved keyframe or set plate into eight on-model angles of the same room " +
+        "and cast — 0/45/90/135/180/225/270/315 degrees — in a single MiniMax-H3 ref2va " +
+        "generation, plus a 4x2 contact sheet. Use it before boarding a scene that needs " +
+        "several framings of one room (a wide, a single, a reaction): generating those as " +
+        "separate keyframes is three chances for the room to drift, and this is one. The " +
+        "angles are lifted from a continuous orbit, so they cannot disagree with each other " +
+        "about the set. Costs about one Draft render. Needs the ref2va weights — check " +
+        "lab_catalog('video').minimax.reference.available first. Returns the coverage run; " +
+        "the angle assets fill in when the job completes (wait_for_job, then coverage_get).",
+      schema: {
+        project: z.string().default("playground"),
+        source: z
+          .string()
+          .min(1)
+          .describe("library relPath of the approved plate — it becomes <Picture 1>"),
+        subject: z
+          .string()
+          .min(1)
+          .max(400)
+          .describe(
+            "one line naming what must survive the orbit — 'the lion at the desk; keep this " +
+              "exact lion, blazer and room'. Quoted into the prompt verbatim.",
+          ),
+        location: z
+          .string()
+          .default("")
+          .describe("the bible location id these angles belong to, for the canon library"),
+        resolution: z.string().default("1344 × 768"),
+        tier: z.enum(["draft", "standard"]).default("draft"),
+        seed: z.number().int().optional(),
+      },
+      handler: async ({ project, ...rest }) => {
+        await requireProject(project);
+        const run = await api.studio.canon.coverage.mutate({ project, ...rest });
+        /* the far bearings invent the wall the plate never showed — say so up front */
+        const craft = applyCraftRules({ prompt: "", mode: "coverage", bearings: COVERAGE_ANGLES.map((a) => a.deg) });
+        return json({ ...run, notes: craft.notes, rulesFired: craft.rulesFired });
+      },
+    }),
+
+    defineTool({
+      name: "coverage_get",
+      title: "Read a coverage pass",
+      description:
+        "The record of a coverage pass: its status, the plate it was of, and the eight angle " +
+        "assets once the render has been imported. List them with no id.",
+      schema: {
+        id: z.string().optional().describe("a run id; omitted = list this project's runs"),
+        project: z.string().optional(),
+        location: z.string().optional().describe("filter a listing to one location"),
+      },
+      handler: async ({ id, project, location }) =>
+        json(
+          id
+            ? await api.studio.canon.coverageGet.query({ id })
+            : await api.studio.canon.coverageList.query({ project, location }),
+        ),
+    }),
+
+    defineTool({
       name: "shot_retake",
       title: "Retake part of a shot",
       description:
@@ -545,7 +727,19 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         "to say which wav speaks which character's line — generate_speech them first — and atSec " +
         "to place one exactly. dryRun returns the composed spec without rendering, which is the " +
         "way to check the beats before spending a render. The finished mp4 attaches to the shot " +
-        "and moves it to 'generated'. Returns the job plus the spec and any composition notes.",
+        "and moves it to 'generated'. Returns the job plus the spec and any composition notes. " +
+        "Lanes: pass preset (a render lane id from lab_catalog('video').lanes — 'zoo-interview-single', " +
+        "'zoo-room-coverage', 'zoo-broll-insert', 'zoo-field-note') to get engine, canvas, length, " +
+        "tier, enhancer state and camera in one word instead of nine arguments. Lanes with lane 'look' " +
+        "(ids 'look-*': 16mm documentary, anamorphic neon noir, claymation, anime cel, broadcast news, " +
+        "security camera, phone vertical…) are bible-free aesthetics for a plain picture or sentence — " +
+        "their look prose is appended to the prompt and their negative rides payload.negativePrompt. A lane also picks " +
+        "the COMPOSER, which is the part that matters: engine 'minimax-h3' composes H3's block " +
+        "prompt (subject definitions / summary / interval-stamped description with <d>…</d> " +
+        "dialogue / soundscape) because H3 has no Director timeline at all, and multiShot composes " +
+        "ONE cutting prose paragraph for LTX 2.5 (wide -> single -> reaction inside a single " +
+        "generation, enhancer forced off). Both can be set directly with engine/multiShot to " +
+        "override the lane.",
       schema: {
         ...shotRenderSchema.omit({ project: true }).shape,
         project: z.string().default("playground"),
@@ -877,6 +1071,221 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         await requireProject(project);
         const { shot } = await api.studio.production.updateShot.mutate({ project, shotId, patch });
         return json(shot);
+      },
+    }),
+
+    defineTool({
+      name: "qc_shot",
+      title: "QC a rendered take",
+      description:
+        "Measure a shot's rendered take against its composed intent — the crew's own judgment " +
+        "call before asking a human to watch it. Measured: container/duration, cut count vs the " +
+        "prompt (multi-shot prose must cut, singles must not — a multi-shot take that never cuts " +
+        "usually means the Gemma enhancer was left on), audio integrity (missing/silent/clipping), " +
+        "and an articulation heuristic (motion energy inside each speech window vs the clip's own " +
+        "median — flags the closed-mouth pronoun failure; a warn, confirm by eye). Verdict is " +
+        "pass/review/fail with per-check detail. It also writes review artifacts (absolute paths): " +
+        "a contact sheet, before/after frames straddling every cut, the shot's keyframe and the " +
+        "cast's bible reference stills. THE VISION CHECKS ARE YOURS: open those images and compare " +
+        "— identity drift against the character refs, or ANY legible burned-in text (a known LTX " +
+        "failure), is an automatic retake even when every measured check passes. On a fail, retake " +
+        "once yourself (retake_shot with a note naming the specific failure, or a new seed); a " +
+        "second fail goes to the human review queue with the evidence attached.",
+      schema: {
+        ...qcShotSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.qc.shot.mutate({ ...input, project }));
+      },
+    }),
+
+    defineTool({
+      name: "qc_scene_voices",
+      title: "QC a scene's voice takes",
+      description:
+        "Check every voiced line in a scene after a table read, instead of listening to all of " +
+        "them: duration sanity against the line's text (truncated / trailing-noise takes), " +
+        "silence and clipping, and median-f0 consistency per character across the scene (a take " +
+        "that doesn't sound like the same speaker is flagged). Returns per-line measurements and " +
+        "flags, per-character f0 medians, and retakeLineIds — feed that list straight back into " +
+        "table_read({lineIds}) to retake just the failures. Lines with no take yet are reported, " +
+        "not failed.",
+      schema: {
+        ...qcSceneVoicesSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.qc.sceneVoices.mutate({ ...input, project }));
+      },
+    }),
+
+    defineTool({
+      name: "approve_shot",
+      title: "Approve a shot (desk verdict)",
+      description:
+        "Lock a rendered take as the shot's pick, mark the shot approved, and drop the take on " +
+        "the sequence's video track (clips land in approve order — approve in script order). " +
+        "Approval is the HUMAN's verdict: only call this when the user has explicitly approved " +
+        "this shot/take, never on your own QC pass. Omit takeId to lock the shot's selected " +
+        "(else newest) take. A take that FAILED hard verification at delivery (no decodable " +
+        "video, digital silence under placed lines, length >15% off) is refused with the reason; " +
+        "force: true approves it anyway — only when the human said so.",
+      schema: {
+        ...productionApproveShotSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        const { shot, take, clip } = await api.studio.production.approveShot.mutate({
+          ...input,
+          project,
+        });
+        return json({ shot, take, clip });
+      },
+    }),
+
+    defineTool({
+      name: "verify_take",
+      title: "Hard-verify a take (P3)",
+      description:
+        "Re-run delivery-time hard verification on a take: decodable video, digital silence " +
+        "under placed lines, and length vs the requested duration. Runs automatically when a " +
+        "take lands; call it for a take from before that existed, or after seeding a room-tone " +
+        "bed for the location (a silent no-dialogue take then gets the bed laid under it at " +
+        "−40 dB). Returns the verify record ({status: ok|broken, reasons}), the asset the take " +
+        "now points at, and notes.",
+      schema: {
+        ...productionVerifyTakeSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        const { verify, asset, notes, takeId } = await api.studio.production.verifyTake.mutate({ ...input, project });
+        return json({ takeId, verify, asset, notes });
+      },
+    }),
+
+    defineTool({
+      name: "preview_shot",
+      title: "Preview a boarded shot (P5)",
+      description:
+        "Render the PREVIEW of a boarded shot: the same lane and composition cut to 2s (4s on " +
+        "H3), a 480p-class canvas, draft tier, enhancer off, no audio — under a minute on 2.5 " +
+        "against 2–4 minutes for a draft. Use it as the BLOCKING check before a full render: " +
+        "qc_shot on the preview runs only board-hold (first frame vs the board, SSIM) and the " +
+        "hard checks. The seed is assigned up front and recorded on the take; approve_shot " +
+        "on the preview take (by takeId) does nothing to the timeline and carries that seed " +
+        "into the next shot_from_storyboard render of the shot. A preview never makes the shot " +
+        "'rendered'. Returns the job, the seed and the notes.",
+      schema: {
+        ...shotRenderSchema.omit({ project: true, preview: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        const r = await api.studio.board.renderShot.mutate({ ...input, project, preview: true });
+        return json({ job: r.job, seed: r.seed, durationSec: r.durationSec, notes: r.notes });
+      },
+    }),
+
+    defineTool({
+      name: "finish_take",
+      title: "Finish a take (full render from a draft, or ×2 upscale)",
+      description:
+        "Two finishing passes on a take that already exists, both LTX 2.5. mode 'refine': the " +
+        "take is a DRAFT that kept its base-pass latents (every 2.5 draft does now) — only the " +
+        "×2 latent upscale + refine pass runs over them, so the full-size take has the draft's " +
+        "EXACT blocking (measured bit-identical to a fresh full render at the draft's seed, and " +
+        "about the same wall time on this card — the win is certainty and a one-call promotion, " +
+        "not speed); approve the draft's blocking, then finish it. mode 'upscale': Lightricks' Pixel Spatial Upscaler IC-LoRA — a ×2 generative pass " +
+        "with the take as its in-context reference that reinvents fur/edge detail 2.5 renders " +
+        "soft at full quality; works on any take (a 1280×704 full take lands at 1920×1088, the " +
+        "card's cap). `strength` (upscale only, 0.3–1): below 1 the pass starts from the " +
+        "upscaled take instead of noise and stays closer to it. `source` is the take's library " +
+        "relPath (production_get lists them under videoTakes[].asset); pass `shotId` so the " +
+        "finished take attaches to the shot like a render. Returns the job.",
+      schema: {
+        ...videoFinishSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        const job = await api.labs.video.finish.mutate({ ...input, project });
+        return json({ job: { id: job.id, title: job.title, detail: job.detail } });
+      },
+    }),
+
+    defineTool({
+      name: "normalize_project",
+      title: "Normalize a project to its lane (P4)",
+      description:
+        "Project hygiene: adopt a canvas on the sequence (the named lane's, else the canvas the " +
+        "approved takes were actually rendered at), re-lay the base video track in the " +
+        "production's own scene/shot order, and re-export at the delivery loudness (−16 LUFS " +
+        "by default). The two automatic rules — canvas from the first clip on an empty " +
+        "sequence, order re-laid on the next approval — only fire once; this is the explicit " +
+        "override for a project that got its clips before they existed. dryRun: true prints " +
+        "the diff (canvas from → to, clip order before → after, approved takes missing from " +
+        "the sequence) and changes nothing — run that first. Returns the plan, whether it was " +
+        "applied, the timeline, and the export job.",
+      schema: {
+        ...productionNormalizeSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        const r = await api.studio.production.normalize.mutate({ ...input, project });
+        return json({
+          applied: r.applied,
+          plan: r.plan,
+          canvas: { width: r.timeline.width, height: r.timeline.height },
+          job: r.job ? { id: r.job.id, title: r.job.title } : null,
+        });
+      },
+    }),
+
+    defineTool({
+      name: "seed_room_tone",
+      title: "Seed a location's room-tone bed (P3)",
+      description:
+        "Give a bible location the loopable room-tone bed that gets laid under silent " +
+        "no-dialogue takes (LTX 2.5 emits digital silence there). Pass `source` (a library " +
+        "relPath of an audio file) to use a stock bed, or omit it to seed one from ACE-Step " +
+        "(queues a job; the bed attaches to the location when it lands). source: null clears it.",
+      schema: {
+        ...bibleSeedRoomToneSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        const r = await api.studio.bible.seedRoomTone.mutate({ ...input, project });
+        return json({ job: r.job ? { id: r.job.id, title: r.job.title } : null, roomTone: r.bible.locations.find((l) => l.id === input.locationId)?.roomTone ?? null });
+      },
+    }),
+
+    defineTool({
+      name: "retake_shot",
+      title: "Retake a shot with a direction note (desk verdict)",
+      description:
+        "Record direction on the shot and re-render it. Direction is folded into every later " +
+        "render's prompt VERBATIM as 'Direction: …', so it must be an INSTRUCTION, never a " +
+        "diagnosis: 'stay seated, hold the framing' — not 'he stood up'. The call refuses a note " +
+        "that reads as a diagnosis (allowDiagnosis: true waves a false positive through). Prefer " +
+        "`fix`, a short vocabulary with a measured phrasing each: hold-framing, stay-seated, " +
+        "hold-set, tighter, looser, slower, static. Same composition surface as " +
+        "shot_from_storyboard (takes/durationSec/seed all apply). A shot with no keyframe keeps " +
+        "the direction and skips the render. Returns the job (or null), the composed spec, the " +
+        "notes (craft rules that fired are 'Rule <id>: …' lines) and the updated shot.",
+      schema: {
+        ...productionRetakeShotSchema.omit({ project: true }).shape,
+        project: z.string().default("playground"),
+      },
+      handler: async ({ project, ...input }) => {
+        await requireProject(project);
+        return json(await api.studio.production.retakeShot.mutate({ ...input, project }));
       },
     }),
 

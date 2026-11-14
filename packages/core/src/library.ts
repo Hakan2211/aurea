@@ -45,9 +45,26 @@ export function removeAssets(dataRoot: string, relPaths: string[]): string[] {
   for (const rel of relPaths) {
     const file = resolveDeletable(dataRoot, rel);
     if (!file) continue;
+    const sidecar = path.join(path.dirname(file), `.${path.basename(file)}.meta.json`);
+    // a draft's kept latents (AssetMeta.draftLatents) go with it — nothing else
+    // references them, and they are the size of the take again
+    try {
+      const meta = JSON.parse(fs.readFileSync(sidecar, "utf8")) as {
+        draftLatents?: { video?: string; audio?: string };
+      };
+      for (const lat of [meta.draftLatents?.video, meta.draftLatents?.audio]) {
+        const f = lat ? resolveDeletable(dataRoot, lat) : null;
+        if (f) {
+          fs.unlinkSync(f);
+          dirs.add(path.dirname(f));
+        }
+      }
+    } catch {
+      // no sidecar, or none that names latents
+    }
     fs.unlinkSync(file);
     try {
-      fs.unlinkSync(path.join(path.dirname(file), `.${path.basename(file)}.meta.json`));
+      fs.unlinkSync(sidecar);
     } catch {
       // no sidecar — most assets don't have one
     }

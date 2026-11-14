@@ -6,6 +6,20 @@
 import type { AssetMeta, Job } from "@aurea/shared";
 import type { JobResources } from "../scheduler.js";
 
+/** A failure of the machinery around a render — the engine process died
+ * mid-run, or nothing answered when the graph was queued — rather than of the
+ * render itself. The JobEngine requeues a job ONCE on these: the graph was
+ * fine, the engine wasn't, and in managed mode the next run respawns a dead
+ * sidecar on its own (ComfyService.ensure health-checks before reuse). A
+ * validation or execution error stays terminal — retrying those repeats the
+ * failure at full render cost. */
+export class InfrastructureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InfrastructureError";
+  }
+}
+
 export interface AdapterProgress {
   /** 0–100; omit to keep the current value */
   progress?: number;

@@ -239,6 +239,10 @@ export class ComfyImageAdapter implements EngineAdapter {
           const label = plan.length > 1 ? ` ${i + 1} of ${plan.length}` : "";
           const images = await client.run(graph, {
             signal: ctrl.signal,
+            // a qwen-edit board with 3 refs runs past the default 10 min on the
+            // 3090 Ti / 32 GB box: 8m31s and one >10m timeout, measured
+            // 2026-11-10 on S1E01 sc1 (2 refs took ~4 min)
+            timeoutMs: payload.type === "image" && payload.model === "qwen-edit" ? 25 * 60_000 : undefined,
             onNode: (classType) => {
               const stage = NODE_STAGE[classType];
               if (stage) report({ stage: `${stage}${label}` });

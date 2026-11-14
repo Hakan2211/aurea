@@ -28,7 +28,8 @@ export class MusicAdapter implements EngineAdapter {
   ) {}
 
   canRun(job: Job): boolean {
-    return job.payload?.type === "music";
+    // ?? — jobs queued before the engine field existed are ACE-Step's
+    return job.payload?.type === "music" && (job.payload.engine ?? "acestep") === "acestep";
   }
 
   resources(): JobResources {

@@ -24,32 +24,181 @@ the full canvas nearer the ~20 min the original evaluation predicted. Add a
 cold-start penalty on the first run of a session: 24 GB of weights have to come
 off disk.
 
-## Draft mode: the Turbo distill (2026-08-07)
+## Quality: three rungs (2026-08-30)
 
-`payload.fast` on H3 renders with the **MiniMax-H3 Turbo LoRA**
-(`minimax-h3-turbo-lora` in the registry — drbaph's ComfyUI conversion of
-larryvrh's few-step distill, ema ckpt850): the same joint A/V pass in **8
-sampler steps instead of 25**, ~3× faster sampling wall-clock. It loads on both
-heads.
+`payload.minimaxTier` picks one of three, and `fast: true` still reads as
+`draft` for callers that predate it:
 
-The graph changes only on the draft path (`minimax-graphs.ts`, `spec.turbo`):
+| Tier | Weight | Steps | Sigma shift (video/audio) |
+| --- | --- | --- | --- |
+| Draft | LightX2V `fl2v_turbo_4step_v1.1_768p` | 4 | 6 / 3 |
+| Standard | LightX2V `fl2v_turbo_8step_v1.0_768p` | 8 | 12 / 3 |
+| Final | *none* | 25 | the model's own |
+
+Reference shots take the ref2v distill instead — LightX2V train the two heads
+separately, and the wrong one is a LoRA whose keys mostly do not land. There is
+no 8-step ref2v, so Standard on that head is the 4-step weight given twice the
+steps.
+
+The graph changes only on a distilled path (`minimax-graphs.ts`, `spec.turbo`):
 
 ```
-UnetLoaderGGUF → LoraLoaderModelOnly(turbo, 1.0) → [PathchSageAttentionKJ]
-              → MiniMaxH3SigmaShift(video 12, audio 6) → BasicGuider/Scheduler
+<unet loader> → LoraLoaderModelOnly(tier.lora, tier.strength) → [PathchSageAttentionKJ]
+             → MiniMaxH3SigmaShift(tier.shiftVideo, tier.shiftAudio) → BasicGuider/Scheduler
 ```
 
-`MiniMaxH3SigmaShift` ships in core 0.30.2; the shift values are what the
-distill was trained around (its README: video 12, audio 4–6). Sampler stays
-`res_multistep` + `simple`. The Final tier is untouched — same 25-step graph as
-always, no shift node.
+The shift is not a taste knob — a distill learns a specific noise schedule, and
+rendering it against a different one is how a 4-step take comes out muddy rather
+than fast. For the shipped weights the sampler stays `res_multistep` + `simple`.
+Final is untouched: the same 25-step graph as always, no LoRA and no shift node.
 
-Quality caveat (it is a preview-grade distill): plastic-looking skin and
-over-sharp grain on some shots. Draft is for blocking; Final delivers. Unlike
-the Sage toggle, an unusable draft **refuses** rather than silently rendering
-25 steps — the LoRA name is resolved from the install's own lora walk
-(`TURBO_LORA` regex in the adapter), and a missing weight or shift node says
-exactly what to fix.
+### Alternate distills (`payload.minimaxDistill`)
+
+The table above is the default, not the only option. A candidate weight can be
+named per render — a payload field rather than a setting, because a bake-off is
+per-render — and it brings its own recipe with it: `MinimaxTurboSpec` carries an
+optional `sampler` and an optional `sigmas` ladder, and the graph swaps
+`BasicScheduler` for KJNodes' `CustomSigmas` when one is present.
+
+That exists because a published distill is a *contract*, not just a file. Tutu's
+20→8 NFE weight is distilled against euler (not `res_multistep`) at strength 0.8
+and nine fixed sigmas taken from boundaries `[0,3,5,8,10,13,15,18,20]` of its
+20-step teacher, and its card is explicit that a uniform 8-step ramp is not a
+substitute. Aurea honours all of it or refuses: a missing weight, a missing
+`CustomSigmas` node, or asking for an fl2va Standard candidate on Draft, Final or
+the reference head each say what is wrong rather than quietly rendering the
+default and letting you believe you compared something. The take's sidecar
+records `distill` so a finished file says which candidate made it.
+
+**Measured verdict so far:** the shipped LightX2V 8-step stays the Standard tier.
+See `VIDEO-LAB-ZOOLOGIC-UPGRADE-PLAN.md` §5.2.2.
+
+### The 2026-11-10 candidates (not yet measured)
+
+Each candidate now declares its **tier** and the **heads** it has a weight for
+(`MinimaxAltDistill`). `resolveDistill` refuses a candidate on the wrong tier or
+head, so a Draft candidate on a Standard render, or an fl2va-only weight on a
+reference shot, fails with a message instead of rendering the default.
+
+| `minimaxDistill` | Tier | Heads | Recipe | Model entry |
+|---|---|---|---|---|
+| `lightx2v-8step-v1.0-shift6` | standard | fl2va | **the shipped weight**, 8 steps, shift **6/3**, euler | `minimax-h3-turbo-lora` (no download) |
+| `lightx2v-8step-v1.1` | standard | fl2va + ref2va | fl2v 8-step v1.1 @6/3 · ref2v **8-step v1.0** @12/3, euler | `minimax-h3-turbo-lora-v2` |
+| `lightx2v-4step-v1.2` | draft | fl2va + ref2va | fl2v 4-step v1.2 @6/3 · ref2v 4-step v1.0 768p @12/3, euler | `minimax-h3-turbo-lora-v2` |
+| `hyperflow-8step` | standard | fl2va + ref2va | 9 fixed sigmas, shift 12/3, euler | `minimax-h3-hyperflow-lora` (316 MB) |
+| `drbaph-v4-6step` | standard | fl2va | **6 steps**, euler + **beta**, shift 12/5 | `minimax-h3-turbo-v4-lora` (620 MB) |
+
+Four findings came out of reading the publishers' own sources rather than
+write-ups:
+
+- **The shipped Standard tier may be on the wrong shift.** LightX2V's spec table
+  trains the *768p* fl2v distills at video/audio shift **6/3**. Only the 544p ones
+  use 12/3. The 8-step v1.0 768p release post says 8 steps, 6/3, Euler, Simple,
+  and LightX2V Studio runs it at 6/3. `MINIMAX_TURBO.standard.fl2v` runs it at
+  12/3 on `res_multistep`. The `lightx2v-8step-v1.0-shift6` candidate tests this
+  at no download cost. If it wins, change two numbers and the sampler in
+  `MINIMAX_TURBO.standard.fl2v`.
+- **ref2va finally has a real 8-step.** Standard on the reference head is
+  currently the 4-step v0.1 run at 8 steps. LightX2V's ref2v 8-step v1.0 has its
+  own recipe (8 steps, 12/3, Euler). Its v1.1 is left out because the release
+  thread (discussion #57) reports it regressing against v1.0.
+- **HyperFlow's ladder.** drbaph's card quotes two different 9-point lists. The
+  weight file's own header (`hyperflow_sigmas`, `hyperflow_video_shift: 12`)
+  settles it: `[1, .931506, …, 0]` is the *unshifted* grid. Because
+  `MiniMaxH3SigmaShift` hands the sampler video-shifted sigmas, the graph needs
+  that grid passed through `shiftSigmas(…, 12)`, which reproduces drbaph's other
+  list (0.99391, 0.98429, …) exactly. The ComfyUI conversion also drops
+  HyperFlow's second time embedder, so in ComfyUI it can only approximate the
+  upstream method.
+- **fl2v 4-step v1.3 is deliberately absent.** Its release thread reports it
+  degrading with sparse attention and stacked LoRAs unless pushed to strength 2.0.
+
+Run the bake-offs with `npx tsx scripts/ab-h3-distill.mts --round=standard|draft|ref`.
+Install the model entries above first. Every round uses one shared seed on the
+Zoo Logic booth still.
+
+#### Standard round, measured 2026-11-10 (run `2026111014422-ee7b53`, seed 695180399)
+
+Settings: fl2va, w4a8 + sage, 1344×768, 5 s, the Milo interview prompt. "Strip"
+means the script's 0.8–2.4 s frame strip, which is the primary evidence.
+
+| Variant | Wall clock | Speech (voiced) | Strip |
+|---|---|---|---|
+| LightX2V 8-step v1.0 @12/3, res_multistep *(shipped)* | 346 s | 2.4 s (53%) | Clean hard cut wide → close-up, sharp, mouth working |
+| same weight @6/3, euler *(publisher)* | 336 s | 1.2 s (44%) | Dissolve instead of a cut, and the lion **ghosts** through the meerkat for ~0.5 s. Clean afterwards |
+| LightX2V 8-step v1.1 @6/3 | 337 s | 1.4 s (39%) | **Worst**: heavy double exposure (two meerkat heads, transparent lion) |
+| HyperFlow 8-step | 326 s | 0.9 s (39%) | Only take that **holds the start frame's composition** (no cut). Clean, mouth moving, least speech |
+| drbaph v4 step-600 · 6 steps | **277 s** | 1.6 s (51%) | Clean and sharp, good expression. **−20 % wall clock** |
+
+**Verdict (one seed, so a screen rather than a ruling):**
+
+- The shipped Standard tier **stays**. The publisher's 6/3 recipe did not beat 12/3 on Aurea's pipeline, and it brought transition ghosting, so the paper discrepancy does not show up as a visible defect.
+- v1.1 is rejected.
+- HyperFlow is the pick when a shot must stay on its start frame (art-piece animation, where the still *is* the composition).
+- v4 at 6 steps is the speed pick, at 20 % faster with no visible loss. Run a second seed before promoting it to a "Fast Standard" rung.
+
+#### Draft round, measured 2026-11-10 (run `2026111015101-1050ed`, seed 1054877156)
+
+| Variant | Wall clock | Audio mean / peak | Strip |
+|---|---|---|---|
+| LightX2V 4-step v1.1 *(shipped)* | 161 s | **−14.0 / −3.0 dB** | Clean, holds the composition, mouth working |
+| LightX2V 4-step v1.2 | 165 s | −28.2 / −11.6 dB | **Glowing orange halo smeared over the beanie**, blurred mic, a stray hand, washed-out light |
+
+**Verdict:** v1.1 **stays** the Draft weight, and v1.2 is rejected on picture. v1.2's audio is calmer, which matches its release note. But the shipped take's −14 dB mean is far too hot for "quiet room tone": above 6 kHz it still measures −33.5 dB mean. Listen to it before trusting Draft audio for anything but timing.
+
+#### Reference round, measured 2026-11-10 (run `2026111015155-cf2943`, seed 1563728539)
+
+The booth still is passed as `<Picture 1>`, at Standard quality.
+
+| Variant | Wall clock | Audio mean / peak | Strip |
+|---|---|---|---|
+| ref2v 4-step v0.1 run at 8 *(shipped)* | 314 s | −18.9 / **−2.9 dB** | Clean, on-model. **No microphone**, though the prompt asks for one |
+| ref2v 8-step v1.0 | 313 s | −21.9 / −4.5 dB | Same performance, **microphone in shot**, slightly crisper fur |
+| HyperFlow 8-step | 304 s | −24.5 / −6.6 dB | Same performance, softer background, mic present |
+
+**Verdict:** all three share the same performance almost frame for frame (one seed, one still). The true 8-step ref2v has the edge on prompt adherence and audio headroom at the same cost, but the edge is small. Defaults are unchanged pending a second seed. If it repeats, promote `minimax_h3_ref2v_turbo_8step_v1.0_768p` to `MINIMAX_TURBO.standard.ref2v` (12/3, euler) and make `minimax-h3-turbo-lora-v2` the entry that preflight requires.
+
+**Summary of all three rounds:** none of the shipped defaults lost. The useful additions are `drbaph-v4-6step` (−20 % on Standard), `hyperflow-8step` (holds a start frame's composition) and `lightx2v-8step-v1.1`'s ref2v head. Rejected: fl2v 8-step v1.1 (ghosting), fl2v 4-step v1.2 (halo artefacts) and the 6/3 shift (transition ghosting).
+
+Quality caveat: these are preview-grade distills. Draft goes plastic on skin and
+soft on fine texture; Standard is where most takes that "look right but look
+wrong" get fixed without paying Final's 25 steps. Unlike the Sage toggle, an
+unusable tier **refuses** rather than silently rendering 25 steps — the LoRA name
+is resolved from the install's own lora walk by exact file name (`findLora` in
+the adapter), and a missing weight or shift node says exactly what to fix.
+
+## Speed, measured (3090 Ti, 2026-08-30)
+
+1344 × 768, 4s (107 frames), fl2va, GGUF weights, same seed:
+
+| Configuration | Wall clock | s/step |
+| --- | --- | --- |
+| Old 4-step LoRA at 8 steps, GGUF, no sage, cu128 *(what shipped before)* | 454s | 40.0 |
+| …with SageAttention | 383s | 30.4 |
+| Standard — LightX2V 8-step, GGUF, sage | 388s | 30.5 |
+| Draft — LightX2V 4-step v1.1, GGUF, sage | 270s | 33.0 |
+| Draft, GGUF, sage, CUDA 13 | 261s | 29.7 |
+| **Draft, w4a8, sage, CUDA 13** | **156s** | **17.6** |
+
+**454s → 156s.** Four independent levers: SageAttention (installed by the
+managed runtime, on by default), the 4-step distill, the w4a8 weight set (5.6 GB
+smaller across the unet and the video VAE, and an INT8 matmul instead of an
+unpack-then-bf16 one), and CUDA 13 (which is what stops comfy-kitchen disabling
+its own quant kernels). ~100–125s of each figure is fixed weight-loading cost.
+
+The full account — including the measured point at which H3 stops fitting on
+this card, and the levers that were looked at and not taken — is in
+[H3-SPEED-AND-LONG-FORM.md](H3-SPEED-AND-LONG-FORM.md).
+
+## Long shots are chunked (2026-08-30)
+
+Past what one pass can hold, the shot is sampled by `HREndlessSampler` as a
+chain of chunks, each handing its finished tail to the next as H3's own
+`<Video N>`/`<Audio N>` reference, with Gemma 4 re-writing the prompt in
+between. It engages on arithmetic (`needsEndless`), never on a switch, so a shot
+that fits never pays for it. References cannot ride along — the chunk sampler is
+already using that channel. Write long prompts as `[Shot 1]`, `[Shot 2]`… with
+`At MM:SS.mmm` cut markers.
 
 ---
 

@@ -31,7 +31,9 @@ import {
   type ProductionAddShot,
   type Scene,
   type Shot,
+  type ShotTake,
   type StudioSeedResult,
+  type TakeVerify,
   type StudioUpdateEvent,
 } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
@@ -174,6 +176,14 @@ export class StudioStore extends EventEmitter {
     return { shot, production: this.updateProduction(project, prod) };
   }
 
+  /** one scene by id — what a table read walks */
+  getScene(project: string, sceneId: string): Scene {
+    const prod = this.getProduction(project);
+    const scene = this.allScenes(prod).find((s) => s.id === sceneId);
+    if (!scene) throw new Error(`unknown scene "${sceneId}" — production_get lists scene ids`);
+    return scene;
+  }
+
   /** a shot plus its enclosing scene — what prompt composition needs */
   getShotContext(project: string, shotId: string): { shot: Shot; scene: Scene } {
     const prod = this.getProduction(project);
@@ -197,7 +207,11 @@ export class StudioStore extends EventEmitter {
       approved: false,
     }));
     shot.keyframes.push(...fresh);
-    if (!shot.selectedKeyframe && fresh.length) shot.selectedKeyframe = fresh[0].id;
+    /* A re-board is what you judge next — same rule as attachTake below. The
+     * pilot re-boarded and then rendered the REJECTED still because the
+     * selection never moved (defect #4). An approved shot keeps its pick. */
+    if (fresh.length && shot.status !== "approved") shot.selectedKeyframe = fresh[0].id;
+    else if (!shot.selectedKeyframe && fresh.length) shot.selectedKeyframe = fresh[0].id;
     if (shot.status === "draft") shot.status = "boarded";
     return { shot, production: this.updateProduction(project, prod) };
   }
@@ -211,6 +225,10 @@ export class StudioStore extends EventEmitter {
     shotId: string,
     assets: string[],
     engine: string,
+    /** the length the render was asked for — qc.shot judges against it (#7);
+     * `verify` = true marks the take pending hard verification (P3.1), which
+     * the caller runs right after and records with recordTakeVerify */
+    meta: { durationSec?: number; verify?: boolean; preview?: boolean; seed?: number } = {},
   ): { shot: Shot; production: Production } {
     const prod = this.getProduction(project);
     const shot = this.allShots(prod).find((s) => s.id === shotId);
@@ -220,10 +238,161 @@ export class StudioStore extends EventEmitter {
       asset,
       engine,
       label: "",
+      preview: meta.preview ?? false,
+      ...(meta.seed !== undefined ? { seed: meta.seed } : {}),
+      ...(meta.durationSec ? { durationSec: meta.durationSec } : {}),
+      ...(meta.verify ? { verify: { status: "pending" as const, reasons: [] } } : {}),
     }));
     shot.videoTakes.push(...fresh);
-    if (!shot.selectedTake && fresh.length) shot.selectedTake = fresh[0].id;
-    if (shot.status === "draft" || shot.status === "boarded") shot.status = "generated";
+    /* The newest take becomes the one under review. A retake exists BECAUSE
+     * the previous take was rejected, so leaving the selection on it meant
+     * qc_shot re-measured the reject and approve_shot would have locked it
+     * (pilot defect #9, 2026-09-02). The one exception is a shot already
+     * approved: that selection is a human's decision and a later render must
+     * not quietly replace the picked take — same rule as `status` below. */
+    if (fresh.length && shot.status !== "approved") shot.selectedTake = fresh[0].id;
+    else if (!shot.selectedTake && fresh.length) shot.selectedTake = fresh[0].id;
+    /* a preview (P5) is under review too, but it is not a render: the
+     * persisted status stays where it was and shotStage keeps the column */
+    if (!meta.preview && (shot.status === "draft" || shot.status === "boarded")) shot.status = "generated";
+    return { shot, production: this.updateProduction(project, prod) };
+  }
+
+  /** Table-read delivery, the voice half of attachTake: a finished TTS wav
+   * lands on its shot's voTakes tagged with the script line it speaks. A
+   * retake of the same line appends (newest last) rather than replacing —
+   * shot composition and the scene strip both read the newest take per line.
+   * Status is untouched: "voiced" is a derived stage (shotStage), not a
+   * persisted status. */
+  attachVoTake(
+    project: string,
+    shotId: string,
+    assets: string[],
+    engine: string,
+    lineId?: string,
+  ): { shot: Shot; production: Production } {
+    const prod = this.getProduction(project);
+    const shot = this.allShots(prod).find((s) => s.id === shotId);
+    if (!shot) throw new Error(`unknown shot "${shotId}"`);
+    const line = lineId ? shot.scriptLines.find((l) => l.id === lineId) : undefined;
+    shot.voTakes.push(
+      ...assets.map((asset) => ({
+        id: randomUUID().slice(0, 8),
+        asset,
+        engine,
+        label: line ? `${line.character ?? ""}: ${line.text.slice(0, 40)}`.trim() : "",
+        lineId,
+      })),
+    );
+    return { shot, production: this.updateProduction(project, prod) };
+  }
+
+  /** Hard verification result (P3.1) lands on the take. A BROKEN take must
+   * never be the thing under review: if it is the selection, the pick moves
+   * back to the newest take that verified ok (an approved shot keeps its
+   * human-made pick regardless). `asset` swaps the take's file — the room-tone
+   * bed (P3.2) writes a sibling and points the take at it. */
+  recordTakeVerify(
+    project: string,
+    shotId: string,
+    takeId: string,
+    verify: TakeVerify,
+    patch: { asset?: string } = {},
+  ): { shot: Shot; take: ShotTake; production: Production } {
+    const prod = this.getProduction(project);
+    const shot = this.allShots(prod).find((s) => s.id === shotId);
+    if (!shot) throw new Error(`unknown shot "${shotId}"`);
+    const take = shot.videoTakes.find((t) => t.id === takeId);
+    if (!take) throw new Error(`unknown take "${takeId}" on shot "${shotId}"`);
+    take.verify = verify;
+    if (patch.asset) take.asset = patch.asset;
+    if (verify.status === "broken" && shot.selectedTake === take.id && shot.status !== "approved") {
+      const fallback = [...shot.videoTakes]
+        .reverse()
+        .find((t) => t.id !== take.id && t.verify?.status !== "broken" && !!t.preview === !!take.preview);
+      if (fallback) shot.selectedTake = fallback.id;
+    }
+    return { shot, take, production: this.updateProduction(project, prod) };
+  }
+
+  /** Desk verdict (P1): lock one rendered take as the shot's pick and approve
+   * the shot. The router half drops the take on the sequence — the store only
+   * owns production.json. A take that failed hard verification (P3.1) is
+   * refused unless `force` — the reason is the whole message. */
+  approveShot(
+    project: string,
+    shotId: string,
+    takeId?: string,
+    force = false,
+  ): { shot: Shot; take: ShotTake; production: Production } {
+    const prod = this.getProduction(project);
+    const shot = this.allShots(prod).find((s) => s.id === shotId);
+    if (!shot) throw new Error(`unknown shot "${shotId}" — production_get lists shot ids`);
+    /* An unnamed approval means the shot's pick, else its newest RENDER — a
+     * preview is only ever approved by name, because approving one is a
+     * different verdict (below). */
+    const renders = shot.videoTakes.filter((t) => !t.preview);
+    const selected = renders.find((t) => t.id === shot.selectedTake);
+    const take = takeId ? shot.videoTakes.find((t) => t.id === takeId) : (selected ?? renders.at(-1));
+    if (!take) {
+      throw new Error(
+        takeId
+          ? `unknown take "${takeId}" on shot "${shotId}"`
+          : `shot "${shotId}" has no rendered takes to approve${shot.videoTakes.length ? " (only previews — render it)" : ""}`,
+      );
+    }
+    if (take.verify?.status === "broken" && !force) {
+      throw new Error(
+        `take "${take.id}" failed hard verification: ${take.verify.reasons.join("; ")} — retake it, or approve with force: true`,
+      );
+    }
+    /* Approving a PREVIEW (P5) does nothing to the timeline and nothing to
+     * the status: it records that the blocking held, and carries the seed
+     * so the full render rolls the same dice. */
+    if (take.preview) {
+      if (take.seed === undefined) {
+        throw new Error(`preview "${take.id}" carries no seed — it predates seed recording; preview again`);
+      }
+      shot.approvedPreview = { takeId: take.id, seed: take.seed, approvedAt: new Date().toISOString() };
+      return { shot, take, production: this.updateProduction(project, prod) };
+    }
+    shot.selectedTake = take.id;
+    shot.status = "approved";
+    return { shot, take, production: this.updateProduction(project, prod) };
+  }
+
+  /** The selected take of every approved shot, in the document's own order:
+   * season → episode → scene → shot. This is the running order of the cut, and
+   * the desk needs it because approvals arrive in whatever order the review
+   * went — a hard shot gets approved last and used to land last in the
+   * sequence (defect #10). */
+  approvedTakeAssets(project: string): string[] {
+    const prod = this.getProduction(project);
+    return this.allShots(prod)
+      .filter((s) => s.status === "approved")
+      .map((s) => s.videoTakes.find((t) => t.id === s.selectedTake && !t.preview)?.asset)
+      .filter((a): a is string => !!a);
+  }
+
+  /** The cut as the production document orders it (P4): every approved
+   * shot's picked take, with the shot it belongs to — what normalize_project
+   * prints as the diff and re-lays the base track from. */
+  approvedTakes(project: string): Array<{ shotId: string; title: string; asset: string }> {
+    const prod = this.getProduction(project);
+    return this.allShots(prod)
+      .filter((s) => s.status === "approved")
+      .map((s) => ({ shot: s, take: s.videoTakes.find((t) => t.id === s.selectedTake && !t.preview) }))
+      .filter((x): x is { shot: Shot; take: ShotTake } => !!x.take)
+      .map(({ shot, take }) => ({ shotId: shot.id, title: shot.title || shot.id, asset: take.asset }));
+  }
+
+  /** Desk verdict (P1): direction accumulates on the shot — composeShotSpec
+   * folds takeNotes into every later render's prompt. */
+  addTakeNote(project: string, shotId: string, note: string): { shot: Shot; production: Production } {
+    const prod = this.getProduction(project);
+    const shot = this.allShots(prod).find((s) => s.id === shotId);
+    if (!shot) throw new Error(`unknown shot "${shotId}" — production_get lists shot ids`);
+    shot.takeNotes.push(note.trim());
     return { shot, production: this.updateProduction(project, prod) };
   }
 
@@ -326,6 +495,17 @@ export class StudioStore extends EventEmitter {
   removeLocation(project: string, id: string): Bible {
     const bible = this.getBible(project);
     bible.locations = bible.locations.filter((l) => l.id !== id);
+    return this.updateBible(project, bible);
+  }
+
+  /** Room-tone delivery (P3.2): a seeded or chosen bed lands on its location.
+   * Called from the job-completion import hook too, so an unknown location
+   * throws and the caller swallows (the file stays in the library). */
+  setLocationRoomTone(project: string, locationId: string, roomTone: string | null): Bible {
+    const bible = this.getBible(project);
+    const loc = bible.locations.find((l) => l.id === locationId);
+    if (!loc) throw new Error(`unknown location "${locationId}"`);
+    loc.roomTone = roomTone;
     return this.updateBible(project, bible);
   }
 

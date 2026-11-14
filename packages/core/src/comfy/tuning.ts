@@ -113,3 +113,19 @@ export function applyTuning(graph: ComfyGraph, tuning: RenderTuning, anchors: Tu
 function setSampler(graph: ComfyGraph, nodeId: string | undefined, name: string): void {
   if (nodeId && graph[nodeId]) graph[nodeId].inputs.sampler_name = name;
 }
+
+/** The render tuning knobs fail inside ComfyUI, far from the toggle that
+ * turned them on — SageAttention in particular needs a pip package the node
+ * pack does not install. Translate those into something the user can act on.
+ * Shared by every adapter that passes tuning into a graph. */
+export function explainTuningFailure(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  if (/sageattention/i.test(message)) {
+    return new Error(
+      "SageAttention is on (Settings → Engines → Render tuning) but the `sageattention` " +
+        "package is not installed in the python that runs your ComfyUI. Install it there, " +
+        "or turn the toggle off.",
+    );
+  }
+  return err instanceof Error ? err : new Error(message);
+}

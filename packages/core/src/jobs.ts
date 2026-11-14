@@ -20,19 +20,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { jobSchema, type AssetMeta, type EnqueueJobResolved, type Job, type JobPriority } from "@aurea/shared";
-import type { AdapterRun, EngineAdapter } from "./adapters/types.js";
+import { InfrastructureError, type AdapterRun, type EngineAdapter } from "./adapters/types.js";
 import { GpuScheduler, type JobResources, type ResourceClass } from "./scheduler.js";
 
 const PRIORITY_RANK: Record<JobPriority, number> = { interactive: 0, preview: 1, batch: 2 };
 
 /** progress points per tick, by how heavy the job kind typically is */
-const TICK_RATE: Record<Job["kind"], number> = { video: 1.6, image: 6, tts: 9, music: 4 };
+const TICK_RATE: Record<Job["kind"], number> = { video: 1.6, image: 6, tts: 9, music: 4, model3d: 2 };
 
 const STAGES: Record<Job["kind"], string[]> = {
   video: ["Sampling", "Upscaling", "Encoding"],
   image: ["Sampling", "Decoding"],
   tts: ["Synthesizing"],
   music: ["Composing", "Mixing"],
+  model3d: ["Sampling shape", "Painting textures"],
 };
 
 export const TICK_MS = 800;
@@ -54,6 +55,10 @@ interface TrackedJob extends Job {
 
 /** the wait reason a queued job shows while the queue is held */
 const PAUSED_STAGE = "Queue paused";
+
+/** what a requeued job shows while it waits for its automatic second try —
+ * ours to show, so ours to take off when the run actually starts */
+const RETRY_DETAIL = "The engine died mid-render — retrying once automatically";
 
 /** how many finished jobs the persisted history keeps */
 const HISTORY_CAP = 100;
@@ -83,6 +88,10 @@ export class JobEngine extends EventEmitter {
   private scheduler: GpuScheduler;
   /** admission is held; running jobs finish */
   private paused = false;
+  /** jobs already requeued once after an InfrastructureError — the second
+   * such failure is terminal. In-memory on purpose: a studiod restart
+   * requeues in-flight jobs anyway, which is its own fresh start. */
+  private autoRetried = new Set<string>();
 
   constructor(private opts: JobEngineOptions = {}) {
     super();
@@ -125,6 +134,21 @@ export class JobEngine extends EventEmitter {
     this.jobs.set(job.id, job);
     this.publish();
     return this.find(job.id)!;
+  }
+
+  /** Stamp a job with the scene-assembly batch that queued it. Batches drive
+   * the existing procedures, which enqueue on their own, so the tag lands
+   * just after the job is created. */
+  tagBatch(id: string, batch: string): void {
+    const job = this.jobs.get(id);
+    if (!job || job.batch === batch) return;
+    job.batch = batch;
+    this.publish();
+  }
+
+  /** one job by id (undefined once dismissed) */
+  get(id: string): Job | undefined {
+    return this.find(id);
   }
 
   cancel(id: string): Job | undefined {
@@ -187,6 +211,7 @@ export class JobEngine extends EventEmitter {
   retry(id: string): Job | undefined {
     const job = this.jobs.get(id);
     if (!job || job.status !== "failed") return this.find(id);
+    this.autoRetried.delete(id); // a deliberate retry earns a fresh allowance
     job.status = "queued";
     job.progress = 0;
     job.error = undefined;
@@ -306,6 +331,7 @@ export class JobEngine extends EventEmitter {
       next.startedAt = Date.now();
       next.progress = 0;
       next.stage = undefined;
+      if (next.detail === RETRY_DETAIL) next.detail = undefined;
       if (adapter) {
         this.scheduler.started(next, res);
         this.startAdapter(next, adapter);
@@ -346,8 +372,27 @@ export class JobEngine extends EventEmitter {
       })
       .catch((err: unknown) => {
         if (job.status !== "running") return; // cancel() already recorded the reason
+        const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof InfrastructureError && !this.autoRetried.has(job.id)) {
+          /* The graph was fine, the engine wasn't — requeue once instead of
+           * losing the render. Nothing to restart here: in managed mode the
+           * next run's ComfyService.ensure() health-checks the sidecar and
+           * respawns a dead one on its own. */
+          this.autoRetried.add(job.id);
+          job.status = "queued";
+          job.progress = 0;
+          job.stage = undefined;
+          job.eta = undefined;
+          job.elapsed = undefined;
+          job.detail = RETRY_DETAIL;
+          job.seq = this.seq++;
+          return;
+        }
         job.status = "failed";
-        job.error = err instanceof Error ? err.message : String(err);
+        job.error =
+          err instanceof InfrastructureError && this.autoRetried.has(job.id)
+            ? `${message} (already retried once — this is the second engine failure)`
+            : message;
         job.stage = undefined;
         job.eta = undefined;
       })

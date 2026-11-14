@@ -8,7 +8,13 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { settingsSchema, type Settings, type SettingsUpdate, type StorageStats } from "@aurea/shared";
+import {
+  SETTINGS_VERSION,
+  settingsSchema,
+  type Settings,
+  type SettingsUpdate,
+  type StorageStats,
+} from "@aurea/shared";
 import { AUREA_DIR } from "./portfile.js";
 
 export const SETTINGS_FILE = path.join(AUREA_DIR, "settings.json");
@@ -43,7 +49,15 @@ export function detectVideofastDir(): string | null {
  * the videofast operator docs (each engine owns one venv); first hit wins. */
 export function detectEnginePaths(): Pick<
   Settings["engines"],
-  "chatterboxPython" | "qwenTtsPython" | "dramaboxPython" | "dramaboxRepo" | "acestepDir"
+  | "chatterboxPython"
+  | "qwenTtsPython"
+  | "dramaboxPython"
+  | "dramaboxRepo"
+  | "acestepDir"
+  | "music3Python"
+  | "music3ModelDir"
+  | "hunyuan3dDir"
+  | "hunyuan3dPython"
 > {
   const first = (candidates: string[], probe: (c: string) => string = (c) => c) =>
     candidates.find((c) => fs.existsSync(probe(c))) ?? null;
@@ -60,7 +74,41 @@ export function detectEnginePaths(): Pick<
       [path.join(homedir(), "acestep1.5", "ACE-Step-1.5"), "D:/acestep1.5/ACE-Step-1.5"],
       (c) => path.join(c, ".venv", "Scripts", "python.exe"),
     ),
+    music3Python: first(["D:/music3env/Scripts/python.exe"]),
+    music3ModelDir: first(["D:/models/MiniMax-Music3"], (c) =>
+      path.join(c, "modular_model_index.json"),
+    ),
+    hunyuan3dDir: first(["D:/hunyuan3d"], (c) => path.join(c, "generate.py")),
+    hunyuan3dPython: first(["D:/hunyuan3d/.venv/Scripts/python.exe"]),
   };
+}
+
+/** Bring a stored settings file forward to SETTINGS_VERSION, in place.
+ *
+ * Only for defaults whose MEANING changed — a knob that was off because it
+ * pointed at something the runtime didn't install yet is not the same knob once
+ * the runtime installs it, and leaving the old value would quietly withhold the
+ * new behaviour from exactly the machines that have been running longest.
+ * Anything that is merely a new field belongs in the schema's own `.default()`,
+ * which parse() already fills in.
+ *
+ * Returns whether anything moved (the caller persists).
+ *
+ *   1 → 2  (2026-08-30) SageAttention. It defaulted off because `sageattention`
+ *          was never in ComfyUI's python, so on would have failed the render;
+ *          the managed runtime installs it now, and it is worth ~2.9× on the
+ *          attention op at video sequence lengths (measured, 3090 Ti).
+ *
+ *          H3 only. LTX's identical toggle is left where the user left it: it
+ *          is a working engine with a tuned look, and INT8 attention is a
+ *          picture change as well as a speed change — that one is worth
+ *          flipping deliberately, after an A/B, not underneath a shot.
+ */
+export function migrateSettings(settings: Settings): boolean {
+  if (settings.version >= SETTINGS_VERSION) return false;
+  if (settings.version < 2) settings.engines.minimaxTuning.sageAttention = true;
+  settings.version = SETTINGS_VERSION;
+  return true;
 }
 
 const defaults = (): Settings =>
@@ -152,6 +200,7 @@ export class SettingsStore extends EventEmitter {
           dirty = true;
         }
       }
+      if (migrateSettings(settings)) dirty = true;
       if (dirty) {
         this.settings = settings;
         this.save();

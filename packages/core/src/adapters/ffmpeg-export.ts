@@ -261,9 +261,21 @@ export class FfmpegExportAdapter implements EngineAdapter {
 
       // silence carries the mix to full length; normalize=0 keeps clip loudness
       filters.push(`anullsrc=r=48000:cl=stereo,atrim=0:${n(total)}[abase]`);
+      /* …and then ONE loudness pass over the finished mix. Per-clip levels stay
+       * relative (that's what normalize=0 protects); what's corrected is the
+       * programme level, which a cut of raw engine output never has — the
+       * pilot's Field Note mixed to a mean of −28.3 dB and had to be rebuilt by
+       * hand (defect #11). Single-pass loudnorm: a two-pass measure would mean
+       * decoding the whole cut twice for a delivery that is already a draft.
+       * Skipped when nothing is audible, where it would only lift the floor. */
+      const lufs = payload.loudnessLufs;
+      const mixOut = lufs !== null && audioLabels.length ? "amix" : "aout";
       filters.push(
-        `[abase]${audioLabels.map((l) => `[${l}]`).join("")}amix=inputs=${audioLabels.length + 1}:duration=first:normalize=0[aout]`,
+        `[abase]${audioLabels.map((l) => `[${l}]`).join("")}amix=inputs=${audioLabels.length + 1}:duration=first:normalize=0[${mixOut}]`,
       );
+      if (mixOut === "amix") {
+        filters.push(`[amix]loudnorm=I=${Number(lufs!.toFixed(1))}:TP=-1.5:LRA=11[aout]`);
+      }
 
       const runDir = jobRunDir(job.id);
       const script = path.join(runDir, "filter.txt");
