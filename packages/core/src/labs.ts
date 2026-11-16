@@ -9,8 +9,11 @@ import path from "node:path";
 import {
   COVERAGE_ANGLES,
   FAL_SIZE_RULES,
+  ELEVENLABS_SFX_RATE_PER_SEC,
   falImageEstimate,
+  falSfxEstimate,
   hasMinimaxRefs,
+  SFX_DURATION_MAX,
   MAX_SHEET_REFS,
   OPEN_AIR_WARN_SEC,
   type EnqueueJobResolved,
@@ -29,9 +32,11 @@ import {
 import { PromptLibrary } from "./promptlib.js";
 import { seedanceEstimate } from "./adapters/seedance.js";
 import { GPT_IMAGE_2_MAX_REFS } from "./adapters/fal-image.js";
+import { H3_IMAGE_MAX_REFS } from "./adapters/comfy-image.js";
 import { RVC_CONVERT_ESTIMATE, RVC_TRAIN_ESTIMATE, rvcModelPath } from "./adapters/replicate-rvc.js";
 import { MUSIC3_MAX_DURATION, music3Paths } from "./adapters/minimax-music.js";
 import { HUNYUAN3D_DEFAULTS, hunyuan3dPaths } from "./adapters/hunyuan3d.js";
+import { MOSS_DEFAULT_SECONDS, MOSS_DEFAULTS, mossSfxPaths } from "./adapters/sfx.js";
 
 export interface LabEngine {
   id: string;
@@ -241,6 +246,21 @@ export class Labs {
             : true,
         },
         {
+          id: "h3-image",
+          label: "MiniMax-H3-Image · local",
+          note: "best lettering, text-to-image and edits · slower",
+          // one checkpoint does both: no refs is text-to-image, refs is an edit
+          role: "both",
+          // managed: ComfyUI 0.45+ (the runtime pin), its own DiT + VAE, and
+          // MiniMax-H3's GGUF text encoder through the GGUF loader nodes
+          available: managed
+            ? this.runtime.componentReady("comfy") &&
+              this.runtime.componentReady("gguf") &&
+              installed("minimax-h3-image") &&
+              installed("minimax-h3-gguf")
+            : true,
+        },
+        {
           id: "gpt-image-2",
           label: "GPT Image 2 · cloud",
           note: providers.falApiKey
@@ -272,25 +292,28 @@ export class Labs {
        * image1..image3; the cloud model has no such ceiling. */
       refsMaxByModel: {
         "qwen-edit": 3,
+        "h3-image": H3_IMAGE_MAX_REFS,
         "gpt-image-2": GPT_IMAGE_2_MAX_REFS,
       } as Record<string, number>,
       /** models that bill per image — the UI shows an estimate before spend */
       cloudModels: ["gpt-image-2"],
       modelNotes: {
         "qwen-edit": "Renders on your GPU — $0.00 · 3 references max",
+        "h3-image":
+          `Renders on your GPU — $0.00 · up to ${H3_IMAGE_MAX_REFS} references, called <Picture 1>, <Picture 2>… in the prompt · edits want a detailed prompt (try Enhance) · ~20-50 s a picture, ~1 min the first time`,
         "gpt-image-2": providers.falApiKey
           ? `Cloud render on your fal.ai account — ≈ $0.015/image at low quality, ≈ $0.22 at high`
           : "Add your fal.ai API key in Settings → AI Providers to enable",
       } as Record<string, string>,
       /** decks stay local: a 40-prompt run on a paid model is a $9 button, and
        * the deck adapter path is t2i-on-Comfy only */
-      deckModels: ["z-image", "krea2"],
+      deckModels: ["z-image", "krea2", "h3-image"],
       countMax: 4,
       /** gpt-image-2 knobs; absent for the local graphs, which use steps/cfg */
       qualities: ["auto", "low", "medium", "high"],
       outputFormats: ["png", "jpeg", "webp"],
       /** models that can infer the output size from their references */
-      autoSizeModels: ["gpt-image-2"],
+      autoSizeModels: ["gpt-image-2", "h3-image"],
       /** models that accept an inpainting mask alongside the references */
       maskModels: ["gpt-image-2"],
       advanced: {
@@ -300,7 +323,11 @@ export class Labs {
         /** cloud renders aren't bounded by this GPU's VRAM — but they are
          * bounded by fal's own rules (max edge 3840, and a minimum total
          * pixel count, both enforced in falSizeError) */
-        sizeMaxByModel: { "gpt-image-2": FAL_SIZE_RULES.maxEdge } as Record<string, number>,
+        sizeMaxByModel: {
+          "gpt-image-2": FAL_SIZE_RULES.maxEdge,
+          // tuned for ~4 MP; 4096 on the long edge is the most this card takes
+          "h3-image": 4096,
+        } as Record<string, number>,
         stepsMax: 50,
         cfgMax: 15,
         /** per-model proven defaults (graphs.ts) shown as placeholders */
@@ -308,6 +335,7 @@ export class Labs {
           "z-image": { steps: 8, cfg: 1.0 },
           krea2: { steps: 8, cfg: 1.0 },
           "qwen-edit": { steps: 20, cfg: 4.0 },
+          "h3-image": { steps: 6, cfg: 1.0 },
         } as Record<string, { steps: number; cfg: number }>,
       },
     };
@@ -601,6 +629,50 @@ export class Labs {
        * the external CLI has no flags for them */
       metadataManagedOnly: !managed,
       singVoices: cloned.map((v) => ({ id: v.id, label: v.name })),
+    };
+  }
+
+  sfxCatalog() {
+    const { providers } = this.settings.get();
+    const moss = mossSfxPaths(this.settings);
+    return {
+      engines: [
+        {
+          id: "elevenlabs",
+          label: "ElevenLabs SFX · cloud",
+          note: providers.falApiKey
+            ? `crisp one-shots, animals, foley · ${falSfxEstimate(5)} per 5 s`
+            : "needs a fal.ai API key",
+          available: !!providers.falApiKey,
+        },
+        {
+          id: "moss",
+          label: "MOSS-SoundEffect · local",
+          note: moss.python && moss.modelDir
+            ? "heavy impacts, footfalls, ambience · $0.00 · ~25 s a take"
+            : "not installed — set engines.mossSfxPython / mossSfxModelDir",
+          available: !!(moss.python && moss.modelDir),
+        },
+      ] satisfies LabEngine[],
+      cloudEngines: ["elevenlabs"],
+      ratePerSecond: { elevenlabs: ELEVENLABS_SFX_RATE_PER_SEC, moss: 0 },
+      durationMin: 0.5,
+      durationMax: SFX_DURATION_MAX,
+      /** MOSS has no natural-length mode — an unset duration renders this long */
+      mossDefaultSeconds: MOSS_DEFAULT_SECONDS,
+      mossSteps: MOSS_DEFAULTS.steps,
+      mossCfg: MOSS_DEFAULTS.cfg,
+      promptMax: 1000,
+      countMax: 4,
+      /** prompts that work: name the source, the action and the space */
+      starters: [
+        "Massive cinematic trailer impact with a deep sub boom and a long metallic tail",
+        "Fast whoosh pass-by, airy and clean",
+        "One heavy footstep on soft earth and grass, close, no reverb",
+        "Calm night meadow ambience, crickets and a soft breeze",
+        "Bright metallic shing of a sword drawn smoothly",
+        "Magical shimmering sparkle rising, fairy dust",
+      ],
     };
   }
 
@@ -1006,13 +1078,17 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
             ? "z-image-turbo"
             : payload.model === "qwen-edit"
               ? "Qwen Edit 2509"
-              : cloud
+              : payload.model === "h3-image"
+                ? "MiniMax-H3-Image"
+                : cloud
                 ? "GPT Image 2 · fal.ai"
                 : "Krea 2",
         detail: [
           // an auto-sized cloud edit has no aspect of its own — it inherits
           // the references', so claiming one on the card would be a lie
-          cloud && payload.sizeMode === "auto" ? "auto size" : payload.aspect,
+          (cloud || payload.model === "h3-image") && payload.refs.length && payload.sizeMode === "auto"
+            ? "auto size"
+            : payload.aspect,
           `${payload.count} image${payload.count === 1 ? "" : "s"}`,
           payload.refs.length
             ? `${payload.refs.length} ref${payload.refs.length === 1 ? "" : "s"}`
@@ -1037,7 +1113,12 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
         priority: "batch",
         title: payload.deckName,
         kind: "image",
-        engine: payload.model === "z-image" ? "z-image-turbo" : "Krea 2",
+        engine:
+          payload.model === "z-image"
+            ? "z-image-turbo"
+            : payload.model === "h3-image"
+              ? "MiniMax-H3-Image"
+              : "Krea 2",
         detail: `deck · ${payload.prompts.length} image${payload.prompts.length === 1 ? "" : "s"} · ${payload.aspect}${payload.preset ? ` · ${payload.preset}` : ""}`,
       };
     case "imageUpscale": {
@@ -1112,6 +1193,22 @@ export function labEnqueue(payload: JobPayload, project: string): EnqueueJobReso
           payload.bpm !== undefined ? `${payload.bpm} bpm` : "",
           payload.seed !== undefined ? `seed ${payload.seed}` : "",
           payload.styles.join(", "),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    case "sfx":
+      return {
+        ...base,
+        title: title(payload.prompt),
+        kind: "sfx",
+        engine: payload.engine === "moss" ? "MOSS-SoundEffect" : "ElevenLabs SFX",
+        detail: [
+          payload.durationSec !== undefined
+            ? `${payload.durationSec}s`
+            : payload.engine === "moss" ? `${MOSS_DEFAULT_SECONDS}s` : "auto length",
+          payload.loop ? "loop" : "",
+          payload.engine === "moss" ? "local · $0.00" : `cloud ${falSfxEstimate(payload.durationSec)}`,
         ]
           .filter(Boolean)
           .join(" · "),

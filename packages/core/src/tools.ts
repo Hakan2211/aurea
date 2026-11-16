@@ -18,6 +18,7 @@ import {
   libraryKindSchema,
   minimaxRefVideoSchema,
   musicGenerateSchema,
+  sfxGenerateSchema,
   productionAddEpisodeSchema,
   productionAddSceneSchema,
   productionAddShotSchema,
@@ -289,7 +290,7 @@ export function buildTools(api: StudiodApi): AureaTool[] {
       description:
         "What a lab can run on this machine: engines/models with availability, plus valid option values " +
         "(aspects, presets, voices, styles, resolutions).",
-      schema: { lab: z.enum(["image", "voice", "music", "video"]) },
+      schema: { lab: z.enum(["image", "voice", "music", "sfx", "video"]) },
       handler: async ({ lab }) => {
         if (lab === "video") {
           // the video lab has a second, live question — which LTX features the
@@ -312,6 +313,7 @@ export function buildTools(api: StudiodApi): AureaTool[] {
           image: () => api.labs.image.catalog.query(),
           voice: () => api.labs.voice.catalog.query(),
           music: () => api.labs.music.catalog.query(),
+          sfx: () => api.labs.sfx.catalog.query(),
         };
         return json(await catalogs[lab]());
       },
@@ -455,6 +457,24 @@ export function buildTools(api: StudiodApi): AureaTool[] {
         if (!id) return json(await api.studio.assembly.list.query({ project }));
         if (cancel) return json(await api.studio.assembly.cancel.mutate({ id }));
         return json(await api.studio.assembly.get.query({ id }));
+      },
+    }),
+
+    defineTool({
+      name: "generate_sfx",
+      title: "Generate sound effect",
+      description:
+        "Enqueue one sound effect or ambience bed from a text prompt. engine 'elevenlabs' (default) = " +
+        "ElevenLabs SFX v3 on fal.ai — cloud, $0.002 per second, best for crisp one-shots, animals and " +
+        "foley; omit durationSec to let it pick the natural length, loop:true for seamless beds. engine " +
+        "'moss' = MOSS-SoundEffect v2 on the local GPU — free, ~25 s a take, strongest on heavy low " +
+        "material (impacts, braams, footfalls); seed/steps/cfg apply. Describe the source, the action and " +
+        "the space. Lands on the project's sfx shelf; returns the job — wait_for_job for the WAV. Call it " +
+        "several times for variations. lab_catalog('sfx') shows which engines are available.",
+      schema: withProjectDefault(sfxGenerateSchema.omit({ project: true })),
+      handler: async ({ project, ...payload }) => {
+        await requireProject(project);
+        return json(await api.labs.sfx.generate.mutate({ ...payload, project }));
       },
     }),
 

@@ -13,7 +13,7 @@ import { z } from "zod";
 import { assetMetaSchema, type AssetMeta, type Job, type LibraryKind, type Project } from "@aurea/shared";
 import type { SettingsStore } from "./settings.js";
 
-export const ASSET_KINDS = ["image", "video", "audio", "music", "model3d"] as const;
+export const ASSET_KINDS = ["image", "video", "audio", "music", "sfx", "model3d"] as const;
 
 /** extension → library kind, shared by the scanner and the importer */
 export const EXT_KIND: Record<string, LibraryKind> = {
@@ -36,6 +36,7 @@ const JOB_KIND_DIR: Record<Job["kind"], LibraryKind> = {
   image: "image",
   tts: "audio",
   music: "music",
+  sfx: "sfx",
   model3d: "model3d",
 };
 
@@ -95,6 +96,15 @@ function assetMetaFor(job: Job): AssetMeta | null {
         ...(p.arrangement === "vocals" && p.lyrics?.trim() ? { lyrics: p.lyrics.trim() } : {}),
         ...(p.bpm !== undefined ? { bpm: p.bpm } : {}),
         ...(p.keyscale ? { keyscale: p.keyscale } : {}),
+      };
+    case "sfx":
+      // the prompt IS the sound's description; its first clause names it
+      return {
+        origin: p.type,
+        engine: p.engine,
+        prompt: p.prompt,
+        title: trackTitle(p.prompt) || job.title || undefined,
+        ...(p.loop ? { loop: true } : {}),
       };
     case "voiceConvert":
       return { origin: p.type, source: p.source, ...(p.mode === "sing" ? { arrangement: "vocals" as const } : {}) };

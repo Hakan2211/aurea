@@ -79,3 +79,20 @@ export function falSizeError(width: number, height: number): string | null {
   }
   return null;
 }
+
+/* ---- ElevenLabs Sound Effects v3 on fal (the Sound FX lab's cloud engine) ----
+ * fal bills generated audio by the second. With no duration set, ElevenLabs
+ * picks the natural length (up to 30 s); 5 s is assumed for the estimate,
+ * which covers the typical one-shot. */
+export const ELEVENLABS_SFX_RATE_PER_SEC = 0.002;
+export const ELEVENLABS_SFX_ENDPOINT = "fal-ai/elevenlabs/sound-effects/v3";
+
+export function falSfxCost(durationSec: number | undefined, count = 1): number {
+  return ELEVENLABS_SFX_RATE_PER_SEC * (durationSec ?? 5) * Math.max(1, count);
+}
+
+export function falSfxEstimate(durationSec: number | undefined, count = 1): string {
+  const total = falSfxCost(durationSec, count);
+  const shown = total < 0.1 ? total.toFixed(3).replace(/0$/, "") : total.toFixed(2);
+  return `≈ $${shown}`;
+}

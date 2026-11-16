@@ -200,3 +200,83 @@ export function qwenEditGraph(
   };
   return graph;
 }
+
+/** MiniMax-H3-Image loader names. The text encoder belongs to a different
+ * registry model (minimax-h3-gguf), so this has its own shape rather than
+ * ModelNames. */
+export interface H3ImageNames {
+  unet: string;
+  /** GGUF qwen3-vl encoder, loaded through CLIPLoaderGGUF type "minimax" */
+  textEncoder: string;
+  vae: string;
+}
+
+/** The H3-Image canvas grid: MiniMaxH3ImageConditioning steps width/height
+ * by 32 (CANVAS_MULTIPLE in comfy_extras/nodes_minimax_h3.py). */
+export const H3_IMAGE_GRID = 32;
+
+/** Mirrors ComfyUI's official image_minimax_h3_image_t2i / _edit templates
+ * (comfyui-workflow-templates, ComfyUI 0.45): one conditioning node takes the
+ * prompt, the canvas and the reference pictures and hands back both the
+ * positive conditioning and the empty latent. PDD-distilled: euler / simple,
+ * 6 steps, cfg 1, with a zeroed negative.
+ *
+ * `refs` are ComfyUI input names (ComfyClient.uploadInput); refs[0] is the
+ * picture being edited and the prompt calls them <Picture 1>, <Picture 2>...
+ * Width/height of 0 lets the node size the canvas from the first reference
+ * (or 2048x2048 without one). */
+export function h3ImageGraph(
+  spec: ImageGraphSpec,
+  names: H3ImageNames,
+  refs: string[] = [],
+): ComfyGraph {
+  const snap = (v: number) => (v ? Math.max(H3_IMAGE_GRID, Math.round(v / H3_IMAGE_GRID) * H3_IMAGE_GRID) : 0);
+  const graph: ComfyGraph = {
+    unet: { inputs: { unet_name: names.unet, weight_dtype: "default" }, class_type: "UNETLoader" },
+    clip: {
+      inputs: { clip_name: names.textEncoder, type: "minimax" },
+      class_type: "CLIPLoaderGGUF",
+    },
+    vae: { inputs: { vae_name: names.vae }, class_type: "VAELoader" },
+    negative: { inputs: { conditioning: ["positive", 0] }, class_type: "ConditioningZeroOut" },
+    sampler: {
+      inputs: {
+        seed: spec.seed,
+        steps: spec.steps ?? 6,
+        cfg: spec.cfg ?? 1.0,
+        sampler_name: "euler",
+        scheduler: "simple",
+        denoise: 1.0,
+        model: ["unet", 0],
+        positive: ["positive", 0],
+        negative: ["negative", 0],
+        latent_image: ["positive", 1],
+      },
+      class_type: "KSampler",
+    },
+    decode: { inputs: { samples: ["sampler", 0], vae: ["vae", 0] }, class_type: "VAEDecode" },
+    save: {
+      inputs: { filename_prefix: "aurea", images: ["decode", 0] },
+      class_type: "SaveImage",
+    },
+  };
+  // the node's images input is an Autogrow group: image_1..image_N, sent as
+  // flat "images.image_N" keys in the API format
+  const imageInputs: Record<string, [string, number]> = {};
+  refs.forEach((name, i) => {
+    graph[`ref${i + 1}`] = { inputs: { image: name }, class_type: "LoadImage" };
+    imageInputs[`images.image_${i + 1}`] = [`ref${i + 1}`, 0];
+  });
+  graph.positive = {
+    inputs: {
+      clip: ["clip", 0],
+      vae: ["vae", 0],
+      prompt: spec.prompt,
+      width: snap(spec.width),
+      height: snap(spec.height),
+      ...imageInputs,
+    },
+    class_type: "MiniMaxH3ImageConditioning",
+  };
+  return graph;
+}

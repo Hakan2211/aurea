@@ -26,13 +26,14 @@ import { GpuScheduler, type JobResources, type ResourceClass } from "./scheduler
 const PRIORITY_RANK: Record<JobPriority, number> = { interactive: 0, preview: 1, batch: 2 };
 
 /** progress points per tick, by how heavy the job kind typically is */
-const TICK_RATE: Record<Job["kind"], number> = { video: 1.6, image: 6, tts: 9, music: 4, model3d: 2 };
+const TICK_RATE: Record<Job["kind"], number> = { video: 1.6, image: 6, tts: 9, music: 4, sfx: 8, model3d: 2 };
 
 const STAGES: Record<Job["kind"], string[]> = {
   video: ["Sampling", "Upscaling", "Encoding"],
   image: ["Sampling", "Decoding"],
   tts: ["Synthesizing"],
   music: ["Composing", "Mixing"],
+  sfx: ["Generating"],
   model3d: ["Sampling shape", "Painting textures"],
 };
 

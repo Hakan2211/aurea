@@ -29,7 +29,7 @@ export type MinimaxDistillId = (typeof MINIMAX_DISTILL_IDS)[number];
 export const jobStatusSchema = z.enum(["running", "queued", "completed", "failed"]);
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 
-export const jobKindSchema = z.enum(["video", "image", "tts", "music", "model3d"]);
+export const jobKindSchema = z.enum(["video", "image", "tts", "music", "sfx", "model3d"]);
 export type JobKind = z.infer<typeof jobKindSchema>;
 
 export const jobPrioritySchema = z.enum(["interactive", "preview", "batch"]);
@@ -265,6 +265,31 @@ export const musicPayloadSchema = z.object({
    * location's `roomTone` bed, the way a boarded still becomes a keyframe */
   roomTone: z.object({ location: z.string().min(1) }).optional(),
 });
+
+/** Sound-effect generation (text → one-shot SFX / ambience).
+ * "elevenlabs" = ElevenLabs Sound Effects v3 on fal.ai (cloud, $0.002/s, needs
+ * providers.falApiKey); "moss" = MOSS-SoundEffect v2.0 run locally from its own
+ * venv (engines.mossSfxPython / mossSfxModelDir). Both render 48 kHz. */
+export const SFX_DURATION_MAX = 30;
+export const sfxPayloadSchema = z.object({
+  type: z.literal("sfx"),
+  engine: z.enum(["elevenlabs", "moss"]).default("elevenlabs"),
+  /** what the sound is — source, action, space ("a heavy elephant footstep on
+   * soft earth, close, no reverb") */
+  prompt: z.string().min(1).max(1000),
+  /** seconds; absent = ElevenLabs picks the natural length (MOSS uses 5 s) */
+  durationSec: z.number().min(0.5).max(SFX_DURATION_MAX).optional(),
+  /** ElevenLabs: how literally to follow the prompt (0 = loose, 1 = strict) */
+  promptInfluence: z.number().min(0).max(1).default(0.45),
+  /** ElevenLabs: render a seamless loop (ambience beds) */
+  loop: z.boolean().default(false),
+  /** MOSS: absent = random each run */
+  seed: z.number().int().optional(),
+  /** MOSS diffusion steps (model default 100) and CFG scale (default 4) */
+  steps: z.number().int().min(10).max(200).optional(),
+  cfg: z.number().min(1).max(10).optional(),
+});
+export type SfxPayload = z.infer<typeof sfxPayloadSchema>;
 
 /** Seed-VC voice conversion — re-voice existing audio (speech or singing)
  * into a cloned voice from the roster. kind rides on "tts" (voice shelf)
@@ -784,6 +809,7 @@ export const jobPayloadSchema = z.discriminatedUnion("type", [
   voiceConvertPayloadSchema,
   rvcTrainPayloadSchema,
   musicPayloadSchema,
+  sfxPayloadSchema,
   model3dPayloadSchema,
   coveragePayloadSchema,
   videoPayloadSchema,
@@ -877,6 +903,9 @@ export type TtsGenerate = z.input<typeof ttsGenerateSchema>;
 
 export const musicGenerateSchema = musicPayloadSchema.omit({ type: true }).extend(projectField);
 export type MusicGenerate = z.input<typeof musicGenerateSchema>;
+
+export const sfxGenerateSchema = sfxPayloadSchema.omit({ type: true }).extend(projectField);
+export type SfxGenerate = z.input<typeof sfxGenerateSchema>;
 
 /** lift an image already in the library into a mesh */
 export const model3dGenerateSchema = model3dPayloadSchema
@@ -1203,6 +1232,12 @@ export const settingsSchema = z.object({
       hunyuan3dDir: z.string().nullable().default(null),
       /** python.exe of that checkout's venv; null = <hunyuan3dDir>/.venv */
       hunyuan3dPython: z.string().nullable().default(null),
+      /** python.exe of the MOSS-SoundEffect v2 venv (moss_soundeffect_v2
+       * installed into it); null = probe the videoproduction\moss-sfx convention */
+      mossSfxPython: z.string().nullable().default(null),
+      /** MOSS-SoundEffect-v2.0 weights folder (model_index.json root); null =
+       * probe D:\AIModels\Aurea-models\moss-soundeffect-v2 at use time */
+      mossSfxModelDir: z.string().nullable().default(null),
     })
     .default({}),
   providers: z.object({
@@ -1210,7 +1245,8 @@ export const settingsSchema = z.object({
     /** Claude Code model alias the Director runs on (resolved by the local CLI) */
     claudeModel: z.enum(["sonnet", "opus", "haiku"]).default("sonnet"),
     openrouterApiKey: z.string().default(""),
-    /** fal.ai key — unlocks the Seedance cloud video engine (paid per clip) */
+    /** fal.ai key — unlocks the cloud engines: Seedance video, GPT Image 2 and
+     * ElevenLabs sound effects (all paid per use) */
     falApiKey: z.string().default(""),
     /** Replicate token — unlocks RVC v2 voice training + conversion (paid per run) */
     replicateApiToken: z.string().default(""),
@@ -1295,7 +1331,7 @@ export const projectRenameSchema = z.object({
 
 /* ---------- asset library ---------- */
 
-export const libraryKindSchema = z.enum(["image", "video", "audio", "music", "model3d"]);
+export const libraryKindSchema = z.enum(["image", "video", "audio", "music", "sfx", "model3d"]);
 export type LibraryKind = z.infer<typeof libraryKindSchema>;
 
 /* ---------- timeline (OTIO-shaped, exporter later) ---------- */

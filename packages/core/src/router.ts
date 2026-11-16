@@ -15,6 +15,7 @@ import {
   imageUpscaleGenerateSchema,
   libraryRemoveSchema,
   musicGenerateSchema,
+  sfxGenerateSchema,
   coverageStartSchema,
   model3dGenerateSchema,
   model3dFromPromptSchema,
@@ -389,6 +390,13 @@ export const appRouter = router({
           // a re-roll is something you're waiting on, unlike the automatic one
           return ctx.engine.enqueue({ ...job, priority: "interactive" });
         }),
+    }),
+    sfx: router({
+      catalog: procedure.query(({ ctx }) => ctx.labs.sfxCatalog()),
+      generate: procedure.input(sfxGenerateSchema).mutation(({ ctx, input }) => {
+        const { project, ...payload } = input;
+        return generate(ctx, { type: "sfx", ...payload }, project);
+      }),
     }),
     model3d: router({
       catalog: procedure.query(({ ctx }) => ctx.labs.model3dCatalog()),

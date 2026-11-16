@@ -13,11 +13,14 @@ import type { ModelManager } from "../models/manager.js";
 import { ComfyClient } from "../comfy/client.js";
 import {
   esrganUpscaleGraph,
+  h3ImageGraph,
   krea2Graph,
   qwenEditGraph,
   zImageGraph,
+  type H3ImageNames,
   type ImageGraphSpec,
 } from "../comfy/graphs.js";
+import { MINIMAX_MODEL_ID } from "./minimax-video.js";
 import { jobRunDir } from "./proc.js";
 import type { JobResources } from "../scheduler.js";
 import type { AdapterProgress, AdapterRun, EngineAdapter } from "./types.js";
@@ -37,6 +40,8 @@ const NODE_STAGE: Record<string, string> = {
   CLIPLoader: "Loading models",
   VAELoader: "Loading models",
   TextEncodeQwenImageEditPlus: "Encoding references",
+  CLIPLoaderGGUF: "Loading models",
+  MiniMaxH3ImageConditioning: "Encoding the prompt",
   KSampler: "Sampling",
   VAEDecode: "Decoding",
   UpscaleModelLoader: "Loading upscaler",
@@ -62,6 +67,29 @@ const WEIGHTS: Record<string, { id: string; label: string; gguf: boolean }> = {
     gguf: true,
   },
 };
+/** H3-Image weights. Its text encoder is MiniMax-H3's, which WEIGHTS can't
+ * express, hence the separate entries and the double preflight. */
+const H3_IMAGE = { id: "minimax-h3-image", label: "MiniMax-H3-Image" };
+const H3_ENCODER = {
+  id: MINIMAX_MODEL_ID,
+  label: "MiniMax-H3 (GGUF), for its text encoder",
+  gguf: true,
+};
+/** most references H3-Image is fed here. The node takes up to 100; past a
+ * handful each one costs encode time and VRAM for little gain. */
+export const H3_IMAGE_MAX_REFS = 8;
+
+/** H3-Image is tuned for ~2048x2048 of area (IMAGE_SIZE in the node). At the
+ * 1 MP SDXL buckets above it garbles text and goes soft, so it gets its own
+ * table at ~4 MP, every side on its 32 px grid. */
+const H3_ASPECT_SIZE: Record<ImageAspect, [number, number]> = {
+  "1:1": [2048, 2048],
+  "3:2": [2496, 1664],
+  "16:9": [2720, 1536],
+  "4:3": [2368, 1760],
+  "9:16": [1536, 2720],
+};
+
 const ESRGAN = { id: "realesrgan-x4plus", label: "Real-ESRGAN x4+" };
 const UPSCALE2K = { id: "qwen-edit-upscale2k-lora", label: "Qwen Image Edit — Upscale2K LoRA" };
 
@@ -128,12 +156,17 @@ export class ComfyImageAdapter implements EngineAdapter {
       return (
         job.payload.model === "z-image" ||
         job.payload.model === "krea2" ||
-        job.payload.model === "qwen-edit"
+        job.payload.model === "qwen-edit" ||
+        job.payload.model === "h3-image"
       );
     }
     // decks are t2i-only (ref decks are a later rung)
     if (job.payload?.type === "imageDeck") {
-      return job.payload.model === "z-image" || job.payload.model === "krea2";
+      return (
+        job.payload.model === "z-image" ||
+        job.payload.model === "krea2" ||
+        job.payload.model === "h3-image"
+      );
     }
     return job.payload?.type === "imageUpscale";
   }
@@ -153,7 +186,10 @@ export class ComfyImageAdapter implements EngineAdapter {
       job.payload?.type === "image" || job.payload?.type === "imageDeck"
         ? job.payload.model
         : "z-image";
-    const vram = model === "qwen-edit" ? 20 : model === "krea2" ? 18 : 14;
+    // h3-image: the 12.5 GB w4a8 DiT plus the 8.5 GB Q2_K encoder, which
+    // offloads after conditioning
+    const vram =
+      model === "h3-image" ? 22 : model === "qwen-edit" ? 20 : model === "krea2" ? 18 : 14;
     return { klass: "gpu", engineId: "comfy", vramGb: managed ? vram : undefined };
   }
 
@@ -171,14 +207,24 @@ export class ComfyImageAdapter implements EngineAdapter {
       }
       const weights = WEIGHTS[payload.model];
       if (weights && managed) this.requireWeights(weights);
+      if (payload.model === "h3-image" && managed) {
+        this.requireWeights(H3_IMAGE);
+        this.requireWeights(H3_ENCODER);
+      }
       report({ progress: 1, stage: managed ? "Starting engine" : "Queuing on ComfyUI" });
       return this.comfy.run(async (url) => {
         const outDir = path.join(jobRunDir(job.id), "out");
         fs.mkdirSync(outDir, { recursive: true });
+        const h3 = payload.model === "h3-image";
+        const h3Edit = h3 && payload.type === "image" && payload.refs.length > 0;
+        // an h3 edit on "Auto" size keeps the picture's own shape: 0x0 tells
+        // the node to size the canvas from <Picture 1>
         const [width, height] =
           payload.width && payload.height
             ? [payload.width, payload.height]
-            : ASPECT_SIZE[payload.aspect];
+            : h3Edit && payload.type === "image" && payload.sizeMode === "auto"
+              ? [0, 0]
+              : (h3 ? H3_ASPECT_SIZE : ASPECT_SIZE)[payload.aspect];
         const fold = (p: string) =>
           payload.preset ? `${p}, ${payload.preset.toLowerCase()} style` : p;
         const baseSeed = payload.seed ?? Math.floor(Math.random() * 1_000_000_000);
@@ -186,9 +232,14 @@ export class ComfyImageAdapter implements EngineAdapter {
 
         // qwen-edit: stage the reference images once, reused across the batch
         const refNames: string[] = [];
-        if (payload.type === "image" && payload.model === "qwen-edit") {
+        if (payload.type === "image" && (payload.model === "qwen-edit" || h3Edit)) {
           if (payload.refs.length === 0) {
             throw new Error("qwen-edit needs at least one reference image (character bible refs)");
+          }
+          if (h3 && payload.refs.length > H3_IMAGE_MAX_REFS) {
+            throw new Error(
+              `H3-Image takes up to ${H3_IMAGE_MAX_REFS} references here, got ${payload.refs.length}`,
+            );
           }
           report({ progress: 2, stage: "Uploading references" });
           const dataRoot = this.settings.get().storage.dataRoot;
@@ -225,13 +276,13 @@ export class ComfyImageAdapter implements EngineAdapter {
             steps: payload.steps,
             cfg: payload.cfg,
           };
-          const names = this.models.comfyNames(WEIGHTS[payload.model].id);
-          const graph =
-            payload.type === "image" && payload.model === "qwen-edit"
-              ? qwenEditGraph(spec, names, refNames)
+          const graph = h3
+            ? h3ImageGraph(spec, this.h3Names(), refNames)
+            : payload.type === "image" && payload.model === "qwen-edit"
+              ? qwenEditGraph(spec, this.models.comfyNames(WEIGHTS["qwen-edit"].id), refNames)
               : payload.model === "krea2"
-                ? krea2Graph(spec, names)
-                : zImageGraph(spec, names);
+                ? krea2Graph(spec, this.models.comfyNames(WEIGHTS.krea2.id))
+                : zImageGraph(spec, this.models.comfyNames(WEIGHTS["z-image"].id));
 
           // each image owns an equal slice of 5..95
           const lo = 5 + (i / plan.length) * 90;
@@ -242,7 +293,13 @@ export class ComfyImageAdapter implements EngineAdapter {
             // a qwen-edit board with 3 refs runs past the default 10 min on the
             // 3090 Ti / 32 GB box: 8m31s and one >10m timeout, measured
             // 2026-11-10 on S1E01 sc1 (2 refs took ~4 min)
-            timeoutMs: payload.type === "image" && payload.model === "qwen-edit" ? 25 * 60_000 : undefined,
+            // h3-image: ~50 s cold load, then 16-45 s a picture at 4-10 MP
+            timeoutMs:
+              payload.type === "image" && payload.model === "qwen-edit"
+                ? 25 * 60_000
+                : h3
+                  ? 20 * 60_000
+                  : undefined,
             onNode: (classType) => {
               const stage = NODE_STAGE[classType];
               if (stage) report({ stage: `${stage}${label}` });
@@ -271,6 +328,19 @@ export class ComfyImageAdapter implements EngineAdapter {
     return {
       done,
       cancel: () => ctrl.abort(),
+    };
+  }
+
+  /** Loader names for H3-Image: DiT + VAE from its own entry, the encoder
+   * from MiniMax-H3's. A managed copy is addressed "<id>/<category>/<file>",
+   * a linked or external one by bare filename (see the graphs.ts header). */
+  private h3Names(): H3ImageNames {
+    const name = (id: string, category: string, file: string) =>
+      this.models.managedCopy(id) ? path.join(id, category, file) : file;
+    return {
+      unet: name(H3_IMAGE.id, "diffusion_models", "minimax_h3_image_pruned_w4a8.safetensors"),
+      vae: name(H3_IMAGE.id, "vae", "minimax_h3_image_vae_fp16.safetensors"),
+      textEncoder: name(MINIMAX_MODEL_ID, "text_encoders", "qwen3vl-32B-MiniMax-H3-Q2_K.gguf"),
     };
   }
 

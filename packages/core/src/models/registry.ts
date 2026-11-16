@@ -676,6 +676,40 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     essential: false,
   }),
   withSize({
+    id: "minimax-h3-image",
+    name: "MiniMax-H3-Image (w4a8)",
+    use: "image",
+    engine: "ComfyUI · Image Lab (h3-image)",
+    description:
+      "MiniMax's 33B image model. One checkpoint does both text-to-image and editing with up to " +
+      "16 reference pictures, distilled to 6 steps with no CFG. Strong at lettering and at " +
+      "keeping a subject on-model through an edit. Needs ComfyUI 0.45+ and reuses the Q2_K text " +
+      "encoder from MiniMax-H3 (GGUF), so that model must be installed too. Tuned for about " +
+      "2048x2048 of area; small canvases come out soft and garble text.",
+    files: [
+      {
+        // w4a8 because it is the one quant that fits beside the 32B encoder
+        // on a 24 GB card; int8 is 21 GB and bf16 40 GB
+        name: "diffusion_models/minimax_h3_image_pruned_w4a8.safetensors",
+        url: "https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/main/diffusion_models/minimax_h3_image_pruned_w4a8.safetensors",
+        sizeBytes: 12549794530,
+        sha256: "517cc19b85348386f4df7c806dce80d839d0899e7cdaa3e1dbb09de964381dbb",
+      },
+      {
+        name: "vae/minimax_h3_image_vae_fp16.safetensors",
+        url: "https://huggingface.co/Comfy-Org/MiniMax-H3-Image/resolve/main/vae/minimax_h3_image_vae_fp16.safetensors",
+        sizeBytes: 1168505312,
+        sha256: "d80e9c2e5cfc9844869961ff5a58c9a9e52182df6bfb30b26018dd7f348721af",
+      },
+    ],
+    license: {
+      name: "MiniMax H3 Community License Agreement",
+      url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+      gated: true,
+    },
+    essential: false,
+  }),
+  withSize({
     id: "z-image-turbo",
     name: "Z-Image Turbo",
     use: "image",

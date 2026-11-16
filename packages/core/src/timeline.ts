@@ -51,6 +51,7 @@ const TRACK_FOR_KIND: Record<string, TimelineTrackKind> = {
   image: "video",
   audio: "voice",
   music: "music",
+  sfx: "sfx",
 };
 
 export class TimelineStore {
@@ -158,7 +159,7 @@ export class TimelineStore {
     const wanted = Math.min(input.trackIndex ?? 0, kindTracks.length);
     let track = kindTracks[wanted];
     if (!track) {
-      const base = kind.charAt(0).toUpperCase() + kind.slice(1);
+      const base = kind === "sfx" ? "SFX" : kind.charAt(0).toUpperCase() + kind.slice(1);
       track = {
         id: randomUUID(),
         kind,

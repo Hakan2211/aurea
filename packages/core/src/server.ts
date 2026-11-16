@@ -46,6 +46,7 @@ import { MinimaxVideoAdapter } from "./adapters/minimax-video.js";
 import { MinimaxCoverageAdapter } from "./adapters/minimax-coverage.js";
 import { SeedanceAdapter } from "./adapters/seedance.js";
 import { FfmpegExportAdapter } from "./adapters/ffmpeg-export.js";
+import { FalSfxAdapter, MossSfxAdapter } from "./adapters/sfx.js";
 import { serveFile, serveMedia } from "./media.js";
 import { appRouter, createCaller } from "./router.js";
 import { InboxWatcher } from "./inbox.js";
@@ -111,6 +112,8 @@ export async function startStudiod(opts: StudiodOptions = {}): Promise<StudiodHa
       new MusicAdapter(settings, runtime, models),
       new MinimaxMusicAdapter(music3, comfy),
       new Hunyuan3dAdapter(settings, comfy),
+      new FalSfxAdapter(settings),
+      new MossSfxAdapter(settings, comfy),
       new ReplicateRvcAdapter(settings),
       new SeedVcAdapter(settings, runtime),
       new ComfyVideoAdapter(settings, comfy, models),

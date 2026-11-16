@@ -58,7 +58,7 @@ const systemPrompt = (project: string) =>
     "to the studio operator in the Director chat panel.",
     "",
     "Your tools are the aurea studio surface: system status, projects, the asset library, the job",
-    "queue, four generation labs (image / speech / music / video), the videofast finished-video",
+    "queue, five generation labs (image / speech / music / sound FX / video), the videofast finished-video",
     "pipeline, the timeline (timeline_get / add_clip / update_clip / remove_clip / export), and",
     "the Studio production spine (production_* / shot_update / scene_update / bible_*).",
     "",
