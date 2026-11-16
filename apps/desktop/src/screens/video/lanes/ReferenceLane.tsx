@@ -1,3 +1,5 @@
+import { Checkbox } from "@/components/ui/Checkbox";
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useRef, useState } from "react";
 import { AudioLines, Film, ListPlus, Upload, X } from "lucide-react";
 import {
@@ -267,17 +269,16 @@ export function ReferenceLane({
                 ))}
               </div>
               <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={v.useItsAudio}
-                  onChange={(e) => {
-                    const on = e.target.checked;
+                  onCheckedChange={(v) => {
+                    const on = v === true;
                     setRefs((r) => ({
                       ...r,
                       videos: r.videos.map((x, j) => (j === i ? { ...x, useItsAudio: on } : x)),
                     }));
                   }}
-                  className="accent-gold"
+                  className=""
                 />
                 <span className="text-2xs text-fog">
                   Reference its sound too
@@ -316,7 +317,7 @@ export function ReferenceLane({
           {refs.images.length > 0 && (
             <div className="flex items-center gap-2">
               <span className="shrink-0 text-2xs text-fog">Stills</span>
-              <select
+              <SelectBox
                 value={refs.imageSize}
                 onChange={(e) =>
                   setRefs((r) => ({ ...r, imageSize: e.target.value as MinimaxRefs["imageSize"] }))
@@ -326,7 +327,7 @@ export function ReferenceLane({
               >
                 <option value="match">Match the render (faster)</option>
                 <option value="max">Full 2048px (holds identity harder)</option>
-              </select>
+              </SelectBox>
             </div>
           )}
 

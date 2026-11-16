@@ -10,6 +10,7 @@
  * retakeShot). /desk falls back to the first episode; /desk/:episodeId
  * deep-links one. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { BookImage, ClipboardCheck, FlaskConical, PenLine, Ruler, Workflow } from "lucide-react";
@@ -82,7 +83,7 @@ export function DeskScreen() {
               rail shows and list_projects marks; the crew addresses projects by
               id, so this is how the human sees the one the crew is in */}
           {projects.length > 1 && (
-            <select
+            <SelectBox
               value={activeId}
               onChange={(e) => setActive(e.target.value)}
               title="Project — every screen follows this"
@@ -93,10 +94,10 @@ export function DeskScreen() {
                   {p.name}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           )}
           {episodes.length > 1 && (
-            <select
+            <SelectBox
               value={episode?.id ?? ""}
               onChange={(e) => navigate(`/story/episodes/${e.target.value}`)}
               className={cx(selectInput, "w-[220px]")}
@@ -106,7 +107,7 @@ export function DeskScreen() {
                   S{pad2(season.number)}E{pad2(ep.number)} · {ep.title || ep.id}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           )}
           <button
             onClick={() => setAbOpen(true)}

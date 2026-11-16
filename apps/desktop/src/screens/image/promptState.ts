@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import type { PromptPreset } from "@aurea/shared";
+import { useDraft } from "@/useDraft";
 import { joinChips, makeChip, parseChips, type PromptChip } from "./PromptBuilder";
 
 /* The Image lab's prompt, lifted out of the params panel.
@@ -26,27 +27,37 @@ export interface PromptState {
   /** accept an enhanced prompt — text wins, chips re-derive from it */
   acceptText: (next: string) => void;
   clear: () => void;
+  /** a run was queued: empty the composer and remember what was sent */
+  sent: (text: string) => void;
+  /** the last prompt sent from this composer — ↑ in an empty box brings it back */
+  lastSent: string;
 }
 
-export function usePromptState(initial: string): PromptState {
-  const [prompt, setPromptRaw] = useState(initial);
-  const [chips, setChips] = useState<PromptChip[]>(() => parseChips(initial));
+/** `key` names the draft, so the prompt is still there after you leave the
+ * screen mid-render and come back (see useDraft) */
+export function usePromptState(key: string, initial: string): PromptState {
+  const [prompt, setPromptRaw] = useDraft(`${key}:prompt`, initial);
+  const [chips, setChips] = useDraft<PromptChip[]>(`${key}:chips`, () => parseChips(initial));
   /** Plain text is the default: it's how prompts are written and pasted. The
    * chip builder is the structured view you opt into. */
-  const [rawMode, setRawMode] = useState(true);
+  const [rawMode, setRawMode] = useDraft(`${key}:raw`, true);
+  const [lastSent, setLastSent] = useDraft(`${key}:lastSent`, "");
 
-  const setPrompt = useCallback((next: string) => setPromptRaw(next.slice(0, PROMPT_MAX)), []);
+  const setPrompt = useCallback(
+    (next: string) => setPromptRaw(next.slice(0, PROMPT_MAX)),
+    [setPromptRaw],
+  );
 
   const commitChips = useCallback((next: PromptChip[]) => {
     setChips(next);
     setPromptRaw(joinChips(next).slice(0, PROMPT_MAX));
-  }, []);
+  }, [setChips, setPromptRaw]);
 
   const acceptText = useCallback((next: string) => {
     const text = next.slice(0, PROMPT_MAX);
     setPromptRaw(text);
     setChips(parseChips(text));
-  }, []);
+  }, [setChips, setPromptRaw]);
 
   return {
     prompt,
@@ -77,5 +88,11 @@ export function usePromptState(initial: string): PromptState {
       setPromptRaw("");
       setChips([]);
     },
+    sent: (text) => {
+      setLastSent(text);
+      setPromptRaw("");
+      setChips([]);
+    },
+    lastSent,
   };
 }

@@ -21,6 +21,7 @@ import type {
   Model3dFromPrompt,
   Model3dGenerate,
   MusicGenerate,
+  SfxGenerate,
   Production,
   ProductionAddEpisode,
   ProductionAddScene,
@@ -746,7 +747,10 @@ export function useImageLab() {
   const seenUpscales = useRef(new Set<string>());
 
   return useMemo(() => {
-    const generate = (input: Omit<ImageGenerate, "project">) => mutate({ ...input, project });
+    /** `onQueued` fires once the engine has the job — the composer clears
+     * then, not on click, so a rejected enqueue keeps your prompt */
+    const generate = (input: Omit<ImageGenerate, "project">, onQueued?: () => void) =>
+      mutate({ ...input, project }, { onSuccess: () => onQueued?.() });
     const generateDeck = (input: Omit<ImageDeckGenerate, "project">) =>
       mutateDeck({ ...input, project });
     /** stage an uploaded reference; resolves to its dataRoot-relative path */
@@ -889,7 +893,11 @@ export function useImageLab() {
           Array.from({ length: j.payload.type === "image" ? j.payload.count : 1 }, (_, i) => ({
             id: `${j.id}:${i}`,
             swatch: labSwatch(`${j.id}${i}`),
-            generating: { progress: j.progress },
+            generating: {
+              progress: j.progress,
+              prompt: j.payload.type === "image" ? j.payload.prompt : undefined,
+              queued: j.status === "queued",
+            },
           })),
         ),
       ...roll.map((a) => ({
@@ -1546,6 +1554,7 @@ const KIND_SWATCH: Record<LibraryKind, string> = {
   video: "bg-gradient-to-br from-[#2c3a4a] to-[#0a0e14]",
   audio: "bg-gradient-to-br from-[#3a2a1a] to-[#120d06]",
   music: "bg-gradient-to-br from-[#2a3a2e] to-[#0b110d]",
+  sfx: "bg-gradient-to-br from-[#3a2a3a] to-[#110b11]",
   model3d: "bg-gradient-to-br from-[#2f2a4a] to-[#0d0b16]",
 };
 
@@ -1554,6 +1563,7 @@ const KIND_LABEL: Record<LibraryKind, string> = {
   video: "Video",
   audio: "Voice",
   music: "Music",
+  sfx: "Sound FX",
   model3d: "3D model",
 };
 
@@ -1572,7 +1582,7 @@ const waveSeed = (id: string) => {
 };
 
 function toScreenAsset(a: CoreAsset, media: ((route: string) => string) | null): LibraryAsset {
-  const audio = a.kind === "audio" || a.kind === "music";
+  const audio = a.kind === "audio" || a.kind === "music" || a.kind === "sfx";
   return {
     id: a.id,
     kind: a.kind,
@@ -1619,6 +1629,7 @@ export function useAssetLibrary() {
         { id: "video", label: "Video takes", count: count("video") },
         { id: "audio", label: "Voices", count: count("audio") },
         { id: "music", label: "Music", count: count("music") },
+        { id: "sfx", label: "Sound FX", count: count("sfx") },
         { id: "model3d", label: "3D models", count: count("model3d") },
       ],
       // smart collections need favorites/review state the store doesn't own yet
@@ -2612,4 +2623,89 @@ export function useSceneAssembly(
     startError: start.error?.message ?? null,
     cancel: (id: string) => cancel.mutateAsync({ id }),
   };
+}
+
+
+/* ---------- Sound FX lab ---------- */
+
+export interface SfxTake {
+  id: string;
+  title: string;
+  prompt?: string;
+  engine?: string;
+  loop?: boolean;
+  url?: string;
+  relPath?: string;
+  createdAt?: string;
+  generating?: { progress: number; stage: string };
+}
+
+const SFX_ROLL_MAX = 200;
+
+/** the Sound FX lab: catalog, takes on the project's sfx shelf (newest first),
+ * the jobs still rendering, and generate(count) for quick variations */
+export function useSfxLab() {
+  const catalog = trpc.labs.sfx.catalog.useQuery().data;
+  const { media, project, invalidate, jobsData, kindAssets } = useLabData("sfx");
+  const mutation = trpc.labs.sfx.generate.useMutation(invalidate);
+  const { mutateAsync } = mutation;
+  const { mutate: cancelJob } = trpc.jobs.cancel.useMutation(invalidate);
+  const removeAssets = useRemoveAssets();
+
+  return useMemo(() => {
+    /** one job per variation — each is its own take, its own file */
+    const generate = async (input: Omit<SfxGenerate, "project">, count = 1) => {
+      for (let i = 0; i < Math.max(1, count); i++) await mutateAsync({ ...input, project });
+    };
+    const active = labJobs(jobsData, "sfx");
+    const takes: SfxTake[] = [
+      ...active.map((j) => ({
+        id: j.id,
+        title: j.title,
+        prompt: j.payload.prompt,
+        engine: j.payload.engine,
+        generating: { progress: j.progress, stage: j.stage ?? "Queued" },
+      })),
+      ...(kindAssets ?? [])
+        .slice()
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
+        .map((a) => ({
+          id: a.id,
+          title: a.meta?.title?.trim() || unslug(strip(a.name)),
+          prompt: a.meta?.prompt,
+          engine: a.meta?.engine,
+          loop: a.meta?.loop,
+          url: media ? media(a.url) : undefined,
+          relPath: a.relPath,
+          createdAt: a.createdAt,
+        })),
+    ].slice(0, SFX_ROLL_MAX);
+    // no catalog = the studio service didn't answer (or predates this lab) —
+    // say that, rather than blaming engines that may be perfectly installed
+    const offline = "studio service not reachable — restart it to load the Sound FX lab";
+    const fallback = [
+      { id: "elevenlabs", label: "ElevenLabs SFX · cloud", note: offline, available: false },
+      { id: "moss", label: "MOSS-SoundEffect · local", note: offline, available: false },
+    ];
+    return {
+      engines: catalog?.engines ?? fallback,
+      cloudEngines: catalog?.cloudEngines ?? ["elevenlabs"],
+      ratePerSecond: catalog?.ratePerSecond ?? { elevenlabs: 0.002, moss: 0 },
+      durationMin: catalog?.durationMin ?? 0.5,
+      durationMax: catalog?.durationMax ?? 30,
+      mossDefaultSeconds: catalog?.mossDefaultSeconds ?? 5,
+      mossSteps: catalog?.mossSteps ?? 100,
+      mossCfg: catalog?.mossCfg ?? 4,
+      promptMax: catalog?.promptMax ?? 1000,
+      countMax: catalog?.countMax ?? 4,
+      starters: catalog?.starters ?? [],
+      takes,
+      failures: labFailures(jobsData, "sfx"),
+      generate,
+      submitting: mutation.isPending,
+      cancel: (jobId: string) => cancelJob({ id: jobId }),
+      remove: removeAssets.remove,
+      removing: removeAssets.removing,
+    };
+  }, [catalog, kindAssets, jobsData, media, project, mutateAsync, mutation.isPending, cancelJob, removeAssets]);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useDraft } from "@/useDraft";
 import {
   composeCineClause,
   composeFreeform,
@@ -36,12 +37,43 @@ import {
  * drawer can sit in different places on screen while reading ONE state — and
  * so a job rendered from the new layout is the job the old one sent. */
 
+/** H3's extra Quality rungs: Standard-tier distills from the 2026-11-10
+ * bake-off (docs/MINIMAX-H3.md). Keys are `MINIMAX_DISTILL_IDS` in shared, so
+ * the payload carries them as `minimaxDistill` unchanged. */
+export type H3Variant = "drbaph-v4-6step" | "hyperflow-8step";
+export const H3_VARIANTS: Record<
+  H3Variant,
+  { label: string; steps: number; weight: string; heads: ("fl2va" | "ref2va")[]; blurb: string }
+> = {
+  "drbaph-v4-6step": {
+    label: "Fast",
+    steps: 6,
+    weight: "drbaph v4 step-600 EMA · 6 steps",
+    heads: ["fl2va"],
+    blurb:
+      "drbaph's v4 turbo at 6 steps — about 20 % faster than Standard with no visible loss in the bake-off (one seed). First/last-frame shots only; it has no reference-head weight.",
+  },
+  "hyperflow-8step": {
+    label: "Hold frame",
+    steps: 8,
+    weight: "HyperFlow 8-step (drbaph pruned r20)",
+    heads: ["fl2va", "ref2va"],
+    blurb:
+      "HyperFlow at 8 steps — the only distill that kept the start frame's composition instead of cutting away. The pick for animating a still that IS the artwork. Slightly less speech than Standard.",
+  },
+};
+export type QualityChoice = "draft" | "standard" | "final" | H3Variant;
+
 /** which frame a click on the picker is retargeting */
 export type Picking =
   | "start"
   | "end"
   | { lane: "director" | "simple"; i: number }
   | null;
+
+/** every composing control of the workbench is a draft under this prefix, so
+ * leaving the lab mid-render keeps the sheet; a storyboard send clears it */
+export const VIDEO_DRAFT = "video:wb:";
 
 export function useVideoParams({
   prefill,
@@ -63,33 +95,33 @@ export function useVideoParams({
   const presets = useVideoPresets();
   /** the A/B dialog — an experiment on the payload this panel is holding */
   const [abOpen, setAbOpen] = useState(false);
-  const [prompt, setPrompt] = useState(prefill?.prompt ?? lab.prompt);
-  const [duration, setDuration] = useState(() =>
+  const [prompt, setPrompt] = useDraft(`${VIDEO_DRAFT}prompt`, prefill?.prompt ?? lab.prompt);
+  const [duration, setDuration] = useDraft(`${VIDEO_DRAFT}duration`, () =>
     prefill ? snapDuration(prefill.durationSec, lab.durations, lab.duration) : lab.duration,
   );
-  const [resolution, setResolution] = useState(lab.resolution);
-  const [motion, setMotion] = useState(lab.motionStrength);
+  const [resolution, setResolution] = useDraft(`${VIDEO_DRAFT}resolution`, lab.resolution);
+  const [motion, setMotion] = useDraft(`${VIDEO_DRAFT}motion`, lab.motionStrength);
   /** null = the default (newest library still); set by the Replace picker */
-  const [frameRel, setFrameRel] = useState<string | null>(prefill?.startFrame ?? null);
+  const [frameRel, setFrameRel] = useDraft<string | null>(`${VIDEO_DRAFT}frameRel`, prefill?.startFrame ?? null);
   const [picking, setPicking] = useState<Picking>(null);
   /** Render from the prompt alone. The panel has always fallen back to the
    * newest library still, so there was no way to say "start from nothing" —
    * only engines with a real text-to-video path may turn this on. */
-  const [noStartFrame, setNoStartFrame] = useState(false);
+  const [noStartFrame, setNoStartFrame] = useDraft(`${VIDEO_DRAFT}noStartFrame`, false);
   /** The frame the take has to LAND on — MiniMax-H3's fl2va second anchor,
    * and (new) LTX's core end-frame guide where the install carries it. */
-  const [endFrameRel, setEndFrameRel] = useState<string | null>(null);
+  const [endFrameRel, setEndFrameRel] = useDraft<string | null>(`${VIDEO_DRAFT}endFrameRel`, null);
   /** Loop (freeform plan §2.5): the take lands back on its own start frame —
    * `endFrame` = `startFrame` on the engines with an end-frame arm (H3 fl2va,
    * LTX's core guide). The take's sidecar records it so an export can drop
    * the seam frame. i2v only: there is nothing to loop back to otherwise. */
-  const [loop, setLoop] = useState(false);
+  const [loop, setLoop] = useDraft(`${VIDEO_DRAFT}loop`, false);
   /** LTX simple-path guide frames — mid-shot anchors on the way to the end
    * frame, without turning the full Director timeline on */
-  const [simpleKeyframes, setSimpleKeyframes] = useState<DirectorKeyframe[]>([]);
+  const [simpleKeyframes, setSimpleKeyframes] = useDraft<DirectorKeyframe[]>(`${VIDEO_DRAFT}simpleKeyframes`, []);
   /** H3's OTHER head: things the shot must carry rather than a frame it starts
    * on. Non-empty switches the render to ref2va, which has no keyframes at all. */
-  const [minimaxRefs, setMinimaxRefs] = useState<MinimaxRefs>({
+  const [minimaxRefs, setMinimaxRefs] = useDraft<MinimaxRefs>(`${VIDEO_DRAFT}minimaxRefs`, {
     images: [],
     imageRoles: [],
     videos: [],
@@ -99,7 +131,7 @@ export function useVideoParams({
   /** name + preview for reference stills brought in from outside the library.
    * They are staged into projects/<id>/refs, which the library scanner never
    * walks, so the row would otherwise show a bare filename and a grey box. */
-  const [importedRefs, setImportedRefs] = useState<Record<string, { name: string; url: string }>>(
+  const [importedRefs, setImportedRefs] = useDraft<Record<string, { name: string; url: string }>>(`${VIDEO_DRAFT}importedRefs`, 
     {},
   );
   const [refImportError, setRefImportError] = useState<string | null>(null);
@@ -109,16 +141,16 @@ export function useVideoParams({
    * The look prose is appended to the prompt once at submit (`withLook`
    * refuses to stack it), the negative rides `payload.negativePrompt` on the
    * LTX engines only — H3 and Seedance have no negative arm. */
-  const [presetLook, setPresetLook] = useState("");
-  const [negative, setNegative] = useState("");
+  const [presetLook, setPresetLook] = useDraft(`${VIDEO_DRAFT}presetLook`, "");
+  const [negative, setNegative] = useDraft(`${VIDEO_DRAFT}negative`, "");
   /** Shot Director: extra keyframes beyond the start frame, in seconds */
-  const [directorOn, setDirectorOn] = useState(!!prefill);
-  const [keyframes, setKeyframes] = useState<DirectorKeyframe[]>(
+  const [directorOn, setDirectorOn] = useDraft(`${VIDEO_DRAFT}directorOn`, !!prefill);
+  const [keyframes, setKeyframes] = useDraft<DirectorKeyframe[]>(`${VIDEO_DRAFT}keyframes`, 
     // keyframe 0 IS the start frame here, and the panel puts it back at submit
     prefill ? prefill.director.keyframes.filter((k) => k.atSec > 0) : [],
   );
   /** prompt beats — the shot's phrasing over time; empty = one prompt throughout */
-  const [beats, setBeats] = useState<DirectorBeat[]>(
+  const [beats, setBeats] = useDraft<DirectorBeat[]>(`${VIDEO_DRAFT}beats`, 
     // a composed beat arrives already expanded (the storyboard resolved the
     // camera ids), so its pickers stay empty rather than expanding it twice
     prefill
@@ -131,49 +163,52 @@ export function useVideoParams({
       : [],
   );
   /** how hard a beat boundary lands: 0.001 a cut, 0.5 a dissolve */
-  const [blend, setBlend] = useState(prefill?.director.epsilon ?? 0.001);
+  const [blend, setBlend] = useDraft(`${VIDEO_DRAFT}blend`, prefill?.director.epsilon ?? 0.001);
   /** optional dialogue take — switches the render to ia2v lip-sync */
-  const [audioRel, setAudioRel] = useState<string | null>(null);
+  const [audioRel, setAudioRel] = useDraft<string | null>(`${VIDEO_DRAFT}audioRel`, null);
   const [audioOpen, setAudioOpen] = useState(false);
   /** Director audio lane: voice takes locked to timecodes. The simple path's
    * single take is the one-segment case of this, so turning the Director on
    * carries it onto the lane rather than dropping it. */
-  const [lane, setLane] = useState<DirectorTake[]>(prefill?.director.audio ?? []);
+  const [lane, setLane] = useDraft<DirectorTake[]>(`${VIDEO_DRAFT}lane`, prefill?.director.audio ?? []);
   /** generate sound in the gaps between takes rather than leaving them silent */
-  const [roomTone, setRoomTone] = useState(prefill?.director.inpaintAudio ?? true);
+  const [roomTone, setRoomTone] = useDraft(`${VIDEO_DRAFT}roomTone`, prefill?.director.inpaintAudio ?? true);
   /** an existing clip's movement, transferred onto this shot */
-  const [motionRef, setMotionRef] = useState<DirectorMotion | null>(null);
+  const [motionRef, setMotionRef] = useDraft<DirectorMotion | null>(`${VIDEO_DRAFT}motionRef`, null);
   /** the cast this shot must stay on-model for — composed into one reference
    * sheet at render time */
-  const [castRefs, setCastRefs] = useState<DirectorRef[]>(prefill?.director.refs ?? []);
-  const [refStrength, setRefStrength] = useState(prefill?.director.refStrength ?? 1);
+  const [castRefs, setCastRefs] = useDraft<DirectorRef[]>(`${VIDEO_DRAFT}castRefs`, prefill?.director.refs ?? []);
+  const [refStrength, setRefStrength] = useDraft(`${VIDEO_DRAFT}refStrength`, prefill?.director.refStrength ?? 1);
   /** LTX frame rate — 48 doubles frames for the same seconds, ~2× the wait */
-  const [fps, setFps] = useState<24 | 48>(24);
+  const [fps, setFps] = useDraft<24 | 48>(`${VIDEO_DRAFT}fps`, 24);
   /* Quality. Two engines, two ladders: LTX has Draft (skip the ×2 upscale +
    * refine pass) and Final, H3 has three rungs — the 4-step distill, the
    * 8-step distill, and its own 25-step schedule. One piece of state holds
    * both, and `effectiveQuality` collapses the middle rung for the engines
    * that don't have one, so switching engine can't leave the segmented control
    * showing a value none of its options carry. */
-  const [quality, setQuality] = useState<"draft" | "standard" | "final">("final");
+  const [quality, setQuality] = useDraft<"draft" | "standard" | "final">(`${VIDEO_DRAFT}quality`, "final");
+  /** an H3 Standard-tier alternate (H3_VARIANTS), or "" for the shipped
+   * LightX2V distill. Only ever applies on top of quality === "standard". */
+  const [h3Variant, setH3Variant] = useDraft<"" | H3Variant>(`${VIDEO_DRAFT}h3Variant`, "");
   /** LTX 2.5's Gemma prompt enhancer — on by default when installed. Off is
    * the setting for a prompt authored to a structure (multi-shot prose, exact
    * quoted dialogue): the rewrite destroys cuts and drops lines. */
-  const [enhance, setEnhance] = useState(true);
+  const [enhance, setEnhance] = useDraft(`${VIDEO_DRAFT}enhance`, true);
   /** stackable adapter LoRAs, from this install's own lora folder */
-  const [loras, setLoras] = useState<{ name: string; strength: number }[]>([]);
+  const [loras, setLoras] = useDraft<{ name: string; strength: number }[]>(`${VIDEO_DRAFT}loras`, []);
   /** camera-control LoRA — hidden until 22b weights exist (see engineSurface) */
-  const [cameraMove, setCameraMove] = useState<CameraMove | "">("");
-  const [cameraStrength, setCameraStrength] = useState(1);
+  const [cameraMove, setCameraMove] = useDraft<CameraMove | "">(`${VIDEO_DRAFT}cameraMove`, "");
+  const [cameraStrength, setCameraStrength] = useDraft(`${VIDEO_DRAFT}cameraStrength`, 1);
   /* The lane this shot is being rendered in, and the settings the lane put
    * there. Keeping the applied snapshot (rather than a dirty flag) is what
    * lets the chip say "customised" honestly: the panel compares what is set
    * NOW against what the lane set, so undoing an edit re-attaches the lane. */
-  const [presetId, setPresetId] = useState<string | null>(null);
-  const [presetSnapshot, setPresetSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [presetId, setPresetId] = useDraft<string | null>(`${VIDEO_DRAFT}presetId`, null);
+  const [presetSnapshot, setPresetSnapshot] = useDraft<Record<string, unknown> | null>(`${VIDEO_DRAFT}presetSnapshot`, null);
   /** cinematography-bank ids for this render — a lane's defaults, or the
    * director's own picks. Expanded to prose at submit, never by an adapter. */
-  const [cine, setCine] = useState<Partial<CameraSpec>>(prefill?.camera ?? {});
+  const [cine, setCine] = useDraft<Partial<CameraSpec>>(`${VIDEO_DRAFT}cine`, prefill?.camera ?? {});
   /** the one open disclosure row — an accordion, so the column stays a column */
   const [openRow, setOpenRow] = useState<string | null>(null);
   const toggleRow = (id: string) => setOpenRow((o) => (o === id ? null : id));
@@ -191,7 +226,10 @@ export function useVideoParams({
     if (p.enhance !== undefined) setEnhance(p.enhance);
     // H3's three rungs win where it has them; LTX only ever means draft-or-not
     const tier = p.minimaxTier ?? (p.fast === true ? "draft" : p.fast === false ? "final" : null);
-    if (tier) setQuality(tier);
+    if (tier) {
+      setQuality(tier);
+      setH3Variant("");
+    }
     setCine(preset.cine);
     /* a look's own fields. A lane leaves them alone unless it names them, so
      * applying a Zoo Logic lane over a look clears the look (a lane has no
@@ -343,8 +381,31 @@ export function useVideoParams({
       ref2va: "LightX2V ref2v 4-step v0.1, run at 8 steps",
     },
   };
-  const minimaxDistill =
-    effectiveQuality === "final" ? null : MINIMAX_DISTILL[effectiveQuality][minimaxHead];
+  /* The alternate that will actually ride this render. v4 has no reference-head
+   * weight, so with references on it falls back to the shipped Standard — and
+   * the panel says so (`h3VariantDropped`) rather than failing at submit. */
+  const h3VariantWanted =
+    isMinimax && effectiveQuality === "standard" && h3Variant ? h3Variant : null;
+  const h3VariantDropped =
+    h3VariantWanted !== null && !H3_VARIANTS[h3VariantWanted].heads.includes(minimaxHead);
+  const minimaxAlt = h3VariantDropped ? null : h3VariantWanted;
+  const minimaxDistill = minimaxAlt
+    ? H3_VARIANTS[minimaxAlt].weight
+    : effectiveQuality === "final"
+      ? null
+      : MINIMAX_DISTILL[effectiveQuality][minimaxHead];
+  /** what the Quality control shows: a variant reads as its own rung */
+  const qualityChoice: QualityChoice =
+    isMinimax && effectiveQuality === "standard" && h3Variant ? h3Variant : effectiveQuality;
+  const setQualityChoice = (v: QualityChoice) => {
+    if (v === "draft" || v === "standard" || v === "final") {
+      setQuality(v);
+      setH3Variant("");
+    } else {
+      setQuality("standard");
+      setH3Variant(v);
+    }
+  };
   const minimaxWeightLabel = minimaxFormat === "w4a8" ? "w4a8 · 4-bit" : "GGUF · Q3_K_M";
   const directorBlocked = surface.sections.director.state !== "shown";
   /** simple-path guide frames apply outside Director/retake renders only —
@@ -691,6 +752,8 @@ export function useVideoParams({
      * renders from. */
     minimaxTier:
       isMinimax && surface.sections.quality.state === "shown" ? effectiveQuality : undefined,
+    minimaxDistill:
+      surface.sections.quality.state === "shown" && minimaxAlt ? minimaxAlt : undefined,
     loras:
       isLtx && surface.sections.adapters.state === "shown" && payloadLoras.length
         ? payloadLoras
@@ -772,7 +835,13 @@ export function useVideoParams({
   if (payload.director && !retake) customs.push("Shot Director");
   if (payload.cameraLora) customs.push(`Camera LoRA: ${payload.cameraLora.move}`);
   if (surface.sections.quality.state === "shown" && effectiveQuality !== "final")
-    customs.push(effectiveQuality === "draft" ? "Draft quality" : "Standard quality");
+    customs.push(
+      effectiveQuality === "draft"
+        ? "Draft quality"
+        : minimaxAlt
+          ? `${H3_VARIANTS[minimaxAlt].label} quality`
+          : "Standard quality",
+    );
   if (payload.fps === 48) customs.push("48 fps");
   if (payload.enhance === false) customs.push("Prompt enhancer off");
   if (payload.loras?.length) customs.push(`${payload.loras.length} adapter LoRA${payload.loras.length === 1 ? "" : "s"}`);
@@ -793,6 +862,7 @@ export function useVideoParams({
     beats, setBeats, blend, setBlend, audioRel, setAudioRel, audioOpen, setAudioOpen,
     lane, setLane, roomTone, setRoomTone, motionRef, setMotionRef, castRefs, setCastRefs,
     refStrength, setRefStrength, fps, setFps, quality, setQuality, enhance, setEnhance,
+    qualityChoice, setQualityChoice, minimaxAlt, h3VariantDropped,
     loras, setLoras, cameraMove, setCameraMove, cameraStrength, setCameraStrength,
     presetId, presetCustomised, cine, setCine, openRow, toggleRow, applyPreset, clearPreset,
     surface, isLtx, isMinimax, keyframesMax, lorasMax,

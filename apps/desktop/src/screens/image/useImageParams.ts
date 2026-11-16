@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { falImageEstimate, falSizeError } from "@aurea/shared";
 import { useImageLab } from "@/hooks";
+import { useDraft } from "@/useDraft";
 import type { PromptState } from "./promptState";
 import { useEnhanceControl } from "./EnhanceButton";
 import { useActivePromptProject, usePromptDecks } from "./promptHooks";
@@ -95,23 +96,23 @@ export function useImageParams({
   /** Krea 2 is the house generator (photoreal heroes) — the catalog lists
    * z-image first because it's the fast drafting model, but that is not what
    * anyone wants pre-selected. Falls back to whatever IS runnable below. */
-  const [modelId, setModelId] = useState(DEFAULT_GENERATOR);
-  const [aspect, setAspect] = useState<Aspect>("3:2");
+  const [modelId, setModelId] = useDraft("image:modelId", DEFAULT_GENERATOR);
+  const [aspect, setAspect] = useDraft<Aspect>("image:aspect", "3:2");
   /** no preset is the honest default — the prompt reaches the model unmodified
    * until you pick one, and clicking the active chip clears it again */
-  const [preset, setPreset] = useState<string | null>(null);
-  const [seed, setSeed] = useState(String(lab.seed));
-  const [count, setCount] = useState(1);
-  const [width, setWidth] = useState("");
-  const [height, setHeight] = useState("");
-  const [steps, setSteps] = useState("");
-  const [cfg, setCfg] = useState("");
+  const [preset, setPreset] = useDraft<string | null>("image:preset", null);
+  const [seed, setSeed] = useDraft("image:seed", String(lab.seed));
+  const [count, setCount] = useDraft("image:count", 1);
+  const [width, setWidth] = useDraft("image:width", "");
+  const [height, setHeight] = useDraft("image:height", "");
+  const [steps, setSteps] = useDraft("image:steps", "");
+  const [cfg, setCfg] = useDraft("image:cfg", "");
   /** cloud-model knobs — inert for the local graphs, which use steps/cfg */
-  const [quality, setQuality] = useState("high");
-  const [outputFormat, setOutputFormat] = useState("png");
+  const [quality, setQuality] = useDraft("image:quality", "high");
+  const [outputFormat, setOutputFormat] = useDraft("image:outputFormat", "png");
   /** "auto" = let the model take its size from the references, which is the
    * right default for an edit; picking an aspect chip switches this off */
-  const [autoSize, setAutoSize] = useState(true);
+  const [autoSize, setAutoSize] = useDraft("image:autoSize", true);
   const [deckName, setDeckName] = useState("");
   /** one entry per prompt — a prompt can span many lines (JSON, shot specs) */
   const [deckItems, setDeckItems] = useState<string[]>([""]);
@@ -241,7 +242,10 @@ export function useImageParams({
   /** paid-per-image model — everything that can spend money shows a number.
    * Decks never route to the cloud, so its knobs stay hidden there. */
   const isCloud = mode !== "deck" && lab.cloudModels.includes(activeId);
-  const supportsAutoSize = isCloud && lab.autoSizeModels.includes(activeId);
+  /** "Auto" = take the size from the references: any edit on a model that
+   * can (local h3-image sizes from <Picture 1>), plus cloud runs */
+  const supportsAutoSize =
+    mode !== "deck" && lab.autoSizeModels.includes(activeId) && (isCloud || mode === "edit");
   const sizeIsAuto = supportsAutoSize && autoSize;
 
   const adv = lab.advancedCfg;
@@ -309,6 +313,7 @@ export function useImageParams({
           ...shared,
         });
       } else {
+        const sentPrompt = prompt;
         lab.generate({
           prompt,
           model: activeId,
@@ -323,8 +328,10 @@ export function useImageParams({
                 outputFormat: outputFormat as "png" | "jpeg" | "webp",
                 sizeMode: sizeIsAuto ? ("auto" as const) : ("aspect" as const),
               }
-            : {}),
-        });
+            : sizeIsAuto
+              ? { sizeMode: "auto" as const }
+              : {}),
+        }, () => ps.sent(sentPrompt));
       }
   };
 

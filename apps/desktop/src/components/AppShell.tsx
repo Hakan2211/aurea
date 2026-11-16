@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { FolderOpen, Gauge, PanelLeftClose, PanelLeftOpen, Settings } from "lucide-react";
-import { cx } from "@/components/ui";
+import { Tip, cx } from "@/components/ui";
 import { AREAS, type Area } from "@/nav";
 import { trpc } from "@/trpc";
 import { TopBar } from "@/components/TopBar";
@@ -50,26 +50,52 @@ function AreaLink({
   const active = area.path === "/" ? pathname === "/" : pathname.startsWith(area.path);
   const Icon = area.icon;
   return (
-    <NavLink
-      to={areaTarget(area)}
-      aria-current={active ? "page" : undefined}
-      title={collapsed ? `${area.label} — ${area.blurb}` : undefined}
-      className={cx(
-        "relative flex items-center gap-3 rounded-xl transition-colors duration-[var(--dur-fast)]",
-        collapsed ? "mx-auto h-11 w-11 justify-center" : "min-h-12 px-3 py-2",
-        active
-          ? "bg-gold/12 text-gold ring-1 ring-gold/25"
-          : "text-cream/90 hover:bg-cream/5 hover:text-cream",
-      )}
-    >
-      <Icon size={19} strokeWidth={active ? 2 : 1.75} className="shrink-0" />
-      {!collapsed && (
-        <span className="flex min-w-0 flex-col">
-          <span className="text-[15px] font-semibold leading-tight">{area.label}</span>
-          {blurbs && <span className="truncate text-xs leading-snug text-fog">{area.blurb}</span>}
+    <Tip
+      disabled={!collapsed}
+      side="right"
+      content={
+        <span className="flex flex-col">
+          <span className="font-semibold">{area.label}</span>
+          <span className="text-fog">{area.blurb}</span>
         </span>
-      )}
-    </NavLink>
+      }
+    >
+      <NavLink
+        to={areaTarget(area)}
+        aria-current={active ? "page" : undefined}
+        aria-label={collapsed ? area.label : undefined}
+        className={cx(
+          "group relative flex items-center gap-3 rounded-xl outline-none transition-[background,color,box-shadow] duration-[var(--dur-fast)]",
+          "focus-visible:ring-2 focus-visible:ring-gold/30",
+          collapsed ? "mx-auto h-11 w-11 justify-center" : "min-h-12 px-3 py-2",
+          active
+            ? "bg-gradient-to-r from-gold/[0.14] to-gold/[0.05] text-gold shadow-[inset_0_0_0_1px_rgba(201,169,110,0.22)]"
+            : "text-cream/85 hover:bg-cream/[0.045] hover:text-cream",
+        )}
+      >
+        {active && !collapsed && (
+          <span
+            aria-hidden
+            className="absolute -left-3 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-gold shadow-[0_0_12px_1px_rgba(201,169,110,0.55)]"
+          />
+        )}
+        <Icon
+          size={19}
+          strokeWidth={active ? 2 : 1.75}
+          className={cx("shrink-0 transition-transform duration-[var(--dur)]", !active && "group-hover:scale-105")}
+        />
+        {!collapsed && (
+          <span className="flex min-w-0 flex-col">
+            <span className="text-[15px] font-semibold leading-tight">{area.label}</span>
+            {blurbs && (
+              <span className={cx("truncate text-xs leading-snug", active ? "text-gold/70" : "text-fog")}>
+                {area.blurb}
+              </span>
+            )}
+          </span>
+        )}
+      </NavLink>
+    </Tip>
   );
 }
 
@@ -87,30 +113,33 @@ function UtilityLink({
   collapsed: boolean;
 }) {
   return (
-    <NavLink
-      to={to}
-      title={collapsed ? label : undefined}
-      className={({ isActive }) =>
-        cx(
-          "relative flex h-9 items-center gap-3 rounded-lg text-sm transition-colors",
-          collapsed ? "mx-auto w-9 justify-center" : "px-3",
-          isActive ? "bg-cream/8 text-cream" : "text-fog hover:bg-cream/5 hover:text-cream",
-        )
-      }
-    >
-      <Icon size={16} className="shrink-0" />
-      {!collapsed && <span className="flex-1">{label}</span>}
-      {!!badge && (
-        <span
-          className={cx(
-            "flex h-4 min-w-4 items-center justify-center rounded-full bg-gold px-1 text-2xs font-semibold tabular-nums text-ink",
-            collapsed && "absolute -right-1 -top-1",
-          )}
-        >
-          {badge > 9 ? "9+" : badge}
-        </span>
-      )}
-    </NavLink>
+    <Tip disabled={!collapsed} side="right" content={label}>
+      <NavLink
+        to={to}
+        aria-label={collapsed ? label : undefined}
+        className={({ isActive }) =>
+          cx(
+            "relative flex h-9 items-center gap-3 rounded-lg text-sm outline-none transition-colors duration-[var(--dur-fast)]",
+            "focus-visible:ring-2 focus-visible:ring-gold/30",
+            collapsed ? "mx-auto w-9 justify-center" : "px-3",
+            isActive ? "bg-cream/[0.07] text-cream" : "text-fog hover:bg-cream/[0.045] hover:text-cream",
+          )
+        }
+      >
+        <Icon size={16} className="shrink-0" />
+        {!collapsed && <span className="flex-1">{label}</span>}
+        {!!badge && (
+          <span
+            className={cx(
+              "flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-gradient-to-b from-gold to-gold-deep px-1 text-2xs font-semibold tabular-nums text-ink shadow-[0_0_10px_-2px_rgba(201,169,110,0.6)]",
+              collapsed && "absolute -right-1.5 -top-1.5",
+            )}
+          >
+            {badge > 9 ? "9+" : badge}
+          </span>
+        )}
+      </NavLink>
+    </Tip>
   );
 }
 
@@ -131,7 +160,7 @@ function Sidebar() {
   return (
     <aside
       className={cx(
-        "flex shrink-0 flex-col border-r hairline bg-[#0c0c0d] transition-[width] duration-[var(--dur-slow)] ease-[var(--ease-out-quart)]",
+        "flex shrink-0 flex-col border-r hairline bg-gradient-to-b from-[#0d0d0e] to-[#0a0a0b] transition-[width] duration-[var(--dur-slow)] ease-[var(--ease-out-quart)]",
         collapsed ? "w-[68px]" : "w-[220px]",
       )}
     >
@@ -149,22 +178,24 @@ function Sidebar() {
         <UtilityLink to="/settings" label="Settings" icon={Settings} collapsed={collapsed} />
         <div className={cx("mt-2 flex items-center", collapsed ? "justify-center" : "justify-between px-1")}>
           {!collapsed && (
-            <button
-              onClick={toggleBlurbs}
-              className="text-xs text-fog transition hover:text-cream"
-              title="Show or hide the one-line descriptions under each area"
-            >
-              {blurbs ? "Hide descriptions" : "Show descriptions"}
-            </button>
+            <Tip content="Show or hide the one-line descriptions under each area" side="top" align="start">
+              <button
+                onClick={toggleBlurbs}
+                className="rounded-md px-1.5 py-1 text-xs text-fog transition hover:bg-cream/5 hover:text-cream"
+              >
+                {blurbs ? "Hide descriptions" : "Show descriptions"}
+              </button>
+            </Tip>
           )}
-          <button
-            onClick={toggleCollapsed}
-            aria-label={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
-            title={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
-            className="rounded-md p-1.5 text-fog transition hover:bg-cream/5 hover:text-cream"
-          >
-            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
+          <Tip content={collapsed ? "Expand the sidebar" : "Collapse the sidebar"} side={collapsed ? "right" : "top"}>
+            <button
+              onClick={toggleCollapsed}
+              aria-label={collapsed ? "Expand the sidebar" : "Collapse the sidebar"}
+              className="rounded-md p-1.5 text-fog transition hover:bg-cream/5 hover:text-cream"
+            >
+              {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
+          </Tip>
         </div>
       </div>
     </aside>

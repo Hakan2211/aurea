@@ -2,7 +2,16 @@ import { useState, type ReactNode } from "react";
 import { Check, ChevronDown, Copy, Download, Image as ImageIcon, Star } from "lucide-react";
 import { fmtStamp, useDownloadTrack, useMusicLab } from "@/hooks";
 import type { MusicStem, MusicTrack } from "@/data/sample";
-import { Slider, Toggle, Waveform, cx } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Slider,
+  Toggle,
+  Waveform,
+  cx,
+} from "@/components/ui";
 import { SendToTimeline } from "@/components/SendToTimeline";
 import { useMediaDuration, type AudioPlayer } from "@/components/useAudioPlayer";
 import { CoverTile, stemIcons, type Likes } from "./shared";
@@ -329,52 +338,45 @@ export function TrackInspector({
           tone="gold"
           className="min-w-0 flex-1 justify-center py-2.5"
         />
-        <div className="relative shrink-0">
-          <button
-            onClick={() => setDlOpen((o) => !o)}
-            disabled={!track.url}
-            title="Download this track"
-            className={cx(
-              "flex h-[38px] w-[38px] items-center justify-center rounded-lg border transition disabled:opacity-40",
-              dlOpen
-                ? "border-gold/45 text-gold"
-                : "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold",
+        <DropdownMenu open={dlOpen} onOpenChange={setDlOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              disabled={!track.url}
+              title="Download this track"
+              className={cx(
+                "flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg border transition disabled:opacity-40",
+                dlOpen
+                  ? "border-gold/45 text-gold"
+                  : "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold",
+              )}
+            >
+              <Download size={14} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="end" className="w-44 min-w-0">
+            {(
+              [
+                ["wav", "WAV · as rendered"],
+                ["mp3", "MP3 · smaller, shareable"],
+              ] as const
+            ).map(([format, label]) => (
+              <DropdownMenuItem
+                key={format}
+                onSelect={() => void downloads.download(track, format)}
+                disabled={format === "mp3" ? !track.relPath || !!downloads.busy : !track.url}
+                className="text-xs text-cream/85"
+              >
+                <Download size={11} />
+                {downloads.busy === format ? "Converting…" : label}
+              </DropdownMenuItem>
+            ))}
+            {downloads.error && (
+              <p className="px-2.5 py-1.5 text-2xs leading-relaxed text-[#e07a6b]">
+                {downloads.error}
+              </p>
             )}
-          >
-            <Download size={14} />
-          </button>
-          {dlOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setDlOpen(false)} />
-              <div className="absolute bottom-full right-0 z-20 mb-1.5 w-44 overflow-hidden rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
-                {(
-                  [
-                    ["wav", "WAV · as rendered"],
-                    ["mp3", "MP3 · smaller, shareable"],
-                  ] as const
-                ).map(([format, label]) => (
-                  <button
-                    key={format}
-                    onClick={() => {
-                      setDlOpen(false);
-                      void downloads.download(track, format);
-                    }}
-                    disabled={format === "mp3" ? !track.relPath || !!downloads.busy : !track.url}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-                  >
-                    <Download size={11} />
-                    {downloads.busy === format ? "Converting…" : label}
-                  </button>
-                ))}
-                {downloads.error && (
-                  <p className="px-2.5 py-1.5 text-2xs leading-relaxed text-[#e07a6b]">
-                    {downloads.error}
-                  </p>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </aside>
   );

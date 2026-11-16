@@ -1,3 +1,4 @@
+import { Slider } from "@/components/ui/Slider";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
@@ -31,7 +32,15 @@ import {
   useVideoLab,
 } from "@/hooks";
 import type { Job, VideoStage } from "@/data/sample";
-import { ProgressRing, cx } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  ProgressRing,
+  cx,
+} from "@/components/ui";
 import { useVideoPlayer, type VideoPlayer } from "@/components/useVideoPlayer";
 import { TakeCard } from "./TakeCard";
 import { MIN_RETAKE_SEC, fmtTime, type RetakeDraft } from "./shared";
@@ -163,14 +172,13 @@ function VolumeControl({ player }: { player: VideoPlayer }) {
       </button>
       {/* slider expands on hover — no space stolen from the scrub bar */}
       <div className="w-0 overflow-hidden opacity-0 transition-all duration-150 group-hover/vol:ml-2 group-hover/vol:w-20 group-hover/vol:opacity-100">
-        <input
-          type="range"
+        <Slider
           min={0}
           max={1}
           step={0.01}
           value={player.muted ? 0 : player.volume}
-          onChange={(e) => player.setVolume(Number(e.target.value))}
-          className="w-20 accent-gold"
+          onChange={(v) => player.setVolume(v)}
+          className="w-20"
         />
       </div>
     </div>
@@ -418,7 +426,6 @@ export function PreviewPanel({
   const player = useVideoPlayer(take?.url);
   const stageRef = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const [menu, setMenu] = useState(false);
   const [armed, setArmed] = useState(false);
 
   useEffect(() => {
@@ -536,107 +543,97 @@ export function PreviewPanel({
           >
             <Maximize2 size={13} />
           </button>
-          <button
-            onClick={() => {
-              setMenu((m) => !m);
-              setArmed(false);
-            }}
-            title="Take actions"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/10 text-fog transition hover:border-gold/35 hover:text-gold"
-          >
-            <MoreVertical size={13} />
-          </button>
-          {menu && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
-              <div className="absolute right-0 top-9 z-20 w-52 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
-                <button
-                  onClick={() => {
-                    setMenu(false);
-                    if (take?.relPath) void timeline.send(take.relPath);
-                  }}
-                  disabled={!take?.relPath || timeline.sending || !timeline.live}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-                >
-                  <ListPlus size={12} /> {timeline.sending ? "Sending…" : "Send to timeline"}
-                </button>
-                <button
-                  onClick={() => {
-                    setMenu(false);
-                    startRetake();
-                  }}
-                  disabled={!take?.relPath || !canRetake}
-                  title={
-                    canRetake
-                      ? "Mark a window and re-render just that bit"
-                      : (lab.capabilities?.note ?? "Needs a ComfyUI with the Director node pack")
+          <DropdownMenu onOpenChange={() => setArmed(false)}>
+            <DropdownMenuTrigger asChild>
+              <button
+                title="Take actions"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-cream/10 text-fog transition hover:border-gold/35 hover:text-gold"
+              >
+                <MoreVertical size={13} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuItem
+                onSelect={() => {
+                  if (take?.relPath) void timeline.send(take.relPath);
+                }}
+                disabled={!take?.relPath || timeline.sending || !timeline.live}
+                className="text-xs text-cream/85"
+              >
+                <ListPlus size={12} /> {timeline.sending ? "Sending…" : "Send to timeline"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => startRetake()}
+                disabled={!take?.relPath || !canRetake}
+                title="Mark a window and re-render just that bit"
+                hint={canRetake ? undefined : (lab.capabilities?.note ?? "Needs a ComfyUI with the Director node pack")}
+                className="text-xs text-cream/85"
+              >
+                <Scissors size={12} /> Fix this bit
+              </DropdownMenuItem>
+              {/* the two finishing passes (Video Lab quality plan Q1 + Q2):
+                  a full render over a draft's kept latents, and the ×2
+                  Pixel Spatial Upscaler on any take. Both queue a job that
+                  lands as a new take in this lab. */}
+              <DropdownMenuItem
+                onSelect={() => {
+                  if (take?.relPath) void lab.finish(take.relPath, "refine").catch(() => {});
+                }}
+                disabled={!take?.relPath || !take?.draft || lab.finishing}
+                title="Full render over this draft's kept latents — the same blocking at full size, guaranteed"
+                hint={
+                  take?.relPath && !take?.draft
+                    ? "Only an LTX 2.5 draft rendered since the finish pass existed keeps its latents"
+                    : undefined
+                }
+                className="text-xs text-cream/85"
+              >
+                <Sparkles size={12} /> Full render from draft
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  if (take?.relPath) void lab.finish(take.relPath, "upscale").catch(() => {});
+                }}
+                disabled={!take?.relPath || lab.finishing || lab.capabilities?.finishUpscale === false}
+                title="×2 finish: the Pixel Spatial Upscaler IC-LoRA re-renders this take at twice the size with reinvented detail (LTX 2.5)"
+                hint={
+                  lab.capabilities?.finishUpscale === false
+                    ? "Needs the LTX 2.5 Pixel Spatial Upscaler IC-LoRA — Settings → Models"
+                    : undefined
+                }
+                className="text-xs text-cream/85"
+              >
+                <Sparkles size={12} /> Finish ×2 (upscaler)
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  if (take?.url) void downloadAsset(take.url, `${take.label || "take"}.mp4`);
+                }}
+                disabled={!take?.url}
+                className="text-xs text-cream/85"
+              >
+                <Download size={12} /> Download
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="danger"
+                onSelect={(e) => {
+                  if (!armed) {
+                    // first press arms; keep the menu open for the confirm
+                    e.preventDefault();
+                    setArmed(true);
+                    return;
                   }
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-                >
-                  <Scissors size={12} /> Fix this bit
-                </button>
-                {/* the two finishing passes (Video Lab quality plan Q1 + Q2):
-                    a full render over a draft's kept latents, and the ×2
-                    Pixel Spatial Upscaler on any take. Both queue a job that
-                    lands as a new take in this lab. */}
-                <button
-                  onClick={() => {
-                    setMenu(false);
-                    if (take?.relPath) void lab.finish(take.relPath, "refine").catch(() => {});
-                  }}
-                  disabled={!take?.relPath || !take?.draft || lab.finishing}
-                  title={
-                    take?.draft
-                      ? "Full render over this draft's kept latents — the same blocking at full size, guaranteed"
-                      : "Only an LTX 2.5 draft rendered since the finish pass existed keeps its latents"
-                  }
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-                >
-                  <Sparkles size={12} /> Full render from draft
-                </button>
-                <button
-                  onClick={() => {
-                    setMenu(false);
-                    if (take?.relPath) void lab.finish(take.relPath, "upscale").catch(() => {});
-                  }}
-                  disabled={!take?.relPath || lab.finishing || lab.capabilities?.finishUpscale === false}
-                  title={
-                    lab.capabilities?.finishUpscale === false
-                      ? "Needs the LTX 2.5 Pixel Spatial Upscaler IC-LoRA — Settings → Models"
-                      : "×2 finish: the Pixel Spatial Upscaler IC-LoRA re-renders this take at twice the size with reinvented detail (LTX 2.5)"
-                  }
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-                >
-                  <Sparkles size={12} /> Finish ×2 (upscaler)
-                </button>
-                <button
-                  onClick={() => {
-                    setMenu(false);
-                    if (take?.url) void downloadAsset(take.url, `${take.label || "take"}.mp4`);
-                  }}
-                  disabled={!take?.url}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-                >
-                  <Download size={12} /> Download
-                </button>
-                <button
-                  onClick={() => {
-                    if (!armed) {
-                      setArmed(true);
-                      return;
-                    }
-                    setMenu(false);
-                    setArmed(false);
-                    if (take?.relPath) void remove(take.relPath);
-                  }}
-                  disabled={!take?.relPath}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-[#e07a6b] transition hover:bg-cream/5 disabled:opacity-40"
-                >
-                  <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
-                </button>
-              </div>
-            </>
-          )}
+                  setArmed(false);
+                  if (take?.relPath) void remove(take.relPath);
+                }}
+                disabled={!take?.relPath}
+                className="text-xs"
+              >
+                <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 

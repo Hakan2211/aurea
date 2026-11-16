@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useLocation } from "react-router";
 import { useVideoLab } from "@/hooks";
 import { ScreenHeader } from "@/components/ui";
@@ -7,7 +7,8 @@ import { Composer } from "./Composer";
 import { AdvancedDrawer } from "./AdvancedDrawer";
 import { AbModal } from "./AbModal";
 import { FramePicker } from "./FramePicker";
-import { useVideoParams } from "./useVideoParams";
+import { useVideoParams, VIDEO_DRAFT } from "./useVideoParams";
+import { clearDrafts, peekDraft, useDraft, writeDraft } from "@/useDraft";
 import type { RetakeDraft, ShotPrefill } from "./shared";
 
 /* Video gen — simple by default (UI simplify plan, Stage 2). The preview and
@@ -24,6 +25,7 @@ const ADVANCED_KEY = "aurea.lab.video.advanced";
  * send so every control re-seeds from the composed shot. */
 function Workbench({
   prefill,
+  onDetachShot,
   retake,
   setRetake,
   engineId,
@@ -32,6 +34,8 @@ function Workbench({
   setTakeId,
 }: {
   prefill: ShotPrefill | null;
+  /** stop rendering for the board shot; the settings stay */
+  onDetachShot: () => void;
   retake: RetakeDraft | null;
   setRetake: (r: RetakeDraft | null) => void;
   engineId: string;
@@ -52,7 +56,12 @@ function Workbench({
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
         <PreviewPanel takeId={takeId} onSelect={setTakeId} retake={retake} setRetake={setRetake} />
-        <Composer p={p} advancedOpen={advanced} onToggleAdvanced={toggleAdvanced} />
+        <Composer
+          p={p}
+          advancedOpen={advanced}
+          onToggleAdvanced={toggleAdvanced}
+          onDetachShot={onDetachShot}
+        />
       </div>
       {advanced && <AdvancedDrawer p={p} onClose={toggleAdvanced} />}
 
@@ -127,27 +136,42 @@ function capabilityLine(
 }
 
 export function VideoLab() {
+  /* "Send to Director" navigates here with the composed shot. The shot stays
+   * attached after you leave and come back through the nav (which carries no
+   * location state), so a take rendered later still lands on its board shot.
+   * A NEW send wipes the workbench draft and seeds it from the shot, before
+   * anything below mounts: an effect would run after the panel's initializers
+   * had already read the stale draft. Keying the inner screen on the send is
+   * what makes a send arriving while this screen is open re-seed too. */
+  const sent = (useLocation().state as { shot?: ShotPrefill } | null)?.shot ?? null;
+  const sentKey = sent ? `${sent.shotId}:${sent.sentAt}` : null;
+  if (sent && sentKey && sentKey !== peekDraft<string>("video:shotKey")) {
+    clearDrafts(VIDEO_DRAFT);
+    clearDrafts("video:retake");
+    writeDraft("video:shotKey", sentKey);
+    writeDraft("video:shot", { key: sentKey, shot: sent });
+    // a composed shot is an LTX Director spec; a send while MiniMax was on
+    // deck would otherwise seed a timeline the chosen engine can't render
+    writeDraft("video:engineId", "ltx2");
+  }
+  return <VideoLabScreen key={peekDraft<string>("video:shotKey") ?? "free"} />;
+}
+
+function VideoLabScreen() {
   const lab = useVideoLab();
-  const [takeId, setTakeId] = useState((lab.takes.find((t) => t.selected) ?? lab.takes[0]).id);
+  const [takeId, setTakeId] = useDraft(
+    "video:takeId",
+    () => (lab.takes.find((t) => t.selected) ?? lab.takes[0]).id,
+  );
   /** a retake is marked on the preview player and rendered from the params
    * panel, so the draft lives here, above both */
-  const [retake, setRetake] = useState<RetakeDraft | null>(null);
+  const [retake, setRetake] = useDraft<RetakeDraft | null>("video:retake", null);
   /** lifted out of the params panel so the header can name the engine — and so
    * the choice survives the panel re-keying on a storyboard send */
-  const [engineId, setEngineId] = useState(lab.engines[0].id);
-  /* "Send to Director" navigates here with the composed shot. Keying the panel
-   * on it re-seeds every control from the spec — including a second send of the
-   * same shot, once its voice takes exist and the timing is no longer a guess. */
-  const prefill = (useLocation().state as { shot?: ShotPrefill } | null)?.shot ?? null;
-  const prefillKey = prefill ? `${prefill.shotId}:${prefill.sentAt}` : null;
-
-  /* A composed shot is an LTX Director spec. Before the engine choice was
-   * lifted, the panel re-keying implicitly reset it to the first engine on
-   * every send — keep that, or a send while MiniMax is on deck would seed a
-   * timeline the chosen engine can't render. */
-  useEffect(() => {
-    if (prefillKey) setEngineId("ltx2");
-  }, [prefillKey]);
+  const [engineId, setEngineId] = useDraft("video:engineId", lab.engines[0].id);
+  const [kept, setKept] = useDraft<{ key: string; shot: ShotPrefill } | null>("video:shot", null);
+  const prefill = kept?.shot ?? null;
+  const prefillKey = kept?.key ?? null;
 
   const engine = lab.engines.find((e) => e.id === engineId);
 
@@ -160,6 +184,7 @@ export function VideoLab() {
       <Workbench
         key={prefillKey ?? "free"}
         prefill={prefill}
+        onDetachShot={() => setKept(null)}
         retake={retake}
         setRetake={setRetake}
         engineId={engineId}

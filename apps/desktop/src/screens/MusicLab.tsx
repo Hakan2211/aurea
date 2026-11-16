@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useDraft } from "@/useDraft";
 import { useLikes, useMusicLab } from "@/hooks";
 import type { MusicTrack } from "@/data/sample";
 import { useAudioPlayer } from "@/components/useAudioPlayer";
@@ -21,7 +21,7 @@ export function MusicLab() {
   const lab = useMusicLab();
   const player = useAudioPlayer();
   const likes = useLikes();
-  const [trackId, setTrackId] = useState<string | null>(null);
+  const [trackId, setTrackId] = useDraft<string | null>("music:trackId", null);
   const p = useMusicParams();
   const { drawer, setDrawer, toggle } = useLabDrawer("music", ["advanced"] as const);
   const playable = lab.tracks.filter((t) => !t.generating);

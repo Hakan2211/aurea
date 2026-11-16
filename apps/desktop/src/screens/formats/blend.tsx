@@ -1,3 +1,4 @@
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useMemo, useState } from "react";
 import { useDirector } from "@/components/DirectorPanel";
 import { Blend, Mic2, Palette, X } from "lucide-react";
@@ -370,7 +371,7 @@ export function BlendPanel({ runs, onClose }: { runs?: FormatRuns; onClose: () =
               onToggle={() => toggle("channel")}
             >
               {ordered.length > 0 ? (
-                <select
+                <SelectBox
                   value={account}
                   onChange={(e) => setAccountId(e.target.value)}
                   className={inputCls}
@@ -381,7 +382,7 @@ export function BlendPanel({ runs, onClose }: { runs?: FormatRuns; onClose: () =
                       {a.format === "strategist" ? " · built for blends" : ""} · {a.voice}
                     </option>
                   ))}
-                </select>
+                </SelectBox>
               ) : (
                 <p className="text-xs leading-relaxed text-fog">
                   {live

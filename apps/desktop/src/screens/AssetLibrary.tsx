@@ -21,6 +21,7 @@ import {
   Play,
   Search,
   Star,
+  AudioLines,
 } from "lucide-react";
 import { useAssetLibrary } from "@/hooks";
 import type { LibraryAsset, LibraryKind } from "@/data/sample";
@@ -39,6 +40,7 @@ const kindIcons: Record<LibraryKind, typeof Image> = {
   video: Film,
   audio: Mic,
   music: Music,
+  sfx: AudioLines,
   model3d: Box,
 };
 
@@ -48,6 +50,7 @@ const collectionIcons: Record<string, typeof Image> = {
   video: Film,
   audio: Mic,
   music: Music,
+  sfx: AudioLines,
   model3d: Box,
 };
 
@@ -155,7 +158,7 @@ function AssetCard({
   onSelect: () => void;
 }) {
   const Icon = kindIcons[asset.kind];
-  const audio = asset.kind === "audio" || asset.kind === "music";
+  const audio = asset.kind === "audio" || asset.kind === "music" || asset.kind === "sfx";
 
   return (
     <button
@@ -232,6 +235,7 @@ function GridPanel({
     { id: "video", label: "Video" },
     { id: "audio", label: "Voice" },
     { id: "music", label: "Music" },
+    { id: "sfx", label: "Sound FX" },
     { id: "model3d", label: "3D" },
   ];
 
@@ -359,7 +363,7 @@ function GridPanel({
 
 function Inspector({ asset }: { asset: LibraryAsset }) {
   const [tab, setTab] = useState<"details" | "comments">("details");
-  const audio = asset.kind === "audio" || asset.kind === "music";
+  const audio = asset.kind === "audio" || asset.kind === "music" || asset.kind === "sfx";
 
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l hairline bg-[#0e0e10]">

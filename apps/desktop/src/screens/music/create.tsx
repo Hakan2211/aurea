@@ -1,4 +1,6 @@
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useRef, useState } from "react";
+import { useDraft } from "@/useDraft";
 import { AudioWaveform, Check, ChevronDown, Dices, Mic, Music2, Plus, Sparkles, X } from "lucide-react";
 import { useMusicLab } from "@/hooks";
 import {
@@ -8,14 +10,22 @@ import {
   ComposerBar,
   DrawerField,
   DrawerSection,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   GenerateButton,
   LabDrawer,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Segmented,
   Slider,
   Toggle,
   customsSummary,
   cx,
   drawerInput,
+  ModelSelect,
 } from "@/components/ui";
 
 /* Music lab — the composer and its Advanced drawer (UI simplify plan,
@@ -37,24 +47,24 @@ const DURATION_PRESETS = [30, 60, 90, 180];
 
 export function useMusicParams() {
   const lab = useMusicLab();
-  const [engineId, setEngineId] = useState<"acestep" | "minimax-music3">("acestep");
-  const [description, setDescription] = useState(lab.description);
-  const [styles, setStyles] = useState(lab.styles);
+  const [engineId, setEngineId] = useDraft<"acestep" | "minimax-music3">("music:engineId", "acestep");
+  const [description, setDescription] = useDraft("music:description", lab.description);
+  const [styles, setStyles] = useDraft("music:styles", lab.styles);
   const [styleOpen, setStyleOpen] = useState(false);
-  const [customStyle, setCustomStyle] = useState("");
-  const [duration, setDuration] = useState(lab.durationSec);
-  const [arrangement, setArrangement] = useState(lab.arrangement);
-  const [voiceId, setVoiceId] = useState("");
+  const [customStyle, setCustomStyle] = useDraft("music:customStyle", "");
+  const [duration, setDuration] = useDraft("music:duration", lab.durationSec);
+  const [arrangement, setArrangement] = useDraft("music:arrangement", lab.arrangement);
+  const [voiceId, setVoiceId] = useDraft("music:voiceId", "");
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [lyrics, setLyrics] = useState("");
-  const [duet, setDuet] = useState(false);
-  const [bpm, setBpm] = useState("");
-  const [seed, setSeed] = useState("");
-  const [language, setLanguage] = useState("unknown");
-  const [keyscale, setKeyscale] = useState("");
-  const [timesig, setTimesig] = useState("");
-  const [steps, setSteps] = useState("");
-  const [shiftVal, setShiftVal] = useState("");
+  const [lyrics, setLyrics] = useDraft("music:lyrics", "");
+  const [duet, setDuet] = useDraft("music:duet", false);
+  const [bpm, setBpm] = useDraft("music:bpm", "");
+  const [seed, setSeed] = useDraft("music:seed", "");
+  const [language, setLanguage] = useDraft("music:language", "unknown");
+  const [keyscale, setKeyscale] = useDraft("music:keyscale", "");
+  const [timesig, setTimesig] = useDraft("music:timesig", "");
+  const [steps, setSteps] = useDraft("music:steps", "");
+  const [shiftVal, setShiftVal] = useDraft("music:shiftVal", "");
   const lyricsRef = useRef<HTMLTextAreaElement>(null);
 
   const voice =
@@ -138,9 +148,6 @@ export function useMusicParams() {
 
 export type MusicParams = ReturnType<typeof useMusicParams>;
 
-const selectCls =
-  "rounded-xl border border-cream/10 bg-surface px-2.5 py-1.5 text-xs text-cream transition hover:border-gold/35 focus:border-gold/40 focus:outline-none";
-
 /** The style tags: chips plus an "Add style" popover with the library. */
 function StyleTags({ p }: { p: MusicParams }) {
   const { lab, styles, setStyles, styleOpen, setStyleOpen, customStyle, setCustomStyle } = p;
@@ -157,56 +164,54 @@ function StyleTags({ p }: { p: MusicParams }) {
           </button>
         </Chip>
       ))}
-      <div className="relative">
-        <button
-          onClick={() => setStyleOpen((o) => !o)}
-          title="Styles also work written straight into the description"
-          className={cx(
-            "inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-xs transition",
-            styleOpen
-              ? "border-gold/60 text-gold"
-              : "border-cream/20 text-fog hover:border-gold/50 hover:text-gold",
-          )}
-        >
-          <Plus size={10} /> Style
-        </button>
-        {styleOpen && (
-          <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl border border-cream/12 bg-raised p-2 shadow-xl">
-            <input
-              autoFocus
-              value={customStyle}
-              onChange={(e) => setCustomStyle(e.target.value.slice(0, 40))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const tag = customStyle.trim();
-                  if (tag && !styles.includes(tag)) setStyles((prev) => [...prev, tag]);
-                  setCustomStyle("");
-                  setStyleOpen(false);
-                }
-                if (e.key === "Escape") setStyleOpen(false);
-              }}
-              placeholder="Type any style + Enter…"
-              className="w-full rounded-lg border border-cream/10 bg-surface px-2 py-1.5 text-xs text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
-            />
-            <div className="mt-2 flex flex-wrap gap-1">
-              {lab.styleLibrary
-                .filter((t) => !styles.includes(t))
-                .map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => {
-                      setStyles((prev) => [...prev, t]);
-                      setStyleOpen(false);
-                    }}
-                    className="rounded-full border border-cream/12 px-2 py-0.5 text-2xs text-cream/80 transition hover:border-gold/50 hover:text-gold"
-                  >
-                    {t}
-                  </button>
-                ))}
-            </div>
+      <Popover open={styleOpen} onOpenChange={setStyleOpen}>
+        <PopoverTrigger asChild>
+          <button
+            title="Styles also work written straight into the description"
+            className={cx(
+              "inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-xs transition",
+              styleOpen
+                ? "border-gold/60 text-gold"
+                : "border-cream/20 text-fog hover:border-gold/50 hover:text-gold",
+            )}
+          >
+            <Plus size={10} /> Style
+          </button>
+        </PopoverTrigger>
+        <PopoverContent side="top" align="start" sideOffset={4} className="w-64 p-2">
+          <input
+            autoFocus
+            value={customStyle}
+            onChange={(e) => setCustomStyle(e.target.value.slice(0, 40))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const tag = customStyle.trim();
+                if (tag && !styles.includes(tag)) setStyles((prev) => [...prev, tag]);
+                setCustomStyle("");
+                setStyleOpen(false);
+              }
+            }}
+            placeholder="Type any style + Enter…"
+            className="w-full rounded-lg border border-cream/10 bg-surface px-2 py-1.5 text-xs text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
+          />
+          <div className="mt-2 flex flex-wrap gap-1">
+            {lab.styleLibrary
+              .filter((t) => !styles.includes(t))
+              .map((t) => (
+                <button
+                  key={t}
+                  onClick={() => {
+                    setStyles((prev) => [...prev, t]);
+                    setStyleOpen(false);
+                  }}
+                  className="rounded-full border border-cream/12 px-2 py-0.5 text-2xs text-cream/80 transition hover:border-gold/50 hover:text-gold"
+                >
+                  {t}
+                </button>
+              ))}
           </div>
-        )}
-      </div>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -253,24 +258,16 @@ export function MusicComposer({
           ]}
         />
         <span className="flex-1" />
-        <select
+        <ModelSelect
           value={engineId}
-          onChange={(e) => {
-            const id = e.target.value as "acestep" | "minimax-music3";
+          onChange={(v) => {
+            const id = v as "acestep" | "minimax-music3";
             setEngineId(id);
             if (id === "minimax-music3") setDuration((d) => Math.min(d, lab.music3DurationMax));
           }}
-          title={engine?.note ?? "Engine"}
-          style={{ colorScheme: "dark" }}
-          className={cx(selectCls, "max-w-[240px]")}
-        >
-          {lab.engines.map((e) => (
-            <option key={e.id} value={e.id} disabled={!e.available}>
-              {e.label}
-              {e.available ? "" : " — not installed"}
-            </option>
-          ))}
-        </select>
+          models={lab.engines}
+          disableUnavailable
+        />
       </div>
 
       <div className="flex gap-2">
@@ -391,36 +388,34 @@ export function MusicAdvanced({ p, onClose }: { p: MusicParams; onClose: () => v
               }}
             />
           </div>
-          <div className="relative">
-            <button
-              onClick={() => vocals && setVoiceOpen((o) => !o)}
-              className="flex w-full items-center gap-2 rounded-xl border border-cream/10 bg-surface px-3 py-2 text-xs text-cream/85 transition hover:border-gold/35"
+          <DropdownMenu open={voiceOpen} onOpenChange={setVoiceOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                disabled={!vocals}
+                className="flex w-full items-center gap-2 rounded-xl border border-cream/10 bg-surface px-3 py-2 text-xs text-cream/85 transition hover:border-gold/35"
+              >
+                <AudioWaveform size={13} className="text-gold/80" />
+                <span className="flex-1 truncate text-left">{voice.label}</span>
+                <ChevronDown size={12} className={cx("text-fog transition-transform", voiceOpen && "rotate-180")} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              sideOffset={4}
+              className="w-[var(--radix-dropdown-menu-trigger-width)]"
             >
-              <AudioWaveform size={13} className="text-gold/80" />
-              <span className="flex-1 truncate text-left">{voice.label}</span>
-              <ChevronDown size={12} className={cx("text-fog transition-transform", voiceOpen && "rotate-180")} />
-            </button>
-            {voiceOpen && (
-              <div className="absolute left-0 right-0 top-full z-10 mt-1 overflow-hidden rounded-xl border border-cream/12 bg-raised shadow-xl">
-                {[NO_CONVERSION, ...lab.singVoices].map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => {
-                      setVoiceId(v.id);
-                      setVoiceOpen(false);
-                    }}
-                    className={cx(
-                      "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-cream/5",
-                      v.id === voiceId ? "text-gold" : "text-cream/85",
-                    )}
-                  >
-                    <span className="w-3.5">{v.id === voiceId && <Check size={12} />}</span>
-                    {v.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+              {[NO_CONVERSION, ...lab.singVoices].map((v) => (
+                <DropdownMenuItem
+                  key={v.id}
+                  onSelect={() => setVoiceId(v.id)}
+                  className={cx("text-xs", v.id === voiceId ? "text-gold" : "text-cream/85")}
+                >
+                  <span className="w-3.5">{v.id === voiceId && <Check size={12} />}</span>
+                  {v.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </DrawerSection>
 
@@ -484,7 +479,7 @@ export function MusicAdvanced({ p, onClose }: { p: MusicParams; onClose: () => v
         </DrawerField>
         {!m3 && (
           <DrawerField label="Language">
-            <select
+            <SelectBox
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
               style={{ colorScheme: "dark" }}
@@ -495,7 +490,7 @@ export function MusicAdvanced({ p, onClose }: { p: MusicParams; onClose: () => v
                   {l === "unknown" ? "auto" : l}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </DrawerField>
         )}
         <DrawerField label="Key / scale">

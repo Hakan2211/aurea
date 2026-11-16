@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import type { Episode } from "@aurea/shared";
-import { Segmented, cx } from "@/components/ui";
+import { Popover, PopoverContent, PopoverTrigger, Segmented, cx } from "@/components/ui";
 import type { useProduction } from "@/hooks";
 import { pad2, scriptStats } from "./shared";
 
@@ -50,69 +50,67 @@ export function StudioHeader({
        across the toggle. */
     <header className="flex items-center gap-4 border-b hairline px-5 py-3 @2xl:grid @2xl:grid-cols-[1fr_auto_1fr]">
       <div className="relative min-w-0 flex-1">
-        <button
-          onClick={() => episodes.length > 0 && setOpen((o) => !o)}
-          className="group flex w-full min-w-0 items-center gap-2 text-left"
-        >
-          {/* min-w-0 as well as truncate: a flex item's implicit
-              `min-width:auto` refuses to shrink below the title's min-content,
-              so without it a long title overruns its grid column and the
-              centred toggle draws on top of it in a narrow window */}
-          <h1 className="min-w-0 truncate font-serif text-[22px] font-semibold text-cream">
-            {current
-              ? `S${pad2(current.season.number)}E${pad2(current.episode.number)} — ${current.episode.title}`
-              : (prod.production?.title ?? "Production")}
-          </h1>
-          {episodes.length > 0 && (
-            <ChevronDown size={16} className="shrink-0 text-fog transition group-hover:text-gold" />
-          )}
-        </button>
-        {open && (
-          <>
-            <button className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-            <div className="absolute left-0 top-full z-20 mt-1 w-[300px] rounded-xl border hairline bg-raised p-1 shadow-xl">
-              {/* row, not a button: the remove control is a button of its own
-                  and buttons don't nest */}
-              {episodes.map(({ season, episode }) => (
-                <div
-                  key={episode.id}
-                  className={cx(
-                    "flex w-full items-center rounded-lg pr-2 text-sm transition",
-                    episode.id === current?.episode.id
-                      ? "bg-gold/10 text-gold"
-                      : "text-cream hover:bg-cream/5",
-                  )}
-                >
-                  <button
-                    onClick={() => {
-                      selectEpisode(episode.id);
-                      setOpen(false);
-                    }}
-                    className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-left"
-                  >
-                    S{pad2(season.number)}E{pad2(episode.number)} — {episode.title}
-                  </button>
-                  <button
-                    title="Remove episode"
-                    onClick={() => prod.removeEpisode(episode.id)}
-                    className="ml-2 shrink-0 text-fog transition hover:text-[#e07a6b]"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={() => {
-                  prod.addEpisode({ title: `Episode ${episodes.length + 1}` });
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-fog transition hover:bg-cream/5 hover:text-gold"
+        {/* a Popover rather than a DropdownMenu: each row carries its own
+            remove button, which a menu item can't host cleanly */}
+        <Popover open={open} onOpenChange={(o) => setOpen(o && episodes.length > 0)}>
+          <PopoverTrigger asChild>
+            <button className="group flex w-full min-w-0 items-center gap-2 text-left">
+              {/* min-w-0 as well as truncate: a flex item's implicit
+                  `min-width:auto` refuses to shrink below the title's min-content,
+                  so without it a long title overruns its grid column and the
+                  centred toggle draws on top of it in a narrow window */}
+              <h1 className="min-w-0 truncate font-serif text-[22px] font-semibold text-cream">
+                {current
+                  ? `S${pad2(current.season.number)}E${pad2(current.episode.number)} — ${current.episode.title}`
+                  : (prod.production?.title ?? "Production")}
+              </h1>
+              {episodes.length > 0 && (
+                <ChevronDown size={16} className="shrink-0 text-fog transition group-hover:text-gold" />
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" sideOffset={4} className="w-[300px] p-1">
+            {/* row, not a button: the remove control is a button of its own
+                and buttons don't nest */}
+            {episodes.map(({ season, episode }) => (
+              <div
+                key={episode.id}
+                className={cx(
+                  "flex w-full items-center rounded-lg pr-2 text-sm transition",
+                  episode.id === current?.episode.id
+                    ? "bg-gold/10 text-gold"
+                    : "text-cream hover:bg-cream/5",
+                )}
               >
-                <Plus size={12} /> New episode
-              </button>
-            </div>
-          </>
-        )}
+                <button
+                  onClick={() => {
+                    selectEpisode(episode.id);
+                    setOpen(false);
+                  }}
+                  className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-left"
+                >
+                  S{pad2(season.number)}E{pad2(episode.number)} — {episode.title}
+                </button>
+                <button
+                  title="Remove episode"
+                  onClick={() => prod.removeEpisode(episode.id)}
+                  className="ml-2 shrink-0 text-fog transition hover:text-[#e07a6b]"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                prod.addEpisode({ title: `Episode ${episodes.length + 1}` });
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm text-fog transition hover:bg-cream/5 hover:text-gold"
+            >
+              <Plus size={12} /> New episode
+            </button>
+          </PopoverContent>
+        </Popover>
         {current?.episode.logline && (
           <p className="mt-0.5 truncate font-serif text-sm italic text-fog">
             {current.episode.logline}

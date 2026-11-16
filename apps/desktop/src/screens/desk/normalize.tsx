@@ -3,6 +3,7 @@
  * before → after, what is missing — then applies on a second, deliberate
  * click. Calls the same procedure the normalize_project tool does. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { GhostButton, GoldButton, Modal, ModalHeader, cx } from "@/components/ui";
@@ -69,7 +70,7 @@ export function NormalizeDialog({
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
         <div>
           <p className={sectionLabel}>Canvas from</p>
-          <select value={lane} onChange={(e) => setLane(e.target.value)} className={cx(selectInput, "mt-1.5 w-full")}>
+          <SelectBox value={lane} onChange={(e) => setLane(e.target.value)} className={cx(selectInput, "mt-1.5 w-full")}>
             <option value="">The approved takes' own canvas</option>
             {lanes.map((p) => (
               <option key={p.id} value={p.id}>
@@ -77,7 +78,7 @@ export function NormalizeDialog({
                 {p.payload.resolution ? ` · ${p.payload.resolution}` : ""}
               </option>
             ))}
-          </select>
+          </SelectBox>
         </div>
 
         {error && <p className="text-xs text-[#f0a89d]">{error}</p>}

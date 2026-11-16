@@ -32,6 +32,7 @@ const TRACK_FOR_KIND: Record<string, TimelineTrack["kind"]> = {
   image: "video",
   audio: "voice",
   music: "music",
+  sfx: "sfx",
 };
 
 const ZONE_MIN = 190;

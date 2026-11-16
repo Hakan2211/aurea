@@ -60,6 +60,7 @@ export const AREAS: Area[] = [
       { key: "video", label: "Video", hint: "Animate a frame or a prompt" },
       { key: "voice", label: "Voice", hint: "Lines in a cast voice" },
       { key: "music", label: "Music", hint: "Beds, stings and themes" },
+      { key: "sfx", label: "Sound FX", hint: "Whooshes, hits, foley, ambience" },
       { key: "3d", label: "3D", hint: "Props and sets as 3D models" },
     ],
   },

@@ -39,7 +39,22 @@ import {
 } from "@/hooks";
 import type { Asset, Job } from "@/data/sample";
 import { composer } from "@/data/sample";
-import { Chip, GhostButton, GoldButton, Progress, Waveform, cx } from "@/components/ui";
+import {
+  Chip,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  GhostButton,
+  GoldButton,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Progress,
+  Waveform,
+  cx,
+} from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import type { ShotContext } from "./shared";
 
@@ -490,61 +505,64 @@ function ThreadSwitcher({ threads }: { threads: ReturnType<typeof useDirectorThr
     );
   };
 
+  // a Popover, not a DropdownMenu: rows hold a rename input and their own
+  // action buttons, which menu-item focus/typeahead would fight
   return (
-    <div className="relative">
-      {open && (
-        <div
-          className="fixed inset-0 z-10"
-          onClick={() => {
-            setOpen(false);
-            setConfirmDelete(null);
-          }}
-        />
-      )}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex max-w-full items-center gap-1 text-xs text-fog transition hover:text-cream"
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setConfirmDelete(null);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button className="flex max-w-full items-center gap-1 text-xs text-fog transition hover:text-cream">
+          <span className="truncate">{current?.title ?? "Director"}</span>
+          {threads.runningId && threads.runningId !== threads.activeId && (
+            <Loader2 size={10} className="shrink-0 animate-spin text-gold/70" />
+          )}
+          <ChevronDown size={11} className={cx("shrink-0 transition", open && "rotate-180")} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[300px] p-1"
+        // Esc while renaming cancels the rename, not the whole switcher
+        onEscapeKeyDown={(e) => {
+          if (renaming) e.preventDefault();
+        }}
       >
-        <span className="truncate">{current?.title ?? "Director"}</span>
-        {threads.runningId && threads.runningId !== threads.activeId && (
-          <Loader2 size={10} className="shrink-0 animate-spin text-gold/70" />
-        )}
-        <ChevronDown size={11} className={cx("shrink-0 transition", open && "rotate-180")} />
-      </button>
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-2 w-[300px] rounded-xl border hairline bg-raised p-1 shadow-xl shadow-ink/60">
-          <div className="max-h-[320px] overflow-y-auto">
-            {openThreads.map((t) => (
-              <Row key={t.id} thread={t} />
-            ))}
-            {closedThreads.length > 0 && (
-              <>
-                <p className="px-2.5 pb-1 pt-2 text-2xs uppercase tracking-wide text-fog">
-                  Closed
-                </p>
-                {closedThreads.map((t) => (
-                  <Row key={t.id} thread={t} />
-                ))}
-              </>
-            )}
-          </div>
-          <button
-            onClick={() => {
-              threads.create();
-              setOpen(false);
-            }}
-            className="mt-1 flex w-full items-center gap-2 border-t hairline px-2.5 py-2 text-left text-sm text-cream/85 transition hover:text-cream"
-          >
-            <Plus size={12} className="text-gold/80" />
-            New thread
-            <span className="ml-auto text-2xs text-fog">fresh context</span>
-          </button>
-          {threads.error && (
-            <p className="px-2.5 pb-1.5 text-2xs leading-relaxed text-ember/90">{threads.error}</p>
+        <div className="max-h-[320px] overflow-y-auto">
+          {openThreads.map((t) => (
+            <Row key={t.id} thread={t} />
+          ))}
+          {closedThreads.length > 0 && (
+            <>
+              <p className="px-2.5 pb-1 pt-2 text-2xs uppercase tracking-wide text-fog">
+                Closed
+              </p>
+              {closedThreads.map((t) => (
+                <Row key={t.id} thread={t} />
+              ))}
+            </>
           )}
         </div>
-      )}
-    </div>
+        <button
+          onClick={() => {
+            threads.create();
+            setOpen(false);
+          }}
+          className="mt-1 flex w-full items-center gap-2 border-t hairline px-2.5 py-2 text-left text-sm text-cream/85 transition hover:text-cream"
+        >
+          <Plus size={12} className="text-gold/80" />
+          New thread
+          <span className="ml-auto text-2xs text-fog">fresh context</span>
+        </button>
+        {threads.error && (
+          <p className="px-2.5 pb-1.5 text-2xs leading-relaxed text-ember/90">{threads.error}</p>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -562,41 +580,31 @@ function ModelPicker() {
   }
 
   return (
-    <div className="relative">
-      {open && <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={cx(
-          "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition",
-          open ? "border-gold/40 text-cream" : "border-cream/10 text-cream/80 hover:border-gold/40",
-        )}
-      >
-        {current.label} <ChevronDown size={11} className={cx("transition", open && "rotate-180")} />
-      </button>
-      {open && (
-        <div className="absolute bottom-full left-0 z-20 mb-2 w-[240px] rounded-xl border hairline bg-raised p-1 shadow-xl shadow-ink/60">
-          {DIRECTOR_MODELS.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => {
-                setModel(m.id);
-                setOpen(false);
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition hover:bg-cream/5"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-sm text-cream">{m.label}</div>
-                <div className="text-2xs text-fog">{m.detail}</div>
-              </div>
-              {m.id === model && <Check size={13} className="shrink-0 text-gold" />}
-            </button>
-          ))}
-          <p className="border-t hairline px-2.5 pb-1 pt-1.5 text-2xs text-fog">
-            Runs on your Claude Code subscription
-          </p>
-        </div>
-      )}
-    </div>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          className={cx(
+            "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition",
+            open ? "border-gold/40 text-cream" : "border-cream/10 text-cream/80 hover:border-gold/40",
+          )}
+        >
+          {current.label} <ChevronDown size={11} className={cx("transition", open && "rotate-180")} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="w-[240px]">
+        {DIRECTOR_MODELS.map((m) => (
+          <DropdownMenuItem key={m.id} onSelect={() => setModel(m.id)}>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-cream">{m.label}</div>
+              <div className="text-2xs text-fog">{m.detail}</div>
+            </div>
+            {m.id === model && <Check size={13} className="shrink-0 text-gold" />}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <p className="px-2.5 pb-1 pt-0.5 text-2xs text-fog">Runs on your Claude Code subscription</p>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -607,44 +615,35 @@ function AttachPicker({ attach }: { attach: AttachApi }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="relative">
-      {open && <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        title="Attach an asset"
-        className={cx(
-          "flex h-8 w-8 items-center justify-center rounded-lg transition",
-          open ? "bg-cream/5 text-cream" : "text-fog hover:bg-cream/5 hover:text-cream",
-        )}
-      >
-        <Paperclip size={15} />
-      </button>
-      {open && (
-        <div className="absolute bottom-full right-0 z-20 mb-2 max-h-[280px] w-[260px] overflow-y-auto rounded-xl border hairline bg-raised p-1 shadow-xl shadow-ink/60">
-          {assets.length === 0 && (
-            <p className="px-2.5 py-2 text-xs text-fog">The library is empty — generate something first.</p>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          title="Attach an asset"
+          className={cx(
+            "flex h-8 w-8 items-center justify-center rounded-lg transition",
+            open ? "bg-cream/5 text-cream" : "text-fog hover:bg-cream/5 hover:text-cream",
           )}
-          {assets.map((a) => {
-            const Icon = kindIcon[a.kind];
-            const attached = attach.pending.some((p) => p.id === a.id);
-            return (
-              <button
-                key={a.id}
-                onClick={() => {
-                  attach.onAttach(a);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-cream/5"
-              >
-                <Icon size={13} className="shrink-0 text-gold/70" />
-                <span className="min-w-0 flex-1 truncate text-sm text-cream/90">{a.name}</span>
-                {attached && <Check size={12} className="shrink-0 text-gold" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+        >
+          <Paperclip size={15} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="end" className="max-h-[280px] w-[260px] min-w-0">
+        {assets.length === 0 && (
+          <p className="px-2.5 py-2 text-xs text-fog">The library is empty — generate something first.</p>
+        )}
+        {assets.map((a) => {
+          const Icon = kindIcon[a.kind];
+          const attached = attach.pending.some((p) => p.id === a.id);
+          return (
+            <DropdownMenuItem key={a.id} onSelect={() => attach.onAttach(a)} className="py-1.5">
+              <Icon size={13} className="shrink-0 text-gold/70" />
+              <span className="min-w-0 flex-1 truncate text-sm text-cream/90">{a.name}</span>
+              {attached && <Check size={12} className="shrink-0 text-gold" />}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

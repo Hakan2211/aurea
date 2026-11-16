@@ -2,6 +2,7 @@
  * right. Everything here is geometry off `pxPerSec`, so zoom is the only thing
  * that changes when the sequence gets long. */
 
+import { Slider } from "@/components/ui/Slider";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Lock, Magnet, Plus, Scissors, Trash2, Volume2, VolumeX, ZoomIn, ZoomOut } from "lucide-react";
 import type { Timeline, TimelineClip, TimelineTrack } from "@aurea/shared";
@@ -23,8 +24,6 @@ import {
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const rulerLabel = (t: number) => `${Math.floor(t / 60)}:${pad2(Math.round(t % 60))}`;
-/** the zoom slider's fill, as a percentage of its range */
-const zoomPct = (px: number) => ((px - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100;
 
 export function Tracks({
   tl,
@@ -211,21 +210,15 @@ export function Tracks({
         <div className="ml-auto flex items-center gap-1.5">
           <span className="mr-1 text-2xs tabular-nums text-fog">{Math.round(pxPerSec)} px/s</span>
           <ToolButton icon={ZoomOut} label="Zoom out (−)" onClick={() => setPxPerSec((z) => clampZoom(z / 1.5))} />
-          <input
-            type="range"
+          <Slider
             min={ZOOM_MIN}
             max={ZOOM_MAX}
             step={1}
             value={Math.round(pxPerSec)}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setPxPerSec(() => v);
-            }}
+            onChange={(v) => setPxPerSec(() => v)}
+            size="sm"
             title="Zoom"
-            className="aurea-slider w-28"
-            style={{
-              background: `linear-gradient(to right, var(--color-gold) ${zoomPct(pxPerSec)}%, color-mix(in srgb, var(--color-cream) 12%, transparent) ${zoomPct(pxPerSec)}%)`,
-            }}
+            className="w-28"
           />
           <ToolButton icon={ZoomIn} label="Zoom in (+)" onClick={() => setPxPerSec((z) => clampZoom(z * 1.5))} />
           <button
@@ -316,26 +309,24 @@ export function Tracks({
                   </button>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <input
-                    type="range"
+                  <Slider
                     min={0}
                     max={2}
                     step={0.05}
                     value={track.gain ?? 1}
                     disabled={track.muted}
                     title={`Volume ${Math.round((track.gain ?? 1) * 100)}% — preview and export`}
-                    onChange={(e) =>
+                    onChange={(v) =>
                       onApply({
                         ...tl,
                         tracks: tl.tracks.map((t) =>
-                          t.id === track.id ? { ...t, gain: Number(e.target.value) } : t,
+                          t.id === track.id ? { ...t, gain: v } : t,
                         ),
                       })
                     }
-                    className="aurea-slider h-[3px] flex-1 disabled:opacity-30"
-                    style={{
-                      background: `linear-gradient(to right, ${kind.accent} ${((track.gain ?? 1) / 2) * 100}%, color-mix(in srgb, var(--color-cream) 10%, transparent) ${((track.gain ?? 1) / 2) * 100}%)`,
-                    }}
+                    size="sm"
+                    accent={kind.accent}
+                    className="flex-1"
                   />
                   <span className="w-7 shrink-0 text-right text-2xs tabular-nums text-fog/0 transition group-hover:text-fog">
                     {Math.round((track.gain ?? 1) * 100)}%
@@ -354,6 +345,7 @@ export function Tracks({
                 ["video", "Video", "Add a video track — its clips composite over the tracks above (inserts, cutaways)"],
                 ["voice", "Voice", "Add a voice track — dialogue and VO, mixed under the takes"],
                 ["music", "Music", "Add a music track — score and stings, mixed under the takes"],
+                ["sfx", "SFX", "Add a sound-effects track — whooshes, hits and foley, mixed under the takes"],
               ] as const
             ).map(([kind, label, title]) => (
               <button

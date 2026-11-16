@@ -13,7 +13,15 @@ import {
 } from "lucide-react";
 import { fmtStamp, useDownloadTrack, useMusicLab, useSendToTimeline } from "@/hooks";
 import type { MusicTrack } from "@/data/sample";
-import { SectionLabel, Waveform, cx } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  SectionLabel,
+  Waveform,
+  cx,
+} from "@/components/ui";
 import { useMediaDuration, type AudioPlayer } from "@/components/useAudioPlayer";
 import { CoverTile, TrackTags, type Likes } from "./shared";
 
@@ -145,17 +153,79 @@ function TrackCard({
                 <Star size={12} fill={starred ? "currentColor" : "none"} />
               </button>
             )}
-            <button
-              title="Track options"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenu((m) => !m);
+            <DropdownMenu
+              open={menu}
+              onOpenChange={(o) => {
+                setMenu(o);
                 setArmed(false);
               }}
-              className="shrink-0 text-fog transition hover:text-cream"
             >
-              <MoreVertical size={14} />
-            </button>
+              <DropdownMenuTrigger asChild>
+                <button
+                  title="Track options"
+                  // the card itself selects on click — keep the kebab from doing so
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0 text-fog transition hover:text-cream"
+                >
+                  <MoreVertical size={14} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-52 min-w-0"
+                // React events bubble through the portal — don't let a menu
+                // click reach the card's onSelect
+                onClick={(e) => e.stopPropagation()}
+              >
+                <DropdownMenuItem
+                  onSelect={onSend}
+                  disabled={sending || !track.relPath}
+                  className="text-xs text-cream/85"
+                >
+                  <ListPlus size={12} /> {sending ? "Sending…" : "Send to timeline"}
+                </DropdownMenuItem>
+                {/* the wav is what the engine rendered; the mp3 is what you send
+                  * someone — a third the size, and the only one a phone will open
+                  * without argument */}
+                <DropdownMenuItem
+                  onSelect={() => void downloads.download(track, "wav")}
+                  disabled={!track.url}
+                  className="text-xs text-cream/85"
+                >
+                  <Download size={12} /> Download WAV
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => void downloads.download(track, "mp3")}
+                  disabled={!track.relPath || !!downloads.busy}
+                  className="text-xs text-cream/85"
+                >
+                  <Download size={12} /> {downloads.busy === "mp3" ? "Converting…" : "Download MP3"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={onRecover}
+                  disabled={!track.relPath}
+                  title="Draw new cover art for this track"
+                  className="text-xs text-cream/85"
+                >
+                  <ImageIcon size={12} /> {track.coverUrl ? "New cover art" : "Make cover art"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="danger"
+                  onSelect={(e) => {
+                    // first click arms; keep the menu open for the confirm
+                    if (!armed) {
+                      e.preventDefault();
+                      setArmed(true);
+                      return;
+                    }
+                    onDelete();
+                  }}
+                  className="text-xs"
+                >
+                  <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <div className="mt-1">
@@ -188,83 +258,6 @@ function TrackCard({
           )}
         </div>
       </div>
-
-      {menu && (
-        <>
-          <div
-            className="fixed inset-0 z-10"
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenu(false);
-            }}
-          />
-          <div className="absolute right-2 top-12 z-20 w-52 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenu(false);
-                onSend();
-              }}
-              disabled={sending || !track.relPath}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-            >
-              <ListPlus size={12} /> {sending ? "Sending…" : "Send to timeline"}
-            </button>
-            {/* the wav is what the engine rendered; the mp3 is what you send
-              * someone — a third the size, and the only one a phone will open
-              * without argument */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenu(false);
-                void downloads.download(track, "wav");
-              }}
-              disabled={!track.url}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-            >
-              <Download size={12} /> Download WAV
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenu(false);
-                void downloads.download(track, "mp3");
-              }}
-              disabled={!track.relPath || !!downloads.busy}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-            >
-              <Download size={12} /> {downloads.busy === "mp3" ? "Converting…" : "Download MP3"}
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenu(false);
-                onRecover();
-              }}
-              disabled={!track.relPath}
-              title="Draw new cover art for this track"
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5 disabled:opacity-40"
-            >
-              <ImageIcon size={12} /> {track.coverUrl ? "New cover art" : "Make cover art"}
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!armed) {
-                  setArmed(true);
-                  return;
-                }
-                setMenu(false);
-                setArmed(false);
-                onDelete();
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-[#e07a6b] transition hover:bg-cream/5"
-            >
-              <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
-            </button>
-          </div>
-        </>
-      )}
     </div>
   );
 }

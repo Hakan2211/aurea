@@ -11,7 +11,14 @@ import {
   VolumeX,
 } from "lucide-react";
 import type { MusicTrack } from "@/data/sample";
-import { ScrubBar, cx } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  ScrubBar,
+  cx,
+} from "@/components/ui";
 import { PLAYBACK_RATES, useMediaDuration, type AudioPlayer } from "@/components/useAudioPlayer";
 import { CoverTile, type Likes } from "./shared";
 
@@ -122,44 +129,37 @@ export function PlayerBar({
         />
       </div>
 
-      <div className="relative">
-        <button
-          onClick={() => setRateOpen((o) => !o)}
-          title="Playback speed"
-          className={cx(
-            "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs tabular-nums transition",
-            player.rate === 1
-              ? "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold"
-              : "border-gold/45 text-gold",
-          )}
-        >
-          {player.rate.toFixed(2).replace(/0$/, "")}×
-          <ChevronDown size={11} className={cx("transition-transform", rateOpen && "rotate-180")} />
-        </button>
-        {rateOpen && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setRateOpen(false)} />
-            <div className="absolute bottom-full right-0 z-20 mb-1.5 w-24 overflow-hidden rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
-              {PLAYBACK_RATES.map((r) => (
-                <button
-                  key={r}
-                  onClick={() => {
-                    player.setRate(r);
-                    setRateOpen(false);
-                  }}
-                  className={cx(
-                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs tabular-nums transition hover:bg-cream/5",
-                    r === player.rate ? "text-gold" : "text-cream/85",
-                  )}
-                >
-                  <span className="w-3">{r === player.rate && <Check size={11} />}</span>
-                  {r.toFixed(2).replace(/0$/, "")}×
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      <DropdownMenu open={rateOpen} onOpenChange={setRateOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            title="Playback speed"
+            className={cx(
+              "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs tabular-nums transition",
+              player.rate === 1
+                ? "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold"
+                : "border-gold/45 text-gold",
+            )}
+          >
+            {player.rate.toFixed(2).replace(/0$/, "")}×
+            <ChevronDown size={11} className={cx("transition-transform", rateOpen && "rotate-180")} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="end" className="w-24 min-w-0">
+          {PLAYBACK_RATES.map((r) => (
+            <DropdownMenuItem
+              key={r}
+              onSelect={() => player.setRate(r)}
+              className={cx(
+                "py-1.5 text-xs tabular-nums",
+                r === player.rate ? "text-gold" : "text-cream/85",
+              )}
+            >
+              <span className="w-3">{r === player.rate && <Check size={11} />}</span>
+              {r.toFixed(2).replace(/0$/, "")}×
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </footer>
   );
 }

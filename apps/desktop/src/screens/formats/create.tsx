@@ -1,3 +1,4 @@
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useMemo, useState } from "react";
 import { useDirector } from "@/components/DirectorPanel";
 import { ArrowRight, Bot, Cpu, Layers, Mic2, Palette, X } from "lucide-react";
@@ -234,7 +235,7 @@ export function CreatePanel({
             >
               {ordered.length > 0 ? (
                 <>
-                  <select
+                  <SelectBox
                     value={account}
                     onChange={(e) => setAccountId(e.target.value)}
                     className={inputCls}
@@ -245,7 +246,7 @@ export function CreatePanel({
                         {a.format === format.id ? " · built for this format" : ""} · {a.voice}
                       </option>
                     ))}
-                  </select>
+                  </SelectBox>
                   <p className="mt-1.5 text-2xs leading-relaxed text-fog">
                     Voice, music bed, prompt tone and CTA come from the channel; the two layers
                     above override its own format and look for this run.

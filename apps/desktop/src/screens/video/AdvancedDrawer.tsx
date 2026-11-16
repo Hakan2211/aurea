@@ -1,3 +1,5 @@
+import { Checkbox } from "@/components/ui/Checkbox";
+import { SelectBox } from "@/components/ui/SelectBox";
 import {
   ArrowLeftRight,
   AudioLines,
@@ -15,6 +17,10 @@ import {
 } from "lucide-react";
 import { sprayVariants, type VideoAb } from "@aurea/shared";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   GhostButton,
   LabDrawer,
   SectionLabel,
@@ -33,7 +39,7 @@ import { MotionLane } from "./lanes/MotionLane";
 import { ReferenceLane } from "./lanes/ReferenceLane";
 import { FrameTile } from "./Composer";
 import { BankSelect, MIN_BEAT_SEC, clampSec, fmtTime, selectInput } from "./shared";
-import type { VideoParams } from "./useVideoParams";
+import { H3_VARIANTS, type VideoParams } from "./useVideoParams";
 
 /* The Advanced drawer (UI simplify plan, Stage 2) — every Video control that
  * isn't needed for a plain run: presets and looks, the end frame and guide
@@ -106,7 +112,8 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
     directorOn, setDirectorOn, keyframes, setKeyframes, beats, setBeats, blend, setBlend,
     audioRel, setAudioRel, audioOpen, setAudioOpen, lane, setLane, roomTone, setRoomTone,
     motionRef, setMotionRef, castRefs, setCastRefs, refStrength, setRefStrength,
-    fps, setFps, setQuality, enhance, setEnhance, loras, setLoras,
+    fps, setFps, enhance, setEnhance, loras, setLoras,
+    qualityChoice, setQualityChoice, minimaxAlt, h3VariantDropped,
     cameraMove, setCameraMove, cameraStrength, setCameraStrength,
     presetId, presetCustomised, cine, setCine, openRow, toggleRow, applyPreset, clearPreset,
     surface, isLtx, isMinimax, keyframesMax, lorasMax, retake, engineId,
@@ -249,11 +256,10 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                 </p>
                 {effectiveRel && (
                   <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-xl border border-cream/10 bg-surface/40 px-2.5 py-2 transition hover:border-cream/25">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={loop}
-                      onChange={(e) => setLoop(e.target.checked)}
-                      className="mt-0.5 h-3 w-3 shrink-0 accent-gold"
+                      onCheckedChange={(v) => setLoop(v === true)}
+                      className="mt-0.5 shrink-0"
                     />
                     <span className="text-2xs leading-relaxed text-fog">
                       <span className="inline-flex items-center gap-1 font-medium text-cream">
@@ -305,19 +311,18 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                     >
                       {still?.name ?? k.image.split("/").pop()}
                     </button>
-                    <input
-                      type="range"
+                    <Slider
                       min={0.3}
                       max={1}
                       step={0.05}
                       value={k.strength}
                       title={`Hold strength ${k.strength.toFixed(2)}`}
-                      onChange={(e) =>
+                      onChange={(v) =>
                         setSimpleKeyframes((ks) =>
-                          ks.map((x, j) => (j === i ? { ...x, strength: Number(e.target.value) } : x)),
+                          ks.map((x, j) => (j === i ? { ...x, strength: v } : x)),
                         )
                       }
-                      className="w-12 shrink-0 accent-gold"
+                      className="w-12 shrink-0"
                     />
                     <button
                       onClick={() => setSimpleKeyframes((ks) => ks.filter((_, j) => j !== i))}
@@ -471,19 +476,18 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                       >
                         {still?.name ?? k.image.split("/").pop()}
                       </button>
-                      <input
-                        type="range"
+                      <Slider
                         min={0.3}
                         max={1}
                         step={0.05}
                         value={k.strength}
                         title={`Hold strength ${k.strength.toFixed(2)}`}
-                        onChange={(e) =>
+                        onChange={(v) =>
                           setKeyframes((ks) =>
-                            ks.map((x, j) => (j === i ? { ...x, strength: Number(e.target.value) } : x)),
+                            ks.map((x, j) => (j === i ? { ...x, strength: v } : x)),
                           )
                         }
-                        className="w-12 shrink-0 accent-gold"
+                        className="w-12 shrink-0"
                       />
                       <button
                         onClick={() => setKeyframes((ks) => ks.filter((_, j) => j !== i))}
@@ -628,14 +632,13 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                       {/* beat blend — how hard a boundary lands */}
                       <div className="flex items-center gap-2 pt-0.5">
                         <span className="shrink-0 text-2xs text-fog">Blend</span>
-                        <input
-                          type="range"
+                        <Slider
                           min={0.001}
                           max={0.5}
                           step={0.001}
                           value={blend}
-                          onChange={(e) => setBlend(Number(e.target.value))}
-                          className="min-w-0 flex-1 accent-gold"
+                          onChange={(v) => setBlend(v)}
+                          className="min-w-0 flex-1"
                         />
                         <span className="w-12 shrink-0 text-right text-2xs tabular-nums text-gold">
                           {blend <= 0.01 ? "cut" : blend >= 0.25 ? "dissolve" : blend.toFixed(2)}
@@ -730,7 +733,7 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
             onToggle={() => toggleRow("camera")}
           >
             <div className="space-y-2">
-              <select
+              <SelectBox
                 value={cameraMove}
                 onChange={(e) => setCameraMove(e.target.value as CameraMove | "")}
                 style={{ colorScheme: "dark" }}
@@ -742,7 +745,7 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                     {m}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
               {cameraMove && (
                 <div className="flex items-center gap-2">
                   <span className="shrink-0 text-2xs text-fog">Strength</span>
@@ -802,6 +805,8 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
               isMinimax
                 ? effectiveQuality === "draft"
                   ? `Draft · 4 steps · ${minimaxWeightLabel}`
+                  : minimaxAlt
+                    ? `${H3_VARIANTS[minimaxAlt].label} · ${H3_VARIANTS[minimaxAlt].steps} steps · ${minimaxWeightLabel}`
                   : effectiveQuality === "standard"
                     ? `Standard · 8 steps · ${minimaxWeightLabel}`
                     : `Final · 25 steps · ${minimaxWeightLabel}`
@@ -816,14 +821,28 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
           >
             <div className="space-y-2">
               <Segmented
-                value={effectiveQuality}
-                onChange={setQuality}
+                value={qualityChoice}
+                onChange={setQualityChoice}
                 options={
                   isMinimax
                     ? [
-                        { value: "draft", label: "Draft" },
-                        { value: "standard", label: "Standard" },
-                        { value: "final", label: "Final" },
+                        { value: "draft", label: "Draft", title: "4 steps — fastest, for blocking" },
+                        {
+                          value: "drbaph-v4-6step",
+                          label: "Fast",
+                          title:
+                            minimaxHead === "ref2va"
+                              ? "No reference-head weight — remove the references to use it"
+                              : "6 steps — ~20 % faster than Standard",
+                          disabled: minimaxHead === "ref2va",
+                        },
+                        { value: "standard", label: "Standard", title: "8 steps — the everyday tier" },
+                        {
+                          value: "hyperflow-8step",
+                          label: "Hold frame",
+                          title: "8 steps — keeps the start frame's composition",
+                        },
+                        { value: "final", label: "Final", title: "25 steps — slowest, delivery" },
                       ]
                     : [
                         { value: "draft", label: "Draft" },
@@ -880,7 +899,11 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                 </div>
               )}
               <p className="text-2xs leading-relaxed text-fog">
-                {isMinimax
+                {isMinimax && h3VariantDropped
+                  ? "Fast has no weight for the reference head, so with references attached this renders as plain Standard (8 steps). Remove the references to get Fast."
+                  : isMinimax && minimaxAlt
+                  ? H3_VARIANTS[minimaxAlt].blurb
+                  : isMinimax
                   ? effectiveQuality === "draft"
                     ? "LightX2V's 4-step distill — the fastest H3 renders, sound included. Skin can look plasticky and fine texture goes soft; for blocking a shot, not keeping it."
                     : effectiveQuality === "standard"
@@ -905,7 +928,7 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
               {loras.map((l, i) => (
                 <div key={i} className="space-y-1.5 rounded-xl border border-cream/10 bg-surface p-2">
                   <div className="flex items-center gap-2">
-                    <select
+                    <SelectBox
                       value={l.name}
                       onChange={(e) =>
                         setLoras((ls) => ls.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
@@ -925,7 +948,7 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                           {name.split(/[\\/]/).pop()}
                         </option>
                       ))}
-                    </select>
+                    </SelectBox>
                     <button
                       onClick={() => setLoras((ls) => ls.filter((_, j) => j !== i))}
                       title="Remove"
@@ -1009,38 +1032,38 @@ export function AdvancedDrawer({ p, onClose }: { p: VideoParams; onClose: () => 
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => setAudioOpen((o) => !o)}
-                      className="flex w-full items-center gap-2 rounded-xl border border-dashed border-cream/15 px-3 py-2 text-xs text-cream/80 transition hover:border-gold/50 hover:text-gold"
-                    >
-                      <AudioLines size={13} />
-                      <span className="flex-1 text-left">Attach a voice take…</span>
-                      <ChevronDown
-                        size={11}
-                        className={cx("text-fog transition-transform", audioOpen && "rotate-180")}
-                      />
-                    </button>
-                  )}
-                  {audioOpen && !audioRel && (
-                    <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-44 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
-                      {lab.audioSources.length === 0 && (
-                        <p className="px-3 py-2 text-xs text-fog">
-                          No voice takes yet — generate one in the Voice lab.
-                        </p>
-                      )}
-                      {lab.audioSources.map((a) => (
-                        <button
-                          key={a.relPath}
-                          onClick={() => {
-                            setAudioRel(a.relPath);
-                            setAudioOpen(false);
-                          }}
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
-                        >
-                          <span className="flex-1 truncate">{a.name}</span>
+                    <DropdownMenu open={audioOpen} onOpenChange={setAudioOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <button className="flex w-full items-center gap-2 rounded-xl border border-dashed border-cream/15 px-3 py-2 text-xs text-cream/80 transition hover:border-gold/50 hover:text-gold">
+                          <AudioLines size={13} />
+                          <span className="flex-1 text-left">Attach a voice take…</span>
+                          <ChevronDown
+                            size={11}
+                            className={cx("text-fog transition-transform", audioOpen && "rotate-180")}
+                          />
                         </button>
-                      ))}
-                    </div>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="start"
+                        sideOffset={4}
+                        className="max-h-44 w-[var(--radix-dropdown-menu-trigger-width)]"
+                      >
+                        {lab.audioSources.length === 0 && (
+                          <p className="px-3 py-2 text-xs text-fog">
+                            No voice takes yet — generate one in the Voice lab.
+                          </p>
+                        )}
+                        {lab.audioSources.map((a) => (
+                          <DropdownMenuItem
+                            key={a.relPath}
+                            onSelect={() => setAudioRel(a.relPath)}
+                            className="text-xs text-cream/85"
+                          >
+                            <span className="flex-1 truncate">{a.name}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
                 </div>
                 <p className="mt-1.5 text-2xs leading-relaxed text-fog">

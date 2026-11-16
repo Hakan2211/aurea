@@ -27,7 +27,18 @@ import {
 import type { ModelEntry } from "@aurea/shared";
 import { useModels, useRootPreview, useSettings } from "@/hooks";
 import type { Provider } from "@/data/sample";
-import { Chip, GhostButton, GoldButton, Progress, Toggle, cx } from "@/components/ui";
+import {
+  Chip,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  GhostButton,
+  GoldButton,
+  Progress,
+  Toggle,
+  cx,
+} from "@/components/ui";
 import { RuntimeCard } from "@/components/RuntimeCard";
 import { trpc } from "@/trpc";
 
@@ -173,35 +184,28 @@ function ProviderAuth({ provider }: { provider: Provider }) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-fog">Model</span>
-      <div className="relative">
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="flex w-56 items-center gap-2 rounded-lg border border-cream/10 bg-surface px-3 py-1.5 text-xs text-cream/85 transition hover:border-gold/35"
-        >
-          <span className="flex-1 truncate text-left">{auth.model}</span>
-          <ChevronDown
-            size={11}
-            className={cx("shrink-0 text-fog transition-transform", open && "rotate-180")}
-          />
-        </button>
-        {open && (
-          <div className="absolute right-0 top-full z-10 mt-1 w-56 overflow-hidden rounded-lg border border-cream/12 bg-raised shadow-xl">
-            {auth.options.map((m) => (
-              <button
-                key={m}
-                onClick={() => setOpen(false)}
-                className={cx(
-                  "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition hover:bg-cream/5",
-                  m === auth.model ? "text-gold" : "text-cream/85",
-                )}
-              >
-                <span className="w-3">{m === auth.model && <Check size={11} />}</span>
-                <span className="truncate">{m}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button className="flex w-56 items-center gap-2 rounded-lg border border-cream/10 bg-surface px-3 py-1.5 text-xs text-cream/85 transition hover:border-gold/35">
+            <span className="flex-1 truncate text-left">{auth.model}</span>
+            <ChevronDown
+              size={11}
+              className={cx("shrink-0 text-fog transition-transform", open && "rotate-180")}
+            />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={4} className="w-56 min-w-0">
+          {auth.options.map((m) => (
+            <DropdownMenuItem
+              key={m}
+              className={cx("px-3 text-xs", m === auth.model ? "text-gold" : "text-cream/85")}
+            >
+              <span className="w-3">{m === auth.model && <Check size={11} />}</span>
+              <span className="truncate">{m}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -271,8 +275,9 @@ function ProvidersSection() {
         <div className="text-sm font-medium text-cream">fal.ai API key</div>
         <div className="mt-0.5 text-2xs text-fog">
           Unlocks the Seedance cloud video engine in the Video Lab and GPT Image 2 in the Image Lab —
-          the one edit model that takes up to 16 references, where local Qwen-Edit stops at 3. Both
-          bill to your fal account; the estimated cost shows before every render.
+          the one edit model that takes up to 16 references, where local Qwen-Edit stops at 3 — and
+          ElevenLabs sound effects in the Sound FX Lab ($0.002 per second). All bill to your fal
+          account; the estimated cost shows before every render.
         </div>
         <input
           type="password"

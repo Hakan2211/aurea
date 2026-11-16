@@ -14,6 +14,7 @@ import {
   Play,
   RotateCcw,
   X,
+  AudioLines,
 } from "lucide-react";
 import { useJobs, useSystem } from "@/hooks";
 import type { Job } from "@/data/sample";
@@ -28,6 +29,7 @@ const kindIcon = {
   image: FileImage,
   tts: FileAudio,
   music: FileMusic,
+  sfx: AudioLines,
   model3d: Box,
 } as const;
 

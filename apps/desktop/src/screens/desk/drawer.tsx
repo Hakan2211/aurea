@@ -9,6 +9,7 @@
  * shot.takeNotes and rides every later render's prompt, so direction
  * accumulates on the shot instead of living in your head. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -506,7 +507,7 @@ export function ShotDrawer({
           {qc && <QcPanel report={qc} onClose={() => setQc(null)} />}
           {/* ---- the lane and the two composer overrides, then the render-shaped verbs ---- */}
           <div className="flex items-center gap-1.5">
-            <select
+            <SelectBox
               value={lane}
               onChange={(e) => setLane(e.target.value)}
               title="Render lane — engine, canvas, length, tier and camera in one word"
@@ -518,10 +519,10 @@ export function ShotDrawer({
                   {p.label}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </div>
           <div className="flex items-center gap-1.5">
-            <select
+            <SelectBox
               value={engine}
               onChange={(e) => setEngine(e.target.value)}
               title="Engine override — picks the composer: H3 composes its block prompt, LTX composes a Director timeline or multi-shot prose"
@@ -531,8 +532,8 @@ export function ShotDrawer({
               <option value="ltx25">LTX 2.5</option>
               <option value="ltx2">LTX 2.3</option>
               <option value="minimax-h3">MiniMax H3</option>
-            </select>
-            <select
+            </SelectBox>
+            <SelectBox
               value={multiShot}
               onChange={(e) => setMultiShot(e.target.value as "" | "on" | "off")}
               title="Multi-shot — compose the beats as ONE cutting prose paragraph (LTX 2.5 cuts inside a single generation; the enhancer is forced off)"
@@ -541,7 +542,7 @@ export function ShotDrawer({
               <option value="">Lane cuts</option>
               <option value="on">Multi-shot</option>
               <option value="off">Single take</option>
-            </select>
+            </SelectBox>
           </div>
           <div className="flex items-center gap-1.5">
             {verb["shot_from_storyboard:dryRun"]}

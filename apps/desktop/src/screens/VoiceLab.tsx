@@ -1,4 +1,7 @@
+import { Checkbox } from "@/components/ui/Checkbox";
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useEffect, useRef, useState } from "react";
+import { useDraft } from "@/useDraft";
 import {
   ArrowRightLeft,
   AudioLines,
@@ -37,6 +40,12 @@ import {
   ComposerBar,
   DrawerField,
   DrawerSection,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
   GenerateButton,
   GoldButton,
   LabDrawer,
@@ -49,6 +58,7 @@ import {
   cx,
   drawerInput,
   useLabDrawer,
+  ModelSelect,
 } from "@/components/ui";
 import {
   PLAYBACK_RATES,
@@ -292,9 +302,10 @@ function VoiceRow({
   /** present only for studio voices — the rest can only be hidden */
   onRemove?: () => void;
 }) {
-  const [menu, setMenu] = useState(false);
   const [armed, setArmed] = useState(false);
   const [editing, setEditing] = useState(false);
+  /** Rename was picked: the menu must not pull focus back off the new input */
+  const renameFocus = useRef(false);
   const [draft, setDraft] = useState(voice.name);
   const playingSample =
     !!voice.sampleUrl && player.src === voice.sampleUrl && player.playing;
@@ -423,56 +434,62 @@ function VoiceRow({
             </Chip>
           )}
         </span>
-        <span
-          title="Rename, hide or delete"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenu((m) => !m);
-            setArmed(false);
-          }}
-          className="shrink-0 text-fog/50 transition hover:text-cream"
-        >
-          <MoreVertical size={14} />
-        </span>
-      </button>
-      {menu && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
-          <div className="absolute right-1 top-10 z-20 w-56 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
-            <button
-              onClick={() => {
-                setMenu(false);
+        <DropdownMenu onOpenChange={() => setArmed(false)}>
+          <DropdownMenuTrigger asChild>
+            <span
+              title="Rename, hide or delete"
+              // the trigger sits inside the row's button — don't select the row too
+              onClick={(e) => e.stopPropagation()}
+              className="shrink-0 text-fog/50 transition hover:text-cream"
+            >
+              <MoreVertical size={14} />
+            </span>
+          </DropdownMenuTrigger>
+          {/* portalled, but React still bubbles its clicks to the row button */}
+          <DropdownMenuContent
+            align="end"
+            className="w-56"
+            // Rename mounts an input; don't let focus snap back to the trigger
+            onCloseAutoFocus={(e) => {
+              if (renameFocus.current) e.preventDefault();
+              renameFocus.current = false;
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            <DropdownMenuItem
+              onSelect={() => {
+                renameFocus.current = true;
                 setDraft(voice.name);
                 setEditing(true);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
+              className="text-xs text-cream/85"
             >
               <Pencil size={12} /> Rename
-            </button>
-            <button
-              onClick={() => {
-                setMenu(false);
-                onHide();
-              }}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => onHide()}
               title="Takes it off every voice picker. Nothing is deleted — restore it from “Hidden” at the bottom of this list."
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
+              className="text-xs text-cream/85"
             >
               <EyeOff size={12} /> Hide from list
-            </button>
+            </DropdownMenuItem>
             {onRemove ? (
-              <button
-                onClick={() => {
+              <DropdownMenuItem
+                variant="danger"
+                onSelect={(e) => {
                   if (!armed) {
+                    // first press arms; keep the menu open for the confirm
+                    e.preventDefault();
                     setArmed(true);
                     return;
                   }
-                  setMenu(false);
                   onRemove();
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-[#e07a6b] transition hover:bg-cream/5"
+                className="text-xs"
               >
                 <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete permanently"}
-              </button>
+              </DropdownMenuItem>
             ) : (
               <p className="px-2.5 py-2 text-2xs leading-relaxed text-fog">
                 {voice.kind === "preset"
@@ -480,9 +497,9 @@ function VoiceRow({
                   : "Lives in videofast’s char_refs, not the studio folder — hide it here, delete the .wav there."}
               </p>
             )}
-          </div>
-        </>
-      )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </button>
     </div>
   );
 }
@@ -661,29 +678,29 @@ function CenterStage({
   takes: React.ReactNode;
 }) {
   const lab = useVoiceLab();
-  const [script, setScript] = useState(lab.script);
-  const [pace, setPace] = useState(lab.pace);
-  const [emotion, setEmotion] = useState(lab.emotion);
-  const [mode, setMode] = useState<"speak" | "convert">("speak");
-  const [engineId, setEngineId] = useState(lab.engines[0].id);
-  const [source, setSource] = useState<{ rel: string; name: string } | null>(null);
+  const [script, setScript] = useDraft("voice:script", lab.script);
+  const [pace, setPace] = useDraft("voice:pace", lab.pace);
+  const [emotion, setEmotion] = useDraft("voice:emotion", lab.emotion);
+  const [mode, setMode] = useDraft<"speak" | "convert">("voice:mode", "speak");
+  const [engineId, setEngineId] = useDraft("voice:engineId", lab.engines[0].id);
+  const [source, setSource] = useDraft<{ rel: string; name: string } | null>("voice:source", null);
   const [sourceOpen, setSourceOpen] = useState(false);
-  const [vcSing, setVcSing] = useState(false);
-  const [vcSteps, setVcSteps] = useState("");
-  const [vcShift, setVcShift] = useState("");
+  const [vcSing, setVcSing] = useDraft("voice:vcSing", false);
+  const [vcSteps, setVcSteps] = useDraft("voice:vcSteps", "");
+  const [vcShift, setVcShift] = useDraft("voice:vcShift", "");
   // RVC singing: octave-correct the vocals into the target voice's register —
   // "auto" measures the song against the voice ref, no gender assumptions
-  const [vcPitch, setVcPitch] = useState<"auto" | "none" | "octave-down" | "octave-up">("auto");
+  const [vcPitch, setVcPitch] = useDraft<"auto" | "none" | "octave-down" | "octave-up">("voice:vcPitch", "auto");
   const [vcError, setVcError] = useState<string | null>(null);
   // "auto" prefers the voice's trained RVC model (the better path) when it exists
-  const [vcEngineSel, setVcEngineSel] = useState<"auto" | "seedvc" | "rvc">("auto");
+  const [vcEngineSel, setVcEngineSel] = useDraft<"auto" | "seedvc" | "rvc">("voice:vcEngineSel", "auto");
   // DramaBox-only knobs (its delivery is prompt-driven — pace/emotion don't apply)
-  const [dbxSeed, setDbxSeed] = useState("42");
-  const [dbxCfg, setDbxCfg] = useState(2.5);
-  const [dbxStg, setDbxStg] = useState(1.5);
-  const [dbxDurMult, setDbxDurMult] = useState(0.9);
-  const [dbxGenDur, setDbxGenDur] = useState("");
-  const [dbxWatermark, setDbxWatermark] = useState(false);
+  const [dbxSeed, setDbxSeed] = useDraft("voice:dbxSeed", "42");
+  const [dbxCfg, setDbxCfg] = useDraft("voice:dbxCfg", 2.5);
+  const [dbxStg, setDbxStg] = useDraft("voice:dbxStg", 1.5);
+  const [dbxDurMult, setDbxDurMult] = useDraft("voice:dbxDurMult", 0.9);
+  const [dbxGenDur, setDbxGenDur] = useDraft("voice:dbxGenDur", "");
+  const [dbxWatermark, setDbxWatermark] = useDraft("voice:dbxWatermark", false);
   // the id being renamed, not a boolean: picking another voice mid-edit used to
   // blur-commit the draft onto whichever voice was selected by then
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -907,20 +924,7 @@ function CenterStage({
           <span className="text-2xs text-fog">as <span className="text-cream/85">{voice.name}</span></span>
           <span className="flex-1" />
           {speak ? (
-            <select
-              value={engineId}
-              onChange={(e) => setEngineId(e.target.value)}
-              title={engine.note ?? "Engine"}
-              style={{ colorScheme: "dark" }}
-              className={cx(selectCls, "max-w-[260px]")}
-            >
-              {lab.engines.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.label}
-                  {e.note ? ` — ${e.note}` : ""}
-                </option>
-              ))}
-            </select>
+            <ModelSelect value={engineId} onChange={setEngineId} models={lab.engines} />
           ) : (
             <>
               <Segmented
@@ -931,7 +935,7 @@ function CenterStage({
                   { value: "sing", label: "Singing", title: "Keeps melody and timing" },
                 ]}
               />
-              <select
+              <SelectBox
                 value={vcEngine}
                 onChange={(e) => setVcEngineSel(e.target.value as "seedvc" | "rvc")}
                 title="Conversion engine"
@@ -943,7 +947,7 @@ function CenterStage({
                     {e.label} — {e.note}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </>
           )}
         </div>
@@ -1007,38 +1011,34 @@ function CenterStage({
                   </span>
                   <span className="text-2xs text-fog">WAV, MP3, FLAC</span>
                 </button>
-                <div className="relative">
-                  <button
-                    onClick={() => setSourceOpen((o) => !o)}
-                    className="flex h-full items-center gap-2 rounded-xl border border-dashed border-cream/15 px-4 transition hover:border-gold/50 hover:bg-gold/4"
-                  >
-                    <ListMusic size={16} strokeWidth={1.5} className="text-gold/80" />
-                    <span className="text-sm text-cream/90">From library</span>
-                    <span className="text-2xs text-fog">{lab.convertSources.length}</span>
-                    <ChevronDown size={11} className={cx("transition-transform", sourceOpen && "rotate-180")} />
-                  </button>
-                  {sourceOpen && (
-                    <div className="absolute bottom-full right-0 z-30 mb-1 max-h-60 w-72 overflow-y-auto rounded-xl border border-cream/12 bg-raised shadow-xl">
-                      {lab.convertSources.length === 0 && (
-                        <p className="px-3 py-2 text-xs text-fog">No audio in the library yet</p>
-                      )}
-                      {lab.convertSources.map((a) => (
-                        <button
-                          key={a.relPath}
-                          onClick={() => {
-                            setSource({ rel: a.relPath, name: a.name });
-                            setSourceOpen(false);
-                            if (a.kind === "music") setVcSing(true);
-                          }}
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5"
-                        >
-                          <span className="flex-1 truncate">{a.name}</span>
-                          <span className="text-2xs text-fog">{a.kind}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <DropdownMenu open={sourceOpen} onOpenChange={setSourceOpen}>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex h-full items-center gap-2 rounded-xl border border-dashed border-cream/15 px-4 transition hover:border-gold/50 hover:bg-gold/4">
+                      <ListMusic size={16} strokeWidth={1.5} className="text-gold/80" />
+                      <span className="text-sm text-cream/90">From library</span>
+                      <span className="text-2xs text-fog">{lab.convertSources.length}</span>
+                      <ChevronDown size={11} className={cx("transition-transform", sourceOpen && "rotate-180")} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="end" sideOffset={4} className="max-h-60 w-72">
+                    {lab.convertSources.length === 0 && (
+                      <p className="px-3 py-2 text-xs text-fog">No audio in the library yet</p>
+                    )}
+                    {lab.convertSources.map((a) => (
+                      <DropdownMenuItem
+                        key={a.relPath}
+                        onSelect={() => {
+                          setSource({ rel: a.relPath, name: a.name });
+                          if (a.kind === "music") setVcSing(true);
+                        }}
+                        className="text-xs text-cream/85"
+                      >
+                        <span className="flex-1 truncate">{a.name}</span>
+                        <span className="text-2xs text-fog">{a.kind}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             )}
           </div>
@@ -1204,11 +1204,10 @@ function CenterStage({
               </DrawerField>
               <label className="flex items-center justify-between gap-3 py-1 text-xs">
                 <span className="text-fog">Watermark</span>
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={dbxWatermark}
-                  onChange={(e) => setDbxWatermark(e.target.checked)}
-                  className="accent-gold"
+                  onCheckedChange={(v) => setDbxWatermark(v === true)}
+                  className=""
                 />
               </label>
             </div>
@@ -1296,7 +1295,6 @@ function TakeRow({
 }) {
   const playing = player.playing && !!take.url && player.src === take.url;
   const loaded = !!take.url && player.src === take.url;
-  const [menu, setMenu] = useState(false);
   const [armed, setArmed] = useState(false);
   // the library scan has no duration — probe the file, the way Music lab does
   const probed = useMediaDuration(take.generating ? undefined : take.url);
@@ -1368,61 +1366,58 @@ function TakeRow({
               </button>
             )}
             {!take.generating && (
-              <button
-                title="Take options"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMenu((m) => !m);
-                  setArmed(false);
-                }}
-                className="text-fog/50 transition hover:text-cream"
-              >
-                <MoreVertical size={13} />
-              </button>
+              <DropdownMenu onOpenChange={() => setArmed(false)}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    title="Take options"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-fog/50 transition hover:text-cream"
+                  >
+                    <MoreVertical size={13} />
+                  </button>
+                </DropdownMenuTrigger>
+                {/* the menu portals out, but React still bubbles its clicks to
+                    the card's onSelect — stop them here */}
+                <DropdownMenuContent
+                  align="end"
+                  className="w-48"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <DropdownMenuItem
+                    disabled={!take.url}
+                    onSelect={() => {
+                      if (take.url) void downloadAsset(take.url, `${take.label || "take"}.wav`);
+                    }}
+                    className="text-xs text-cream/85"
+                  >
+                    <Download size={12} /> Download .wav
+                  </DropdownMenuItem>
+                  {onDelete && (
+                    <DropdownMenuItem
+                      variant="danger"
+                      onSelect={(e) => {
+                        if (!armed) {
+                          // first press arms; keep the menu open for the confirm
+                          e.preventDefault();
+                          setArmed(true);
+                          return;
+                        }
+                        onDelete();
+                      }}
+                      className="text-xs"
+                    >
+                      <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
+                    </DropdownMenuItem>
+                  )}
+                  {take.sizeLabel && (
+                    <p className="px-2.5 py-1.5 text-2xs text-fog">{take.sizeLabel} on disk</p>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </div>
       </div>
-
-      {menu && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setMenu(false); }} />
-          <div className="absolute right-2 top-11 z-20 w-48 rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenu(false);
-                if (take.url) void downloadAsset(take.url, `${take.label || "take"}.wav`);
-              }}
-              className={cx(
-                "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-cream/85 transition hover:bg-cream/5",
-                !take.url && "pointer-events-none opacity-40",
-              )}
-            >
-              <Download size={12} /> Download .wav
-            </button>
-            {onDelete && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!armed) {
-                    setArmed(true);
-                    return;
-                  }
-                  setMenu(false);
-                  onDelete();
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-[#e07a6b] transition hover:bg-cream/5"
-              >
-                <Trash2 size={12} /> {armed ? "Click again to confirm" : "Delete from disk"}
-              </button>
-            )}
-            {take.sizeLabel && (
-              <p className="px-2.5 py-1.5 text-2xs text-fog">{take.sizeLabel} on disk</p>
-            )}
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -1650,44 +1645,41 @@ function PlayerBar({
       </div>
 
       {/* playback speed — the one graft the review took from the v2 mockup */}
-      <div className="relative">
-        <button
-          onClick={() => setRateOpen((o) => !o)}
-          title="Playback speed"
-          className={cx(
-            "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs tabular-nums transition",
-            player.rate === 1
-              ? "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold"
-              : "border-gold/45 text-gold",
-          )}
-        >
-          {player.rate.toFixed(2).replace(/0$/, "")}×
-          <ChevronDown size={11} className={cx("transition-transform", rateOpen && "rotate-180")} />
-        </button>
-        {rateOpen && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setRateOpen(false)} />
-            <div className="absolute bottom-full right-0 z-20 mb-1.5 w-24 overflow-hidden rounded-xl border border-cream/12 bg-raised p-1 shadow-xl">
-              {PLAYBACK_RATES.map((r) => (
-                <button
-                  key={r}
-                  onClick={() => {
-                    player.setRate(r);
-                    setRateOpen(false);
-                  }}
-                  className={cx(
-                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs tabular-nums transition hover:bg-cream/5",
-                    r === player.rate ? "text-gold" : "text-cream/85",
-                  )}
-                >
-                  <span className="w-3">{r === player.rate && <Check size={11} />}</span>
-                  {r.toFixed(2).replace(/0$/, "")}×
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      <DropdownMenu open={rateOpen} onOpenChange={setRateOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            title="Playback speed"
+            className={cx(
+              "flex items-center gap-1 rounded-lg border px-2 py-1 text-xs tabular-nums transition",
+              player.rate === 1
+                ? "border-cream/10 text-cream/80 hover:border-gold/40 hover:text-gold"
+                : "border-gold/45 text-gold",
+            )}
+          >
+            {player.rate.toFixed(2).replace(/0$/, "")}×
+            <ChevronDown size={11} className={cx("transition-transform", rateOpen && "rotate-180")} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="end" className="w-24 min-w-0">
+          <DropdownMenuRadioGroup
+            value={String(player.rate)}
+            onValueChange={(v) => player.setRate(Number(v))}
+          >
+            {PLAYBACK_RATES.map((r) => (
+              <DropdownMenuRadioItem
+                key={r}
+                value={String(r)}
+                className={cx(
+                  "py-1.5 text-xs tabular-nums",
+                  r === player.rate ? "text-gold" : "text-cream/85",
+                )}
+              >
+                {r.toFixed(2).replace(/0$/, "")}×
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </footer>
   );
 }
@@ -1698,8 +1690,8 @@ export function VoiceLab() {
   const lab = useVoiceLab();
   const player = useAudioPlayer();
   const likes = useLikes();
-  const [voiceId, setVoiceId] = useState(lab.voices[0]?.id ?? "");
-  const [takeId, setTakeId] = useState<string | null>(null);
+  const [voiceId, setVoiceId] = useDraft("voice:voiceId", lab.voices[0]?.id ?? "");
+  const [takeId, setTakeId] = useDraft<string | null>("voice:takeId", null);
   const [clone, setClone] = useState<{ open: boolean; file: File | null }>({
     open: false,
     file: null,

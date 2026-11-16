@@ -3,6 +3,7 @@
  * with the writers' room panel and is driven by the selection both views make,
  * so a shot picked on the kanban is the shot you edit while reading the page. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
 import type { Scene, Shot, ShotStatus } from "@aurea/shared";
 import { Chip, cx } from "@/components/ui";
@@ -125,7 +126,7 @@ export function ShotInspector({
 
         <label className="block">
           <span className={fieldLabel}>Status</span>
-          <select
+          <SelectBox
             className={selectInput}
             value={draft.status}
             onChange={(e) => patch({ status: e.target.value as ShotStatus })}
@@ -135,7 +136,7 @@ export function ShotInspector({
                 {s}
               </option>
             ))}
-          </select>
+          </SelectBox>
         </label>
 
         <div>
@@ -163,7 +164,7 @@ export function ShotInspector({
 
         <label className="block">
           <span className={fieldLabel}>Location</span>
-          <select
+          <SelectBox
             className={selectInput}
             value={draft.location ?? ""}
             onChange={(e) => patch({ location: e.target.value || null })}
@@ -174,7 +175,7 @@ export function ShotInspector({
                 {l.name}
               </option>
             ))}
-          </select>
+          </SelectBox>
         </label>
 
         {/* camera & lens — bank ids autocomplete from the cinematography bank
@@ -256,7 +257,7 @@ export function ShotInspector({
             {draft.scriptLines.map((line) => (
               <div key={line.id} className="rounded-lg border border-cream/10 bg-ink/40 p-2">
                 <div className="mb-1 flex items-center gap-1.5">
-                  <select
+                  <SelectBox
                     className={cx(selectInput, "flex-1")}
                     value={line.character ?? ""}
                     onChange={(e) => patchLine(line.id, { character: e.target.value || null })}
@@ -267,7 +268,7 @@ export function ShotInspector({
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SelectBox>
                   <button
                     title="Remove line"
                     onClick={() =>

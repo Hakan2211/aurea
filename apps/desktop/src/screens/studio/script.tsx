@@ -8,6 +8,7 @@
  * rail over to the inspector. Selection made in the Board view scrolls the
  * matching block into place here. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useEffect, useRef } from "react";
 import { Loader2, MessageSquareText, Mic, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
 import type { Episode, Scene, Shot } from "@aurea/shared";
@@ -365,7 +366,7 @@ function ShotBlock({
             {line.character ? (
               <div className="px-10">
                 <div className="flex items-center justify-center">
-                  <select
+                  <SelectBox
                     value={line.character}
                     onChange={(e) => patchLine(line.id, { character: e.target.value || null })}
                     className="cursor-pointer appearance-none rounded-md border border-transparent bg-transparent text-center font-mono text-sm font-semibold uppercase tracking-[0.1em] text-gold outline-none transition focus:border-cream/10 focus:bg-ink/60"
@@ -376,7 +377,7 @@ function ShotBlock({
                       </option>
                     ))}
                     <option value="">(action)</option>
-                  </select>
+                  </SelectBox>
                 </div>
                 <input
                   value={line.deliveryNotes}

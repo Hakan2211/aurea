@@ -10,7 +10,17 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronDown, LayoutPanelTop, Rows3, Sparkles, LayoutGrid } from "lucide-react";
 import type { Episode, Scene, Shot } from "@aurea/shared";
-import { Chip, GoldButton, Progress, Segmented, cx } from "@/components/ui";
+import {
+  Chip,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  GoldButton,
+  Progress,
+  Segmented,
+  cx,
+} from "@/components/ui";
 import type { useBible, useStoryboard } from "@/hooks";
 import { STATUS_TONE, pad2, shotCode } from "./shared";
 
@@ -43,48 +53,36 @@ export function BoardHeader({
     <header className="flex items-center gap-4 border-b hairline px-5 py-2.5">
       {/* the quiet header the v2 mockup argued for: an episode chip, not a
           title block — the board itself is the loud element */}
-      <div className="relative min-w-0">
-        <button
-          onClick={() => episodes.length > 0 && setOpen((o) => !o)}
-          className={cx(
-            "flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition",
-            episodes.length > 0 && "hover:bg-cream/5",
-          )}
-        >
-          <span className="truncate font-serif text-base text-cream">
-            {current
-              ? `S${pad2(current.season.number)}E${pad2(current.episode.number)} — ${current.episode.title}`
-              : "No episode"}
-          </span>
-          {episodes.length > 0 && <ChevronDown size={13} className="shrink-0 text-fog" />}
-        </button>
-        {open && (
-          <>
-            <button className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
-            <div className="absolute left-0 top-full z-20 mt-1 w-[300px] rounded-xl border hairline bg-raised p-1 shadow-xl">
-              {episodes.map(({ season, episode }) => (
-                <button
-                  key={episode.id}
-                  onClick={() => {
-                    selectEpisode(episode.id);
-                    setOpen(false);
-                  }}
-                  className={cx(
-                    "flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-sm transition",
-                    episode.id === current?.episode.id
-                      ? "bg-gold/10 text-gold"
-                      : "text-cream hover:bg-cream/5",
-                  )}
-                >
-                  <span className="truncate">
-                    S{pad2(season.number)}E{pad2(episode.number)} — {episode.title}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+      <DropdownMenu open={open} onOpenChange={(o) => setOpen(o && episodes.length > 0)}>
+        <DropdownMenuTrigger asChild>
+          <button
+            className={cx(
+              "flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-left transition",
+              episodes.length > 0 && "hover:bg-cream/5",
+            )}
+          >
+            <span className="truncate font-serif text-base text-cream">
+              {current
+                ? `S${pad2(current.season.number)}E${pad2(current.episode.number)} — ${current.episode.title}`
+                : "No episode"}
+            </span>
+            {episodes.length > 0 && <ChevronDown size={13} className="shrink-0 text-fog" />}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-[300px]">
+          {episodes.map(({ season, episode }) => (
+            <DropdownMenuItem
+              key={episode.id}
+              onSelect={() => selectEpisode(episode.id)}
+              className={cx(episode.id === current?.episode.id && "bg-gold/10 text-gold")}
+            >
+              <span className="truncate">
+                S{pad2(season.number)}E{pad2(episode.number)} — {episode.title}
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {total > 0 && (

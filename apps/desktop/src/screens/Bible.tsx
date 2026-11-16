@@ -5,6 +5,8 @@
  * are debounced whole-entity upserts (timeline precedent: renderer owns edit
  * state, bible.json is the truth). */
 
+import { Slider } from "@/components/ui/Slider";
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useEffect, useRef, useState } from "react";
 import {
   Crosshair,
@@ -1139,7 +1141,7 @@ function VoiceCard({
       )}
 
       <span className={cx(fieldLabel, "mt-3")}>Voice engine</span>
-      <select
+      <SelectBox
         value={draft.voice.voiceId ?? ""}
         onChange={(e) => setVoice({ voiceId: e.target.value || null })}
         className="w-full rounded-lg border border-cream/10 bg-ink px-2 py-1.5 text-xs text-cream outline-none focus:border-gold/40"
@@ -1151,7 +1153,7 @@ function VoiceCard({
             {v.source ? ` · ${v.source}` : ""})
           </option>
         ))}
-      </select>
+      </SelectBox>
 
       <button
         title={
@@ -1197,14 +1199,13 @@ function VoiceCard({
             {label}
             <span className="text-cream/80">{draft.voice[key].toFixed(2)}</span>
           </span>
-          <input
-            type="range"
+          <Slider
             min={0}
             max={1}
             step={0.05}
             value={draft.voice[key]}
-            onChange={(e) => setVoice({ [key]: Number(e.target.value) } as Partial<BibleCharacter["voice"]>)}
-            className="mt-1 w-full accent-[#c9a96e]"
+            onChange={(v) => setVoice({ [key]: v } as Partial<BibleCharacter["voice"]>)}
+            className="mt-1.5"
           />
         </label>
       ))}
@@ -1585,14 +1586,14 @@ function StyleDetail({ bible }: { bible: ReturnType<typeof useBible> }) {
 
         <label className="block">
           <span className={fieldLabel}>Room tone under silent takes</span>
-          <select
+          <SelectBox
             className={textInput}
             value={draft.roomTone}
             onChange={(e) => patch({ roomTone: e.target.value as BibleStyle["roomTone"] })}
           >
             <option value="auto">auto — lay the location's bed at −40 dB under a silent no-dialogue take</option>
             <option value="off">off — leave silent takes silent</option>
-          </select>
+          </SelectBox>
           <span className="mt-1 block text-2xs leading-relaxed text-fog">
             Beds live on each location (Locations → Room tone). Only a take with no placed lines
             gets one; silence under lines is a broken take.

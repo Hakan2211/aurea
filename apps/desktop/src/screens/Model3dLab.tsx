@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useDraft } from "@/useDraft";
 import { Box, Grid3x3, Image as ImageIcon, RotateCw, Sparkles, Trash2, X } from "lucide-react";
 import { useModel3dLab, type Model3dItem } from "@/hooks";
 import { GlbViewer } from "@/components/GlbViewer";
@@ -46,14 +47,14 @@ const fmtBytes = (b?: number) =>
 
 export function Model3dLab() {
   const lab = useModel3dLab();
-  const [mode, setMode] = useState<Mode>("prompt");
-  const [subject, setSubject] = useState("");
-  const [source, setSource] = useState<string>("");
-  const [textured, setTextured] = useState(true);
-  const [octree, setOctree] = useState(lab.defaults.octree as number);
-  const [textureSize, setTextureSize] = useState(lab.defaults.textureSize as number);
-  const [conceptModel, setConceptModel] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mode, setMode] = useDraft<Mode>("model3d:mode", "prompt");
+  const [subject, setSubject] = useDraft("model3d:subject", "");
+  const [source, setSource] = useDraft<string>("model3d:source", "");
+  const [textured, setTextured] = useDraft("model3d:textured", true);
+  const [octree, setOctree] = useDraft("model3d:octree", lab.defaults.octree as number);
+  const [textureSize, setTextureSize] = useDraft("model3d:textureSize", lab.defaults.textureSize as number);
+  const [conceptModel, setConceptModel] = useDraft<string | null>("model3d:conceptModel", null);
+  const [selectedId, setSelectedId] = useDraft<string | null>("model3d:selectedId", null);
   const [autoRotate, setAutoRotate] = useState(true);
   const [wireframe, setWireframe] = useState(false);
 

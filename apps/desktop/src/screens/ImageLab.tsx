@@ -19,11 +19,22 @@ import {
 } from "lucide-react";
 import { downloadAsset, useImageLab, useLikes } from "@/hooks";
 import type { ImageHistoryEntry, ImageTile } from "@/data/sample";
-import { Chip, LabDrawer, StatusBar, cx, useLabDrawer } from "@/components/ui";
+import {
+  Chip,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  LabDrawer,
+  StatusBar,
+  cx,
+  useLabDrawer,
+} from "@/components/ui";
 import { PromptLibraryPanel } from "@/screens/image/PromptLibraryPanel";
 import { PromptLibraryRail } from "@/screens/image/PromptLibraryRail";
 import { LabHeader, type RollScope, type RollView } from "@/screens/image/LabHeader";
 import { usePromptState } from "@/screens/image/promptState";
+import { useDraft } from "@/useDraft";
 import { ImageComposer } from "@/screens/image/ImageComposer";
 import { ImageAdvanced } from "@/screens/image/ImageAdvanced";
 import { useImageParams, type LabMode, type RefImage } from "@/screens/image/useImageParams";
@@ -211,11 +222,19 @@ function ResultTile({
         <div className="relative flex flex-col items-center gap-1.5 px-3 text-center">
           <Sparkles size={18} className="animate-pulse text-gold" />
           <span className="max-w-full truncate text-sm text-cream/90">
-            {tile.generating.label ?? "Generating…"}
+            {tile.generating.label ?? (tile.generating.queued ? "Queued" : "Generating…")}
           </span>
           <span className="font-serif text-lg font-semibold tabular-nums text-gold">
             {Math.round(tile.generating.progress)}%
           </span>
+          {tile.generating.prompt && (
+            <span
+              title={tile.generating.prompt}
+              className="line-clamp-3 max-w-[90%] text-2xs leading-snug text-cream/60"
+            >
+              {tile.generating.prompt}
+            </span>
+          )}
           {tile.generating.label && (
             <span className="text-2xs text-fog">appears at the top of the roll when done</span>
           )}
@@ -427,7 +446,7 @@ function ResultRow({
 
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs text-cream/90">
-          {tile.name ?? tile.generating?.label ?? "Rendering…"}
+          {tile.name ?? tile.generating?.label ?? tile.generating?.prompt ?? "Rendering…"}
         </div>
         <div className="flex items-center gap-2 text-2xs text-fog">
           <span>{tile.day ? dayLabel(tile.day) : "in flight"}</span>
@@ -694,9 +713,9 @@ function HistoryRow({ entry, active, onToggle }: {
   const [armed, setArmed] = useState(false);
   const rels = entry.relPaths ?? [];
 
-  const close = () => {
-    setMenu(false);
-    setArmed(false);
+  const onMenuOpenChange = (open: boolean) => {
+    setMenu(open);
+    if (!open) setArmed(false);
   };
 
   return (
@@ -736,48 +755,37 @@ function HistoryRow({ entry, active, onToggle }: {
         </div>
       </button>
 
-      <button
-        onClick={() => (menu ? close() : setMenu(true))}
-        title="Actions for this day"
-        className="absolute right-1.5 top-2 p-1 text-fog transition hover:text-gold"
-      >
-        <MoreHorizontal size={14} />
-      </button>
-
-      {menu && (
-        <>
-          {/* click-away — a menu that only closes via its own items strands you */}
-          <div className="fixed inset-0 z-20" onClick={close} />
-          <div className="glass absolute right-1.5 top-8 z-30 w-[188px] overflow-hidden rounded-xl py-1">
-            <button
-              onClick={() => {
-                onToggle();
-                close();
-              }}
-              className="block w-full px-3 py-1.5 text-left text-xs text-cream/85 transition hover:bg-cream/8 hover:text-gold"
-            >
-              {active ? "Clear day filter" : "Show only this day"}
-            </button>
-            <button
-              onClick={() => {
-                if (!armed) {
-                  setArmed(true);
-                  return;
-                }
-                close();
-                if (rels.length) void lab.remove(rels);
-              }}
-              disabled={!rels.length || lab.removing}
-              className={cx(
-                "block w-full px-3 py-1.5 text-left text-xs transition hover:bg-cream/8 disabled:opacity-40",
-                armed ? "text-red-400" : "text-cream/85 hover:text-red-400",
-              )}
-            >
-              {armed ? `Sure? Delete ${rels.length}` : `Delete all ${rels.length}`}
-            </button>
-          </div>
-        </>
-      )}
+      <DropdownMenu open={menu} onOpenChange={onMenuOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <button
+            title="Actions for this day"
+            className="absolute right-1.5 top-2 p-1 text-fog transition hover:text-gold"
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-[188px] min-w-0">
+          <DropdownMenuItem onSelect={onToggle} className="text-xs">
+            {active ? "Clear day filter" : "Show only this day"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            variant={armed ? "danger" : "default"}
+            onSelect={(e) => {
+              // first click arms; keep the menu open for the confirm
+              if (!armed) {
+                e.preventDefault();
+                setArmed(true);
+                return;
+              }
+              if (rels.length) void lab.remove(rels);
+            }}
+            disabled={!rels.length || lab.removing}
+            className="text-xs"
+          >
+            {armed ? `Sure? Delete ${rels.length}` : `Delete all ${rels.length}`}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -890,12 +898,14 @@ export function ImageLab() {
   const lab = useImageLab();
   const likes = useLikes();
   /** the prompt is shared by the composer and the library drawer */
-  const ps = usePromptState(lab.prompt);
-  const [mode, setMode] = useState<LabMode>("generate");
-  const [refs, setRefs] = useState<RefImage[]>([]);
+  const ps = usePromptState("image", lab.prompt);
+  // what you are composing is a draft: it survives leaving the lab while a
+  // render runs, so you can queue, wander off, and come back to the same sheet
+  const [mode, setMode] = useDraft<LabMode>("image:mode", "generate");
+  const [refs, setRefs] = useDraft<RefImage[]>("image:refs", []);
   /** which edit model is selected. It lives here because the composer picks
    * it but a tile's Edit action also enforces its reference ceiling. */
-  const [editorId, setEditorId] = useState("qwen-edit");
+  const [editorId, setEditorId] = useDraft("image:editor", "qwen-edit");
   const refsMax = lab.refsMaxByModel[editorId] ?? lab.refsMax;
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [dismissed, setDismissed] = useState<string[]>([]);

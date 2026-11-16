@@ -10,6 +10,7 @@
  * The results live on the Desk (A/B tab), not here: an experiment takes
  * minutes per variant, and nobody watches a modal for that long. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useState } from "react";
 import { FlaskConical, Plus, Trash2 } from "lucide-react";
 import type { VideoAb } from "@aurea/shared";
@@ -197,7 +198,7 @@ export function AbModal({
                 </div>
 
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <select
+                  <SelectBox
                     value={v.engine}
                     onChange={(e) => patch(i, { engine: e.target.value, resolution: "" })}
                     style={{ colorScheme: "dark" }}
@@ -209,8 +210,8 @@ export function AbModal({
                         {e.label}
                       </option>
                     ))}
-                  </select>
-                  <select
+                  </SelectBox>
+                  <SelectBox
                     value={v.quality}
                     onChange={(e) =>
                       patch(i, { quality: e.target.value as VariantDraft["quality"] })
@@ -222,8 +223,8 @@ export function AbModal({
                     <option value="draft">draft</option>
                     <option value="standard">standard</option>
                     <option value="final">final</option>
-                  </select>
-                  <select
+                  </SelectBox>
+                  <SelectBox
                     value={v.resolution}
                     onChange={(e) => patch(i, { resolution: e.target.value })}
                     style={{ colorScheme: "dark" }}
@@ -235,8 +236,8 @@ export function AbModal({
                         {r}
                       </option>
                     ))}
-                  </select>
-                  <select
+                  </SelectBox>
+                  <SelectBox
                     value={v.durationSec}
                     onChange={(e) => patch(i, { durationSec: e.target.value })}
                     style={{ colorScheme: "dark" }}
@@ -248,8 +249,8 @@ export function AbModal({
                         {d}
                       </option>
                     ))}
-                  </select>
-                  <select
+                  </SelectBox>
+                  <SelectBox
                     value={v.fps}
                     onChange={(e) => patch(i, { fps: e.target.value as VariantDraft["fps"] })}
                     style={{ colorScheme: "dark" }}
@@ -258,7 +259,7 @@ export function AbModal({
                     <option value="">fps · base</option>
                     <option value="24">24 fps</option>
                     <option value="48">48 fps</option>
-                  </select>
+                  </SelectBox>
                   {engine === "ltx25" && (
                     <span className="flex items-center gap-1.5 rounded-md border border-cream/10 px-2 py-1 text-2xs text-fog">
                       enhancer

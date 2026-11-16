@@ -9,6 +9,7 @@ import { HomeScreen } from "@/screens/Home";
 import { ImageLab } from "@/screens/ImageLab";
 import { JobCenter } from "@/screens/JobCenter";
 import { MusicLab } from "@/screens/MusicLab";
+import { SfxLab } from "@/screens/SfxLab";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 import { StudioScreen } from "@/screens/Studio";
 import { DeskScreen } from "@/screens/desk/DeskScreen";
@@ -72,6 +73,7 @@ export function App() {
             <Route path="video" element={<VideoLab />} />
             <Route path="voice" element={<VoiceLab />} />
             <Route path="music" element={<MusicLab />} />
+            <Route path="sfx" element={<SfxLab />} />
             <Route path="3d" element={<Model3dLab />} />
           </Route>
 

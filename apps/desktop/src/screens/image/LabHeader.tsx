@@ -12,7 +12,14 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { GoldButton, cx } from "@/components/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  GoldButton,
+  cx,
+} from "@/components/ui";
 
 /* The Image lab's top bar — Image Lab.jpg's toolbar row. Scope on the left
  * ("My Generations ⌄"), search + view + rail toggle in the middle, the gold
@@ -47,50 +54,40 @@ function ScopeMenu({
 }) {
   const active = SCOPES.find((s) => s.id === scope) ?? SCOPES[0];
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className={cx(
-          "flex items-center gap-2 rounded-pill border px-3 py-1.5 transition duration-[var(--dur)]",
-          open
-            ? "border-gold/45 bg-gold/10 text-gold"
-            : "border-cream/10 text-cream/85 hover:border-gold/35 hover:text-gold",
-        )}
-      >
-        <active.icon size={13} />
-        <span className="text-xs font-medium">{active.label}</span>
-        <ChevronDown size={12} className={cx("transition-transform", open && "rotate-180")} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-[var(--z-scrim)]" onClick={() => setOpen(false)} />
-          {/* opaque, not .glass — a translucent menu over the params panel let
-              the controls behind it read straight through the labels */}
-          <div className="anim-scale-in absolute left-0 top-full z-[var(--z-modal)] mt-1.5 w-[236px] origin-top-left overflow-hidden rounded-panel border border-cream/12 bg-raised py-1 shadow-[0_20px_50px_rgba(0,0,0,0.7)]">
-            {SCOPES.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => {
-                  setScope(s.id);
-                  setOpen(false);
-                }}
-                className={cx(
-                  "flex w-full items-center gap-2.5 px-3 py-2 text-left transition duration-[var(--dur-fast)] hover:bg-cream/6",
-                  s.id === scope ? "text-gold" : "text-cream/85",
-                )}
-              >
-                <s.icon size={13} className="shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium">{s.label}</span>
-                  <span className="block truncate text-2xs text-fog">{s.note}</span>
-                </span>
-                {s.id === scope && <Check size={12} className="shrink-0" />}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          className={cx(
+            "flex items-center gap-2 rounded-pill border px-3 py-1.5 transition duration-[var(--dur)]",
+            open
+              ? "border-gold/45 bg-gold/10 text-gold"
+              : "border-cream/10 text-cream/85 hover:border-gold/35 hover:text-gold",
+          )}
+        >
+          <active.icon size={13} />
+          <span className="text-xs font-medium">{active.label}</span>
+          <ChevronDown size={12} className={cx("transition-transform", open && "rotate-180")} />
+        </button>
+      </DropdownMenuTrigger>
+      {/* opaque, not .glass — a translucent menu over the params panel let
+          the controls behind it read straight through the labels */}
+      <DropdownMenuContent align="start" className="w-[236px] bg-raised">
+        {SCOPES.map((s) => (
+          <DropdownMenuItem
+            key={s.id}
+            onSelect={() => setScope(s.id)}
+            className={cx(s.id === scope ? "text-gold" : "text-cream/85")}
+          >
+            <s.icon size={13} className="shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium">{s.label}</span>
+              <span className="block truncate text-2xs text-fog">{s.note}</span>
+            </span>
+            {s.id === scope && <Check size={12} className="shrink-0" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -141,12 +138,9 @@ export function LabHeader({
 
   return (
     /* Solid, and `relative z-30`. The stack, low to high: canvas sticky day
-       rules (20) < this header and its menu (30) < the app rail when it
-       unfurls over the screen (z-scrim 40) < modals (z-modal 50). A
-       backdrop-blur here would also make the header its own stacking context
-       AND the containing block for the menu's click-away scrim, which left
-       the menu painted under the columns and closable only from inside the
-       bar — nothing scrolls under this header, so the blur bought nothing. */
+       rules (20) < this header (30) < the app rail when it unfurls over the
+       screen (z-scrim 40) < menus and modals (z-modal 50, portalled). No
+       backdrop-blur: nothing scrolls under this header, so it bought nothing. */
     <header className="relative z-30 flex h-[58px] shrink-0 items-center gap-3 border-b hairline bg-[#0c0c0d] px-4">
       <div className="min-w-0">
         <h1 className="font-serif text-lg font-semibold leading-none text-cream">Image</h1>

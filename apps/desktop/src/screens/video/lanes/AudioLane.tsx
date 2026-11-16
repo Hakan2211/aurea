@@ -1,3 +1,4 @@
+import { Checkbox } from "@/components/ui/Checkbox";
 import { useState } from "react";
 import { AudioLines, X } from "lucide-react";
 import { cx } from "@/components/ui";
@@ -185,11 +186,10 @@ export function AudioLane({
 
           {/* room tone — what happens in the silence between the lines */}
           <label className="flex cursor-pointer items-center gap-2 pt-0.5">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={roomTone}
-              onChange={(e) => setRoomTone(e.target.checked)}
-              className="accent-gold"
+              onCheckedChange={(v) => setRoomTone(v === true)}
+              className=""
             />
             <span className="text-2xs text-fog">Score the gaps ({fmtTime(gap)})</span>
           </label>

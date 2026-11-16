@@ -1,3 +1,4 @@
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Timer } from "lucide-react";
 import type { CameraSpec, DirectorSpec } from "@aurea/shared";
@@ -198,7 +199,7 @@ export function BankSelect({
   className?: string;
 }) {
   return (
-    <select
+    <SelectBox
       value={value}
       onChange={(e) => onChange(e.target.value)}
       style={{ colorScheme: "dark" }}
@@ -211,7 +212,7 @@ export function BankSelect({
           {shortName(e.name)}
         </option>
       ))}
-    </select>
+    </SelectBox>
   );
 }
 

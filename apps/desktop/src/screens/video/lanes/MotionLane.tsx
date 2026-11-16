@@ -1,3 +1,6 @@
+import { Slider } from "@/components/ui/Slider";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useState } from "react";
 import { Waypoints, X } from "lucide-react";
 import { cx } from "@/components/ui";
@@ -78,7 +81,7 @@ export function MotionLane({
             <span className="shrink-0 text-2xs uppercase tracking-wider text-fog">ref</span>
           </div>
 
-          <select
+          <SelectBox
             value={motion.icLora}
             onChange={(e) => patch({ icLora: e.target.value as DirectorMotion["icLora"] })}
             style={{ colorScheme: "dark" }}
@@ -86,7 +89,7 @@ export function MotionLane({
           >
             <option value="motionTrack">Track its movement (close)</option>
             <option value="union">Follow its staging (loose)</option>
-          </select>
+          </SelectBox>
 
           <div className="flex items-center gap-1.5">
             {(
@@ -126,14 +129,13 @@ export function MotionLane({
 
           <div className="flex items-center gap-2">
             <span className="shrink-0 text-2xs text-fog">Strength</span>
-            <input
-              type="range"
+            <Slider
               min={0.1}
               max={1}
               step={0.05}
               value={motion.strength}
-              onChange={(e) => patch({ strength: Number(e.target.value) })}
-              className="min-w-0 flex-1 accent-gold"
+              onChange={(v) => patch({ strength: v })}
+              className="min-w-0 flex-1"
             />
             <span className="w-7 shrink-0 text-right text-2xs tabular-nums text-gold">
               {motion.strength.toFixed(2)}
@@ -141,11 +143,10 @@ export function MotionLane({
           </div>
 
           <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={motion.useItsAudio}
-              onChange={(e) => patch({ useItsAudio: e.target.checked })}
-              className="accent-gold"
+              onCheckedChange={(v) => patch({ useItsAudio: v === true })}
+              className=""
             />
             <span className="text-2xs text-fog">Take its audio too</span>
           </label>

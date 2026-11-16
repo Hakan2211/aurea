@@ -6,6 +6,7 @@
  * Calls the same procedures as the scene_assemble_plan / scene_assemble
  * tools. The gates stay human: "through" picks where the run stops. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useState } from "react";
 import { crewVerb, type AssemblyStep, type AssemblyThrough, type Scene } from "@aurea/shared";
 import { GhostButton, GoldButton, Modal, ModalHeader, cx } from "@/components/ui";
@@ -58,7 +59,7 @@ export function AssembleDialog({ scene, onClose }: { scene: Scene | null; onClos
         <div className="grid grid-cols-2 gap-3">
           <div>
             <p className={sectionLabel}>Run through</p>
-            <select
+            <SelectBox
               value={through}
               disabled={!!running}
               onChange={(e) => setThrough(e.target.value as AssemblyThrough)}
@@ -69,12 +70,12 @@ export function AssembleDialog({ scene, onClose }: { scene: Scene | null; onClos
                   {t.label}
                 </option>
               ))}
-            </select>
+            </SelectBox>
             <p className="mt-1 text-2xs text-fog">{THROUGH.find((t) => t.id === through)?.hint}</p>
           </div>
           <div>
             <p className={sectionLabel}>Lane</p>
-            <select
+            <SelectBox
               value={lane}
               disabled={!!running}
               onChange={(e) => setLane(e.target.value)}
@@ -86,7 +87,7 @@ export function AssembleDialog({ scene, onClose }: { scene: Scene | null; onClos
                   {p.label}
                 </option>
               ))}
-            </select>
+            </SelectBox>
             <p className="mt-1 text-2xs text-fog">Nobody → B-roll · one voice → interview · a conversation → coverage</p>
           </div>
         </div>

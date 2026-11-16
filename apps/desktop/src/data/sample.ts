@@ -22,7 +22,7 @@ export type JobStatus = "running" | "queued" | "completed" | "failed";
 export interface Job {
   id: string;
   title: string;
-  kind: "video" | "image" | "tts" | "music" | "model3d";
+  kind: "video" | "image" | "tts" | "music" | "sfx" | "model3d";
   engine: string;
   status: JobStatus;
   progress: number;
@@ -449,7 +449,7 @@ export const musicLab = {
 
 /* ---------- asset library ---------- */
 
-export type LibraryKind = "image" | "video" | "audio" | "music" | "model3d";
+export type LibraryKind = "image" | "video" | "audio" | "music" | "sfx" | "model3d";
 
 export interface LibraryAsset {
   id: string;
@@ -906,7 +906,15 @@ export interface ImageTile {
   id: string;
   swatch: string;
   /** present while the tile is still rendering */
-  generating?: { progress: number; label?: string };
+  generating?: {
+    progress: number;
+    label?: string;
+    /** the prompt that was sent — the composer clears on send, so the
+     * placeholder is where you see what is rendering */
+    prompt?: string;
+    /** waiting behind another job in the engine queue */
+    queued?: boolean;
+  };
   liked?: boolean;
   /** real thumbnail URL once the tile is a real asset */
   url?: string;
@@ -941,7 +949,19 @@ export const imageLab = {
     { id: "krea2", label: "Krea 2 · local", note: "photoreal · free" },
     { id: "z-image", label: "z-image-turbo · local", note: "fast drafts" },
     { id: "qwen-edit", label: "Qwen-Edit 2509 · local", note: "reference edit" },
-    { id: "gpt-image", label: "GPT-Image · API", note: "hero frames · $" },
+    {
+      id: "h3-image",
+      label: "MiniMax-H3-Image · local",
+      note: "best lettering, text-to-image and edits · slower",
+      role: "both",
+    },
+    {
+      id: "gpt-image-2",
+      label: "GPT Image 2 · cloud",
+      note: "needs a fal.ai API key",
+      role: "both",
+      available: false,
+    },
   ],
   aspects: ["1:1", "3:2", "16:9", "4:3", "9:16"],
   presets: ["Cinematic", "Photographic", "Concept Art", "Minimal", "Moody", "Vintage", "Fantasy"],

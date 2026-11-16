@@ -1,3 +1,5 @@
+import { Slider } from "@/components/ui/Slider";
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useState } from "react";
 import { ListPlus, X } from "lucide-react";
 import { sheetLayout, type DirectorRef } from "@aurea/shared";
@@ -106,7 +108,7 @@ export function CastLane({
                   placeholder="Name"
                   className="min-w-0 flex-1 bg-transparent text-xs text-cream/85 outline-none placeholder:text-fog"
                 />
-                <select
+                <SelectBox
                   value={ref.kind}
                   onChange={(e) => patch(i, { kind: e.target.value as DirectorRef["kind"] })}
                   style={{ colorScheme: "dark" }}
@@ -115,7 +117,7 @@ export function CastLane({
                   <option value="character">Character</option>
                   <option value="prop">Prop</option>
                   <option value="setting">Setting</option>
-                </select>
+                </SelectBox>
                 <button
                   onClick={() => setRefs((r) => r.filter((_, j) => j !== i))}
                   title="Remove"
@@ -139,14 +141,13 @@ export function CastLane({
 
           <div className="flex items-center gap-2">
             <span className="shrink-0 text-2xs text-fog">Hold</span>
-            <input
-              type="range"
+            <Slider
               min={0.1}
               max={1}
               step={0.05}
               value={strength}
-              onChange={(e) => setStrength(Number(e.target.value))}
-              className="min-w-0 flex-1 accent-gold"
+              onChange={(v) => setStrength(v)}
+              className="min-w-0 flex-1"
             />
             <span className="w-7 shrink-0 text-right text-2xs tabular-nums text-gold">
               {strength.toFixed(2)}

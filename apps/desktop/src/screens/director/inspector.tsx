@@ -3,6 +3,7 @@
  * side, and the board should not pay board-width rent for a panel you open a
  * few times a scene. Esc closes; the board keeps its selection ring. */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Check, Clapperboard, RotateCcw, Sparkles, Star, Trash2, X } from "lucide-react";
@@ -270,7 +271,7 @@ export function ShotInspector({
         <div className="grid grid-cols-3 gap-1.5">
           <label className="block">
             <span className={fieldLabel}>Takes</span>
-            <select
+            <SelectBox
               className={selectInput}
               value={count}
               onChange={(e) => setCount(Number(e.target.value))}
@@ -280,11 +281,11 @@ export function ShotInspector({
                   {n}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </label>
           <label className="block">
             <span className={fieldLabel}>Aspect</span>
-            <select
+            <SelectBox
               className={selectInput}
               value={aspect}
               onChange={(e) => setAspect(e.target.value as ImageAspect)}
@@ -294,7 +295,7 @@ export function ShotInspector({
                   {a}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </label>
           <label className="block">
             <span className={fieldLabel}>Seed</span>

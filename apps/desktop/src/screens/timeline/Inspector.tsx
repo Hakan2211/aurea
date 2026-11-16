@@ -5,6 +5,7 @@
  * Deliberately NOT a compositing inspector: the export is an ffmpeg cuts-first
  * render, so position/scale/rotation controls would be knobs wired to nothing. */
 
+import { Slider } from "@/components/ui/Slider";
 import { Trash2 } from "lucide-react";
 import type { Timeline, TimelineClip, TimelineTrack } from "@aurea/shared";
 import { Chip, SectionLabel, cx } from "@/components/ui";
@@ -174,18 +175,14 @@ function ClipInspector({
         Crossfade
       </SectionLabel>
       <div className="mt-3 flex items-center gap-3">
-        <input
-          type="range"
+        <Slider
           min={0}
           max={Math.min(2, Math.max(0.1, clip.duration - 0.1))}
           step={0.05}
           value={clip.transitionSec}
-          onChange={(e) => onPatch({ transitionSec: Number(e.target.value) })}
-          className="aurea-slider flex-1"
+          onChange={(v) => onPatch({ transitionSec: v })}
+          className="flex-1"
           title="Dissolve from the previous clip into this one"
-          style={{
-            background: `linear-gradient(to right, var(--color-gold) ${(clip.transitionSec / Math.min(2, Math.max(0.1, clip.duration - 0.1))) * 100}%, color-mix(in srgb, var(--color-cream) 12%, transparent) ${(clip.transitionSec / Math.min(2, Math.max(0.1, clip.duration - 0.1))) * 100}%)`,
-          }}
         />
         <span className="w-10 shrink-0 text-right text-xs tabular-nums text-cream/80">
           {clip.transitionSec.toFixed(2)}s

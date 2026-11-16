@@ -1,3 +1,4 @@
+import { Checkbox } from "@/components/ui/Checkbox";
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -215,11 +216,10 @@ function ModelRow({
       )}
       {needsLicense && selected && !busy && !done && (
         <label className="mt-2 flex cursor-pointer items-center gap-2 pl-7 text-xs text-fog">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={accepted}
-            onChange={(e) => onAccept(e.target.checked)}
-            className="h-3.5 w-3.5 accent-[#c9a96e]"
+            onCheckedChange={(v) => onAccept(v === true)}
+            className="mt-0.5"
           />
           <span>
             I accept the{" "}

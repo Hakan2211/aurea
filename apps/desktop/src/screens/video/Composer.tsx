@@ -1,3 +1,6 @@
+import { Slider } from "@/components/ui/Slider";
+import { Checkbox } from "@/components/ui/Checkbox";
+import { SelectBox } from "@/components/ui/SelectBox";
 import {
   CircleAlert,
   LayoutPanelTop,
@@ -9,7 +12,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { AdvancedButton, ComposerBar, GenerateButton, cx } from "@/components/ui";
+import { AdvancedButton, ComposerBar, GenerateButton, ModelSelect, cx } from "@/components/ui";
 import { MIN_RETAKE_SEC, fmtTime, selectInput } from "./shared";
 import type { VideoParams } from "./useVideoParams";
 
@@ -97,10 +100,13 @@ export function Composer({
   p,
   advancedOpen,
   onToggleAdvanced,
+  onDetachShot,
 }: {
   p: VideoParams;
   advancedOpen: boolean;
   onToggleAdvanced: () => void;
+  /** unlink the board shot — the next take renders as a free one */
+  onDetachShot: () => void;
 }) {
   const { lab, retake, setRetake, prefill } = p;
 
@@ -242,6 +248,13 @@ export function Composer({
               </p>
             ))}
           </div>
+          <button
+            onClick={onDetachShot}
+            title="Detach from the storyboard shot. Settings stay; the next take won't land on the shot."
+            className="shrink-0 rounded p-0.5 text-fog transition hover:text-gold"
+          >
+            <X size={13} />
+          </button>
         </div>
       )}
 
@@ -282,26 +295,24 @@ export function Composer({
               <div className="w-[200px] shrink-0 space-y-1.5">
                 <div className="flex items-center gap-2">
                   <span className="shrink-0 text-2xs text-fog">Freedom</span>
-                  <input
-                    type="range"
+                  <Slider
                     min={0.3}
                     max={1}
                     step={0.05}
                     value={retake.strength}
                     title={`How far from the original the window may go (${retake.strength.toFixed(2)})`}
-                    onChange={(e) => setRetake({ ...retake, strength: Number(e.target.value) })}
-                    className="min-w-0 flex-1 accent-gold"
+                    onChange={(v) => setRetake({ ...retake, strength: v })}
+                    className="min-w-0 flex-1"
                   />
                   <span className="w-8 shrink-0 text-right text-2xs tabular-nums text-gold">
                     {retake.strength.toFixed(2)}
                   </span>
                 </div>
                 <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={retake.regenerateAudio}
-                    onChange={(e) => setRetake({ ...retake, regenerateAudio: e.target.checked })}
-                    className="accent-gold"
+                    onCheckedChange={(v) => setRetake({ ...retake, regenerateAudio: v === true })}
+                    className=""
                   />
                   <span className="text-2xs text-fog">Re-render the sound too</span>
                 </label>
@@ -346,19 +357,17 @@ export function Composer({
 
           {/* the settings that change every shot, then Generate */}
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <ModelSelect
               value={p.engineId}
-              onChange={(e) => p.setEngineId(e.target.value)}
-              title={lab.engineNotes[p.engineId] ?? "Engine"}
-              style={{ colorScheme: "dark" }}
-              className={cx(selectInput, "w-auto max-w-[180px] text-xs")}
-            >
-              {lab.engines.map((e) => (
-                <option key={e.id} value={e.id} title={e.note}>
-                  {e.label}
-                </option>
-              ))}
-            </select>
+              onChange={p.setEngineId}
+              models={lab.engines}
+              // the catalog says where each engine runs in `sub` ("cloud · paid")
+              cloudIds={lab.engines
+                .filter((e) => (e as { sub?: string }).sub?.includes("cloud"))
+                .map((e) => e.id)}
+              missingLabel={(_, cloud) => (cloud ? "Needs fal.ai key" : "Not set up")}
+              className="max-w-[200px]"
+            />
 
             <div
               className={cx("flex items-center gap-1", retake && "pointer-events-none opacity-40")}
@@ -380,7 +389,7 @@ export function Composer({
               ))}
             </div>
 
-            <select
+            <SelectBox
               value={p.effectiveResolution}
               onChange={(e) => p.setResolution(e.target.value)}
               title="Size"
@@ -393,7 +402,7 @@ export function Composer({
                   {r}
                 </option>
               ))}
-            </select>
+            </SelectBox>
 
             {/* Advanced + Generate travel together, so a wrap never strands
                 the button that matters on a line of its own */}

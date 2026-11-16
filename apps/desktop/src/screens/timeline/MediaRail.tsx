@@ -17,6 +17,7 @@ import {
   List,
   Plus,
   Search,
+  AudioLines,
 } from "lucide-react";
 import { cx } from "@/components/ui";
 import { mediaDuration, poster } from "./frames";
@@ -29,6 +30,7 @@ const kindIcon = {
   video: FileVideo,
   audio: FileAudio,
   music: FileMusic,
+  sfx: AudioLines,
 } as const;
 
 /** split by media kind so voices/music don't bury the takes */
@@ -37,6 +39,7 @@ const GROUPS: Array<{ label: string; kind: keyof typeof kindIcon }> = [
   { label: "Images", kind: "image" },
   { label: "Voices", kind: "audio" },
   { label: "Music", kind: "music" },
+  { label: "Sound FX", kind: "sfx" },
 ];
 
 const FILTERS = [
@@ -51,7 +54,7 @@ const RAIL_MAX = 520;
 
 /** smallest tile a kind is allowed — video takes read as pictures, the rest
  * are really just labelled rows, so they may pack tighter */
-const MIN_TILE: Record<string, number> = { video: 148, image: 118, audio: 110, music: 110 };
+const MIN_TILE: Record<string, number> = { video: 148, image: 118, audio: 110, music: 110, sfx: 110 };
 
 /** how many cards fit across the rail's content box at this width */
 function columns(railWidth: number, kind: string): number {
@@ -300,7 +303,7 @@ function usePreview(item: PoolItem, mounted: boolean) {
         el.height = frame.height;
         el.getContext("2d")?.drawImage(frame, 0, 0);
       }, noop);
-    } else if (item.kind === "audio" || item.kind === "music") {
+    } else if (item.kind === "audio" || item.kind === "music" || item.kind === "sfx") {
       mediaDuration(item.url).then(remember, noop);
     }
     return () => {
@@ -363,7 +366,7 @@ function GridCard({
       {item.kind === "video" && (
         <canvas ref={canvas} className="absolute inset-0 h-full w-full object-cover" />
       )}
-      {(item.kind === "audio" || item.kind === "music") && (
+      {(item.kind === "audio" || item.kind === "music" || item.kind === "sfx") && (
         <span className="absolute inset-0 bg-gradient-to-br from-cream/[0.07] to-transparent" />
       )}
       <span className="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/20 to-transparent" />
@@ -409,7 +412,7 @@ function ListRow({ item, used, onAdd }: { item: PoolItem; used: number; onAdd: (
         {item.kind === "video" && (
           <canvas ref={canvas} className="h-full w-full object-cover" />
         )}
-        {(item.kind === "audio" || item.kind === "music") && (
+        {(item.kind === "audio" || item.kind === "music" || item.kind === "sfx") && (
           <Icon size={11} className="absolute inset-0 m-auto text-fog" />
         )}
       </span>

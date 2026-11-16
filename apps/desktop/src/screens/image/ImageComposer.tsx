@@ -16,6 +16,11 @@ import {
   ChoiceChips,
   ComposerBar,
   GenerateButton,
+  ModelSelect,
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverTrigger,
   Segmented,
   cx,
 } from "@/components/ui";
@@ -29,13 +34,12 @@ import { MODE_LABEL, type Aspect, type ImageParams, type LabMode, type RefImage 
  * Advanced + Generate. Style preset, seed, quality, format and exact pixels
  * live in the Advanced drawer; the prompt library and history are drawers too. */
 
-const selectCls =
-  "rounded-xl border border-cream/10 bg-surface px-2.5 py-1.5 text-xs text-cream transition hover:border-gold/35 focus:border-gold/40 focus:outline-none";
-
 /** What each slot is for. The local 3-ref stack has fixed roles because
  * Qwen encodes them positionally; the cloud model just takes a list, so past
  * the third every slot is simply another reference in priority order. */
-function refSlotLabel(i: number, refsMax: number): string {
+function refSlotLabel(i: number, refsMax: number, modelId?: string): string {
+  // H3-Image names them in the prompt, so the label is the name to type
+  if (modelId === "h3-image") return `<Picture ${i + 1}>`;
   if (refsMax <= 3) return i === 0 ? "subject" : i === 1 ? "scene / prop" : "style";
   return i === 0 ? "subject" : `ref ${i + 1}`;
 }
@@ -93,7 +97,7 @@ function RefStrip({
               title={r.name}
               className="h-[72px] w-[72px] rounded-lg border border-cream/10 object-cover"
             />
-            <div className="mt-0.5 truncate text-center text-xs text-fog">{refSlotLabel(i, refsMax)}</div>
+            <div className="mt-0.5 truncate text-center text-xs text-fog">{refSlotLabel(i, refsMax, p.activeId)}</div>
             <div className="absolute inset-x-0 top-0 flex h-[72px] items-end justify-between rounded-lg bg-ink/55 p-1 opacity-0 transition group-hover:opacity-100">
               <button
                 title="Move earlier"
@@ -160,9 +164,11 @@ function RefStrip({
         )}
         <p className="min-w-[180px] max-w-[340px] self-center pl-1 text-2xs leading-relaxed text-fog">
           {refs.length}/{refsMax} ·{" "}
-          {refsMax <= 3
-            ? "Order matters: subject first, then scene/prop, then style. Keeps characters on-model with no LoRA."
-            : `Up to ${refsMax} references — most important first. Or use Edit on any still above.`}
+          {p.activeId === "h3-image"
+            ? "Picture 1 is the one being edited. Name them in the prompt as <Picture 1>, <Picture 2>…, and describe the result in detail (Enhance helps)."
+            : refsMax <= 3
+              ? "Order matters: subject first, then scene/prop, then style. Keeps characters on-model with no LoRA."
+              : `Up to ${refsMax} references — most important first. Or use Edit on any still above.`}
         </p>
       </div>
       {error && <p className="mt-1 text-2xs text-red-400">{error}</p>}
@@ -179,6 +185,14 @@ function DeckEditor({ p }: { p: ImageParams }) {
   } = p;
   return (
     <div className="relative">
+      <Popover
+        open={deckPickOpen}
+        onOpenChange={(o) => {
+          setDeckPickOpen(o);
+          setDeckArmed(null);
+        }}
+      >
+      <PopoverAnchor asChild>
       <div className="flex items-center gap-2">
         <input
           value={deckName}
@@ -187,11 +201,8 @@ function DeckEditor({ p }: { p: ImageParams }) {
           className="min-w-0 flex-1 rounded-xl border border-cream/10 bg-surface px-3 py-2 text-sm text-cream placeholder:text-fog focus:border-gold/40 focus:outline-none"
         />
         {deckStore.decks.length > 0 ? (
+          <PopoverTrigger asChild>
           <button
-            onClick={() => {
-              setDeckPickOpen(!deckPickOpen);
-              setDeckArmed(null);
-            }}
             className={cx(
               "flex shrink-0 items-center gap-1 text-2xs transition",
               deckPickOpen ? "text-gold" : "text-fog hover:text-gold",
@@ -201,6 +212,7 @@ function DeckEditor({ p }: { p: ImageParams }) {
             {deckStore.decks.length} saved deck{deckStore.decks.length === 1 ? "" : "s"}
             <ChevronDown size={11} className={cx("transition-transform", deckPickOpen && "rotate-180")} />
           </button>
+          </PopoverTrigger>
         ) : (
           <button onClick={newDeck} className="shrink-0 text-2xs text-fog transition hover:text-gold">
             New deck
@@ -216,8 +228,8 @@ function DeckEditor({ p }: { p: ImageParams }) {
                 : "Autosaves once it has a title + prompt"}
         </span>
       </div>
-      {deckPickOpen && (
-        <div className="absolute right-0 z-30 mt-1 w-[320px] overflow-hidden rounded-xl border border-cream/12 bg-raised shadow-xl">
+      </PopoverAnchor>
+        <PopoverContent align="end" sideOffset={4} className="w-[320px] overflow-hidden p-0">
           <button
             onClick={newDeck}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gold transition hover:bg-cream/5"
@@ -266,8 +278,8 @@ function DeckEditor({ p }: { p: ImageParams }) {
               )}
             </div>
           ))}
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
 
       <div className="mt-2 max-h-[34vh] space-y-1.5 overflow-y-auto pr-1">
         {deckItems.map((text, i) => (
@@ -430,6 +442,12 @@ export function ImageComposer({
               onChange={(e) => setPrompt(e.target.value.slice(0, PROMPT_MAX))}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) generate();
+                // the box clears on send; ↑ in an empty box recalls the last
+                // prompt, for the tweak-and-rerun loop
+                if (e.key === "ArrowUp" && !prompt && p.ps.lastSent) {
+                  e.preventDefault();
+                  p.ps.acceptText(p.ps.lastSent);
+                }
               }}
               rows={3}
               className="w-full resize-none rounded-xl border border-cream/10 bg-surface p-3 text-sm leading-relaxed text-cream transition-[border-color,box-shadow] placeholder:text-fog focus:border-gold/45 focus:shadow-[0_0_0_3px_rgba(201,169,110,0.1)] focus:outline-none"
@@ -438,6 +456,7 @@ export function ImageComposer({
                   ? "Describe the new scene for the referenced subject…"
                   : "Describe the image…"
               }
+              title={p.ps.lastSent ? "↑ recalls the last prompt you sent" : undefined}
             />
           ) : (
             <PromptBuilder chips={chips} onChips={commitChips} />
@@ -466,20 +485,14 @@ export function ImageComposer({
       )}
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <select
+        <ModelSelect
           value={shownModel?.id ?? ""}
-          onChange={(e) => (mode === "edit" ? setEditorId(e.target.value) : setModelId(e.target.value))}
-          title={shownModel?.note ?? "Model"}
-          style={{ colorScheme: "dark" }}
-          className={cx(selectCls, "max-w-[240px]", editorMissing && "border-amber-500/40")}
-        >
-          {pickable.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-              {m.note ? ` — ${m.note}` : ""}
-            </option>
-          ))}
-        </select>
+          onChange={(id) => (mode === "edit" ? setEditorId(id) : setModelId(id))}
+          models={pickable}
+          cloudIds={lab.cloudModels}
+          missingLabel={(_, cloud) => (cloud ? "Needs fal.ai key" : "Not installed")}
+          warn={editorMissing}
+        />
 
         <ChoiceChips<Aspect | "auto">
           value={sizeIsAuto ? "auto" : aspect}

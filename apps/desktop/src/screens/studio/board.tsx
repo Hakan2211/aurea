@@ -6,6 +6,7 @@
  * page has boarded without leaving the page (studio-v2's docked kanban,
  * prototyped here as the plan asked before committing to toggle-only). */
 
+import { SelectBox } from "@/components/ui/SelectBox";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import type { Episode, Scene, Shot } from "@aurea/shared";
 import { Chip, cx } from "@/components/ui";
@@ -83,7 +84,7 @@ export function SceneBoard({
           onChange={(e) => patch({ slugline: e.target.value })}
           className="w-[340px] rounded-lg border border-transparent bg-transparent px-2 py-1 font-mono text-sm uppercase tracking-wide text-cream/90 outline-none transition focus:border-cream/10 focus:bg-ink/60"
         />
-        <select
+        <SelectBox
           value={draft.location ?? ""}
           onChange={(e) => patch({ location: e.target.value || null })}
           className={cx(selectInput, "w-[160px]")}
@@ -94,7 +95,7 @@ export function SceneBoard({
               {l.name}
             </option>
           ))}
-        </select>
+        </SelectBox>
         <button
           title="Remove scene"
           onClick={() => prod.removeScene(scene.id)}
